@@ -1,0 +1,16 @@
+package art.arcane.volmlib.util.interpolation;
+
+public enum InterpolationMethod3D {
+    TRILINEAR,
+    TRICUBIC,
+    TRIHERMITE,
+    TRISTARCAST_3,
+    TRISTARCAST_6,
+    TRISTARCAST_9,
+    TRISTARCAST_12,
+    TRILINEAR_TRISTARCAST_3,
+    TRILINEAR_TRISTARCAST_6,
+    TRILINEAR_TRISTARCAST_9,
+    TRILINEAR_TRISTARCAST_12,
+    NONE
+}

@@ -1,0 +1,46 @@
+package art.arcane.volmlib.util.scheduling;
+
+import art.arcane.volmlib.util.collection.KList;
+
+public class O<T> implements Observable<T> {
+    private T t = null;
+    private KList<Observer<T>> observers;
+
+    @Override
+    public T get() {
+        return t;
+    }
+
+    @Override
+    public O<T> set(T t) {
+        this.t = t;
+
+        if (observers != null && observers.hasElements()) {
+            observers.forEach((o) -> o.onChanged(t, t));
+        }
+
+        return this;
+    }
+
+    @Override
+    public boolean has() {
+        return t != null;
+    }
+
+    @Override
+    public O<T> clearObservers() {
+        observers.clear();
+        return this;
+    }
+
+    @Override
+    public O<T> observe(Observer<T> observer) {
+        if (observers == null) {
+            observers = new KList<>();
+        }
+
+        observers.add(observer);
+
+        return this;
+    }
+}
