@@ -6,6 +6,7 @@ import art.arcane.volmlib.util.scheduling.Callback;
 import org.bukkit.Material;
 import org.bukkit.enchantments.Enchantment;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.ItemFlag;
 import org.bukkit.inventory.meta.ItemMeta;
 
 public class UIElement implements Element {
@@ -194,6 +195,7 @@ public class UIElement implements Element {
 
             if (isEnchanted()) {
                 im.addEnchant(Enchantment.FIRE_ASPECT, 1, true);
+                im.addItemFlags(ItemFlag.HIDE_ENCHANTS);
             }
 
             is.setItemMeta(im);

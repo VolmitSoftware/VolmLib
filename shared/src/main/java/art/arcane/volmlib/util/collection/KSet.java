@@ -31,8 +31,12 @@ public class KSet<T> extends AbstractSet<T> implements Serializable {
     private static final long serialVersionUID = 1L;
     private final ConcurrentHashMap<T, Boolean> map;
 
+    public KSet() {
+        map = new ConcurrentHashMap<>();
+    }
+
     public KSet(Collection<? extends T> c) {
-        this(c.size());
+        this();
         addAll(c);
     }
 
