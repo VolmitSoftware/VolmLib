@@ -30,4 +30,8 @@ public class FileWatcher {
 
         return mod;
     }
+
+    public boolean wasDeleted() {
+        return !file.exists();
+    }
 }

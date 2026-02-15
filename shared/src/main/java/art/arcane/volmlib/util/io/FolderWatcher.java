@@ -24,17 +24,16 @@ public class FolderWatcher extends FileWatcher {
         }
 
         if (file.isDirectory()) {
-            for (File i : file.listFiles()) {
-                if (!watchers.containsKey(i)) {
-                    watchers.put(i, new FolderWatcher(i));
+            File[] files = file.listFiles();
+            if (files != null) {
+                for (File i : files) {
+                    if (!watchers.containsKey(i)) {
+                        watchers.put(i, new FolderWatcher(i));
+                    }
                 }
             }
 
-            for (File i : watchers.k()) {
-                if (!i.exists()) {
-                    watchers.remove(i);
-                }
-            }
+            watchers.values().removeIf(FileWatcher::wasDeleted);
         } else {
             super.readProperties();
         }
