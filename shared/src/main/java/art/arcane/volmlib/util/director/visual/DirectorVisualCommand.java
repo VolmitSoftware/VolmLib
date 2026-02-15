@@ -113,6 +113,10 @@ public final class DirectorVisualCommand {
 
         for (DirectorRuntimeParameter runtimeParameter : runtimeParameters) {
             DirectorVisualParameter parameter = DirectorVisualParameter.from(runtimeParameter, legacyHandlers);
+            if (parameter.isContextual()) {
+                continue;
+            }
+
             if (parameter.isRequired()) {
                 required.add(parameter);
             } else {

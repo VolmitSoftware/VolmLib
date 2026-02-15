@@ -127,7 +127,8 @@ public final class DirectorMiniMenu {
             return escapeAttr(hover.toString());
         }
 
-        if (node.getDescriptor().getParameters().isEmpty()) {
+        List<DirectorParameterDescriptor> visibleParameters = visibleParameters(node);
+        if (visibleParameters.isEmpty()) {
             hover.append(nl)
                     .append("<").append(theme.optional()).append(">No parameters. Click to prefill command.</").append(theme.optional()).append(">");
             return escapeAttr(hover.toString());
@@ -135,7 +136,7 @@ public final class DirectorMiniMenu {
 
         hover.append(nl)
                 .append("<").append(theme.optional()).append(">Parameters:</").append(theme.optional()).append(">");
-        for (DirectorParameterDescriptor parameter : node.getDescriptor().getParameters()) {
+        for (DirectorParameterDescriptor parameter : visibleParameters) {
             hover.append(nl).append(renderParameterHover(parameter, theme));
         }
 
@@ -186,18 +187,20 @@ public final class DirectorMiniMenu {
     }
 
     private static String renderParameterSummary(DirectorRuntimeNode node, Theme theme) {
-        if (!node.isInvocable() || node.getDescriptor().getParameters().isEmpty()) {
+        if (!node.isInvocable()) {
+            return "";
+        }
+
+        List<DirectorParameterDescriptor> visibleParameters = visibleParameters(node);
+        if (visibleParameters.isEmpty()) {
             return "";
         }
 
         StringBuilder out = new StringBuilder();
-        for (DirectorParameterDescriptor parameter : node.getDescriptor().getParameters()) {
+        for (DirectorParameterDescriptor parameter : visibleParameters) {
             out.append(" ");
             String parameterName = escapeText(parameter.getName());
-            if (parameter.isContextual()) {
-                out.append("<").append(theme.contextual()).append(">[")
-                        .append(parameterName).append("]</").append(theme.contextual()).append(">");
-            } else if (parameter.isRequired()) {
+            if (parameter.isRequired()) {
                 out.append("<").append(theme.required()).append(">[")
                         .append(parameterName).append("]</").append(theme.required()).append(">");
             } else {
@@ -206,6 +209,17 @@ public final class DirectorMiniMenu {
         }
 
         return out.toString();
+    }
+
+    private static List<DirectorParameterDescriptor> visibleParameters(DirectorRuntimeNode node) {
+        List<DirectorParameterDescriptor> visible = new ArrayList<>();
+        for (DirectorParameterDescriptor parameter : node.getDescriptor().getParameters()) {
+            if (!parameter.isContextual()) {
+                visible.add(parameter);
+            }
+        }
+
+        return visible;
     }
 
     private static String renderFooter(DirectorHelpPage page, Theme theme) {

@@ -256,6 +256,10 @@ public final class DirectorRuntimeEngine implements DirectorCommandEngine {
                 continue;
             }
 
+            if (parameter.getDescriptor().isContextual()) {
+                continue;
+            }
+
             if (position < positional.size()) {
                 mapped.put(parameter, positional.get(position++));
             }
@@ -417,7 +421,7 @@ public final class DirectorRuntimeEngine implements DirectorCommandEngine {
             String key = last.substring(0, split).trim();
             String valuePrefix = last.substring(split + 1).trim();
             DirectorRuntimeParameter parameter = findBestParameter(node.getParameters(), key, true);
-            if (parameter == null) {
+            if (parameter == null || parameter.getDescriptor().isContextual()) {
                 return List.of();
             }
 
@@ -433,7 +437,7 @@ public final class DirectorRuntimeEngine implements DirectorCommandEngine {
         }
 
         for (DirectorRuntimeParameter parameter : node.getParameters()) {
-            if (consumed.contains(parameter)) {
+            if (consumed.contains(parameter) || parameter.getDescriptor().isContextual()) {
                 continue;
             }
 
@@ -452,7 +456,7 @@ public final class DirectorRuntimeEngine implements DirectorCommandEngine {
 
         DirectorRuntimeParameter nextUnconsumed = null;
         for (DirectorRuntimeParameter parameter : node.getParameters()) {
-            if (!consumed.contains(parameter)) {
+            if (!consumed.contains(parameter) && !parameter.getDescriptor().isContextual()) {
                 nextUnconsumed = parameter;
                 break;
             }
