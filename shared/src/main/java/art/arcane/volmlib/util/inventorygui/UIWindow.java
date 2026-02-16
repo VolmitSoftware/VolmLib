@@ -3,6 +3,7 @@ package art.arcane.volmlib.util.inventorygui;
 import art.arcane.volmlib.util.collection.KMap;
 import art.arcane.volmlib.util.collection.KSet;
 import art.arcane.volmlib.util.scheduling.Callback;
+import art.arcane.volmlib.util.scheduling.FoliaScheduler;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -173,11 +174,24 @@ public class UIWindow implements Window, Listener {
     }
 
     private void queueSync(Runnable runnable) {
-        if (plugin == null || !plugin.isEnabled()) {
+        if (runnable == null || plugin == null || !plugin.isEnabled()) {
             return;
         }
 
-        Bukkit.getScheduler().scheduleSyncDelayedTask(plugin, runnable);
+        // Mirror Bukkit's no-delay scheduleSyncDelayedTask behavior: run on the next tick.
+        if (FoliaScheduler.runEntity(plugin, viewer, runnable, 1L)) {
+            return;
+        }
+
+        if (FoliaScheduler.runGlobal(plugin, runnable, 1L)) {
+            return;
+        }
+
+        try {
+            Bukkit.getScheduler().scheduleSyncDelayedTask(plugin, runnable);
+        } catch (UnsupportedOperationException e) {
+            throw new IllegalStateException("Failed to schedule sync task on Folia-safe scheduler.", e);
+        }
     }
 
     @Override
