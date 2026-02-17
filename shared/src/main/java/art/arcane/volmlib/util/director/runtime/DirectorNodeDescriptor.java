@@ -1,6 +1,6 @@
 package art.arcane.volmlib.util.director.runtime;
 
-import art.arcane.volmlib.util.decree.DecreeOrigin;
+import art.arcane.volmlib.util.director.DirectorOrigin;
 
 import java.util.List;
 
@@ -8,7 +8,7 @@ public final class DirectorNodeDescriptor {
     private final String name;
     private final String description;
     private final List<String> aliases;
-    private final DecreeOrigin origin;
+    private final DirectorOrigin origin;
     private final DirectorExecutionMode executionMode;
     private final boolean group;
     private final List<DirectorParameterDescriptor> parameters;
@@ -17,7 +17,7 @@ public final class DirectorNodeDescriptor {
             String name,
             String description,
             List<String> aliases,
-            DecreeOrigin origin,
+            DirectorOrigin origin,
             DirectorExecutionMode executionMode,
             boolean group,
             List<DirectorParameterDescriptor> parameters
@@ -43,7 +43,7 @@ public final class DirectorNodeDescriptor {
         return aliases;
     }
 
-    public DecreeOrigin getOrigin() {
+    public DirectorOrigin getOrigin() {
         return origin;
     }
 

@@ -24,6 +24,7 @@ public class UIElement implements Element {
     private Callback<Element> eDraggedInto;
     private Callback<Element> eOtherDraggedInto;
     private int count;
+    private ItemStack baseItemStack;
 
     public UIElement(String id) {
         this.id = id;
@@ -31,6 +32,7 @@ public class UIElement implements Element {
         enchanted = false;
         count = 1;
         material = new MaterialBlock(Material.AIR);
+        baseItemStack = null;
     }
 
     protected void reportError(Throwable e) {
@@ -184,11 +186,26 @@ public class UIElement implements Element {
         return count;
     }
 
+    @Override
+    public ItemStack getBaseItemStack() {
+        return baseItemStack == null ? null : baseItemStack.clone();
+    }
+
+    @Override
+    public UIElement setBaseItemStack(ItemStack itemStack) {
+        baseItemStack = itemStack == null ? null : itemStack.clone();
+        return this;
+    }
+
     @SuppressWarnings("deprecation")
     @Override
     public ItemStack computeItemStack() {
         try {
-            ItemStack is = new ItemStack(getMaterial().getMaterial(), getCount(), getEffectiveDurability());
+            ItemStack is = baseItemStack == null
+                    ? new ItemStack(getMaterial().getMaterial(), getCount(), getEffectiveDurability())
+                    : baseItemStack.clone();
+            is.setAmount(getCount());
+            is.setDurability(getEffectiveDurability());
             ItemMeta im = is.getItemMeta();
             im.setDisplayName(getName());
             im.setLore(getLore().copy());

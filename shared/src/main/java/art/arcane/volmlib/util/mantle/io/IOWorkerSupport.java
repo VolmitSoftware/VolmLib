@@ -29,6 +29,9 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.Semaphore;
 
 public class IOWorkerSupport implements Closeable {
     private static final Set<OpenOption> OPTIONS = Set.of(
@@ -37,6 +40,7 @@ public class IOWorkerSupport implements Closeable {
             StandardOpenOption.CREATE,
             StandardOpenOption.SYNC
     );
+    private static final ConcurrentMap<String, Semaphore> GLOBAL_CHANNEL_GATES = new ConcurrentHashMap<>();
 
     private final Path root;
     private final File tmp;
@@ -107,7 +111,10 @@ public class IOWorkerSupport implements Closeable {
                 }
 
                 if (holder == null) {
-                    Holder created = new Holder(FileChannel.open(root.resolve(name), OPTIONS));
+                    Path filePath = root.resolve(name);
+                    String gateKey = filePath.toAbsolutePath().normalize().toString();
+                    Semaphore gate = GLOBAL_CHANNEL_GATES.computeIfAbsent(gateKey, unused -> new Semaphore(1));
+                    Holder created = new Holder(FileChannel.open(filePath, OPTIONS), gate);
                     boolean createdUsed = false;
                     try {
                         synchronized (cache) {

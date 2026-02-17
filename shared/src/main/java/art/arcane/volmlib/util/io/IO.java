@@ -1727,16 +1727,32 @@ public class IO {
     }
 
     public static FileLock lock(FileChannel channel) throws IOException {
+        long started = System.currentTimeMillis();
+        long warnedAt = 0L;
         while (true) {
             try {
-                return channel.lock();
-            } catch (OverlappingFileLockException ignored) {
-                try {
-                    Thread.sleep(1L);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    throw new IOException("Interrupted while waiting for file lock", e);
+                FileLock fileLock = channel.tryLock();
+                if (fileLock != null) {
+                    return fileLock;
                 }
+            } catch (OverlappingFileLockException ignored) {
+            }
+
+            long waited = System.currentTimeMillis() - started;
+            if (waited - warnedAt >= 5000L) {
+                warnedAt = waited;
+                System.err.println("IO.lock waiting for channel lock: waitedMs=" + waited
+                        + " thread=" + Thread.currentThread().getName());
+            }
+            if (waited >= 60000L) {
+                throw new IOException("Timed out waiting for file lock after " + waited + "ms");
+            }
+
+            try {
+                Thread.sleep(2L);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IOException("Interrupted while waiting for file lock", e);
             }
         }
     }

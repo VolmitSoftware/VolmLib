@@ -1,6 +1,6 @@
 package art.arcane.volmlib.util.director.runtime;
 
-import art.arcane.volmlib.util.decree.DecreeParameterHandler;
+import art.arcane.volmlib.util.director.DirectorParameterHandler;
 import art.arcane.volmlib.util.director.context.DirectorContextMap;
 import art.arcane.volmlib.util.director.context.DirectorContextRegistry;
 import art.arcane.volmlib.util.director.parse.DirectorConfidence;
@@ -24,7 +24,7 @@ public final class DirectorRuntimeEngine implements DirectorCommandEngine {
     private final DirectorParserRegistry parsers;
     private final DirectorContextRegistry contexts;
     private final DirectorExecutionDispatcher dispatcher;
-    private final List<DecreeParameterHandler<?>> legacyHandlers;
+    private final List<DirectorParameterHandler<?>> legacyHandlers;
     private final DirectorInvocationHook invocationHook;
 
     public DirectorRuntimeEngine(
@@ -41,7 +41,7 @@ public final class DirectorRuntimeEngine implements DirectorCommandEngine {
             DirectorParserRegistry parsers,
             DirectorContextRegistry contexts,
             DirectorExecutionDispatcher dispatcher,
-            List<? extends DecreeParameterHandler<?>> legacyHandlers,
+            List<? extends DirectorParameterHandler<?>> legacyHandlers,
             DirectorInvocationHook invocationHook
     ) {
         this.root = root;
@@ -68,7 +68,7 @@ public final class DirectorRuntimeEngine implements DirectorCommandEngine {
         return dispatcher;
     }
 
-    public List<DecreeParameterHandler<?>> getLegacyHandlers() {
+    public List<DirectorParameterHandler<?>> getLegacyHandlers() {
         return legacyHandlers;
     }
 
@@ -276,7 +276,7 @@ public final class DirectorRuntimeEngine implements DirectorCommandEngine {
         DirectorParameterDescriptor descriptor = parameter.getDescriptor();
         Class<?> type = descriptor.getType();
 
-        DecreeParameterHandler<?> customHandler = parameter.getCustomHandlerOrNull();
+        DirectorParameterHandler<?> customHandler = parameter.getCustomHandlerOrNull();
         if (customHandler != null) {
             try {
                 return ValueResult.valid(customHandler.parse(raw, false));
@@ -300,7 +300,7 @@ public final class DirectorRuntimeEngine implements DirectorCommandEngine {
             return resolved == null ? ValueResult.invalid() : ValueResult.valid(resolved);
         }
 
-        DecreeParameterHandler<?> legacyHandler = resolveLegacyHandler(type);
+        DirectorParameterHandler<?> legacyHandler = resolveLegacyHandler(type);
         if (legacyHandler != null) {
             try {
                 return ValueResult.valid(legacyHandler.parse(raw, false));
@@ -476,7 +476,7 @@ public final class DirectorRuntimeEngine implements DirectorCommandEngine {
         String normalized = input == null ? "" : input.trim().toLowerCase();
         Set<String> suggestions = new LinkedHashSet<>();
 
-        DecreeParameterHandler<?> customHandler = parameter.getCustomHandlerOrNull();
+        DirectorParameterHandler<?> customHandler = parameter.getCustomHandlerOrNull();
         if (customHandler != null) {
             try {
                 for (Object possibility : customHandler.getPossibilities(input)) {
@@ -491,7 +491,7 @@ public final class DirectorRuntimeEngine implements DirectorCommandEngine {
 
         Class<?> type = descriptor.getType();
         if (suggestions.isEmpty()) {
-            DecreeParameterHandler<?> legacyHandler = resolveLegacyHandler(type);
+            DirectorParameterHandler<?> legacyHandler = resolveLegacyHandler(type);
             if (legacyHandler != null) {
                 try {
                     for (Object possibility : legacyHandler.getPossibilities(input)) {
@@ -530,8 +530,8 @@ public final class DirectorRuntimeEngine implements DirectorCommandEngine {
                 .toList();
     }
 
-    private DecreeParameterHandler<?> resolveLegacyHandler(Class<?> type) {
-        for (DecreeParameterHandler<?> handler : legacyHandlers) {
+    private DirectorParameterHandler<?> resolveLegacyHandler(Class<?> type) {
+        for (DirectorParameterHandler<?> handler : legacyHandlers) {
             try {
                 if (handler.supports(type)) {
                     return handler;

@@ -33,6 +33,14 @@ public interface Element {
 
     ItemStack computeItemStack();
 
+    default ItemStack getBaseItemStack() {
+        return null;
+    }
+
+    default Element setBaseItemStack(ItemStack itemStack) {
+        return this;
+    }
+
     Element setBackground(boolean bg);
 
     boolean isBackgrond();

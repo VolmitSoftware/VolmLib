@@ -1,8 +1,8 @@
 package art.arcane.volmlib.util.director.runtime;
 
-import art.arcane.volmlib.util.decree.DecreeParameterHandler;
-import art.arcane.volmlib.util.decree.annotations.Param;
-import art.arcane.volmlib.util.decree.specialhandlers.NoParameterHandler;
+import art.arcane.volmlib.util.director.DirectorParameterHandler;
+import art.arcane.volmlib.util.director.annotations.Param;
+import art.arcane.volmlib.util.director.specialhandlers.NoParameterHandler;
 
 import java.lang.reflect.Parameter;
 
@@ -10,7 +10,7 @@ public final class DirectorRuntimeParameter {
     private final DirectorParameterDescriptor descriptor;
     private final Parameter parameter;
     private final Param annotation;
-    private volatile DecreeParameterHandler<?> customHandler;
+    private volatile DirectorParameterHandler<?> customHandler;
     private volatile boolean customHandlerInitialized;
 
     public DirectorRuntimeParameter(DirectorParameterDescriptor descriptor, Parameter parameter, Param annotation) {
@@ -31,7 +31,7 @@ public final class DirectorRuntimeParameter {
         return annotation;
     }
 
-    public DecreeParameterHandler<?> getCustomHandlerOrNull() {
+    public DirectorParameterHandler<?> getCustomHandlerOrNull() {
         if (customHandlerInitialized) {
             return customHandler;
         }
@@ -47,8 +47,8 @@ public final class DirectorRuntimeParameter {
                     customHandler = null;
                 } else {
                     Object instance = handlerType.getConstructor().newInstance();
-                    if (instance instanceof DecreeParameterHandler<?> decreeHandler) {
-                        customHandler = decreeHandler;
+                    if (instance instanceof DirectorParameterHandler<?> directorHandler) {
+                        customHandler = directorHandler;
                     } else {
                         customHandler = null;
                     }

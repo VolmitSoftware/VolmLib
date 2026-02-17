@@ -269,7 +269,19 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
     }
 
     public void deleteChunk(int x, int z) {
+        long started = nowMillis();
+        boolean trace = Thread.currentThread().getName().startsWith("Iris-Regen");
+        if (trace) {
+            onWarn("Mantle deleteChunk start: chunk=" + x + "," + z
+                    + " thread=" + Thread.currentThread().getName());
+        }
         get(x >> 5, z >> 5).delete(x & 31, z & 31);
+        if (trace) {
+            long took = nowMillis() - started;
+            onWarn("Mantle deleteChunk done: chunk=" + x + "," + z
+                    + " tookMs=" + took
+                    + " thread=" + Thread.currentThread().getName());
+        }
     }
 
     @RegionCoordinates

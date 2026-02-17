@@ -18,20 +18,18 @@
 
 package art.arcane.volmlib.util.mantle.io;
 
-import art.arcane.volmlib.util.io.IO;
-
 import java.io.IOException;
 import java.nio.channels.FileChannel;
 import java.util.concurrent.Semaphore;
 
 public class Holder {
     private final FileChannel channel;
-    private final Semaphore semaphore = new Semaphore(1);
+    private final Semaphore semaphore;
     private volatile boolean closed;
 
-    public Holder(FileChannel channel) throws IOException {
+    public Holder(FileChannel channel, Semaphore semaphore) {
         this.channel = channel;
-        IO.lock(channel);
+        this.semaphore = semaphore;
     }
 
     public SynchronizedChannel acquire() {

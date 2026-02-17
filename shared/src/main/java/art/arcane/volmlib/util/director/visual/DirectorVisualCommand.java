@@ -1,8 +1,8 @@
 package art.arcane.volmlib.util.director.visual;
 
 import art.arcane.volmlib.util.collection.KList;
-import art.arcane.volmlib.util.decree.DecreeParameterHandler;
-import art.arcane.volmlib.util.decree.specialhandlers.NoParameterHandler;
+import art.arcane.volmlib.util.director.DirectorParameterHandler;
+import art.arcane.volmlib.util.director.specialhandlers.NoParameterHandler;
 import art.arcane.volmlib.util.director.runtime.DirectorRuntimeEngine;
 import art.arcane.volmlib.util.director.runtime.DirectorRuntimeNode;
 import art.arcane.volmlib.util.director.runtime.DirectorRuntimeParameter;
@@ -77,7 +77,7 @@ public final class DirectorVisualCommand {
     private static DirectorVisualCommand fromRuntime(
             DirectorRuntimeNode runtime,
             DirectorVisualCommand parent,
-            List<DecreeParameterHandler<?>> legacyHandlers
+            List<DirectorParameterHandler<?>> legacyHandlers
     ) {
         KList<String> names = new KList<>();
         names.add(runtime.getDescriptor().getName());
@@ -106,7 +106,7 @@ public final class DirectorVisualCommand {
 
     private static KList<DirectorVisualParameter> buildParameters(
             List<DirectorRuntimeParameter> runtimeParameters,
-            List<DecreeParameterHandler<?>> legacyHandlers
+            List<DirectorParameterHandler<?>> legacyHandlers
     ) {
         KList<DirectorVisualParameter> required = new KList<>();
         KList<DirectorVisualParameter> optional = new KList<>();
@@ -235,7 +235,7 @@ public final class DirectorVisualCommand {
         private final boolean contextual;
         private final String defaultValue;
         private final KList<String> names;
-        private final DecreeParameterHandler<?> handler;
+        private final DirectorParameterHandler<?> handler;
         private final ParamView param;
 
         private DirectorVisualParameter(
@@ -246,7 +246,7 @@ public final class DirectorVisualCommand {
                 boolean contextual,
                 String defaultValue,
                 KList<String> names,
-                DecreeParameterHandler<?> handler
+                DirectorParameterHandler<?> handler
         ) {
             this.name = name;
             this.description = description;
@@ -261,7 +261,7 @@ public final class DirectorVisualCommand {
 
         private static DirectorVisualParameter from(
                 DirectorRuntimeParameter runtime,
-                List<DecreeParameterHandler<?>> legacyHandlers
+                List<DirectorParameterHandler<?>> legacyHandlers
         ) {
             String name = runtime.getDescriptor().getName();
             KList<String> names = new KList<>();
@@ -269,7 +269,7 @@ public final class DirectorVisualCommand {
             names.add(name);
             names.removeDuplicates();
 
-            DecreeParameterHandler<?> handler = resolveHandler(runtime, legacyHandlers);
+            DirectorParameterHandler<?> handler = resolveHandler(runtime, legacyHandlers);
 
             return new DirectorVisualParameter(
                     name,
@@ -283,9 +283,9 @@ public final class DirectorVisualCommand {
             );
         }
 
-        private static DecreeParameterHandler<?> resolveHandler(
+        private static DirectorParameterHandler<?> resolveHandler(
                 DirectorRuntimeParameter runtime,
-                List<DecreeParameterHandler<?>> legacyHandlers
+                List<DirectorParameterHandler<?>> legacyHandlers
         ) {
             Class<?> customType = runtime.getAnnotation().customHandler();
             boolean systemHandler = customType == null
@@ -295,14 +295,14 @@ public final class DirectorVisualCommand {
             if (!systemHandler) {
                 try {
                     Object instance = customType.getConstructor().newInstance();
-                    if (instance instanceof DecreeParameterHandler<?> decreeHandler) {
-                        return decreeHandler;
+                    if (instance instanceof DirectorParameterHandler<?> directorHandler) {
+                        return directorHandler;
                     }
                 } catch (Throwable ignored) {
                 }
             }
 
-            for (DecreeParameterHandler<?> handler : legacyHandlers == null ? List.<DecreeParameterHandler<?>>of() : legacyHandlers) {
+            for (DirectorParameterHandler<?> handler : legacyHandlers == null ? List.<DirectorParameterHandler<?>>of() : legacyHandlers) {
                 try {
                     if (handler.supports(runtime.getDescriptor().getType())) {
                         return handler;

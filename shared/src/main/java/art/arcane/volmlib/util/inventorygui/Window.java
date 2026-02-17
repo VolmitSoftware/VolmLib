@@ -59,6 +59,14 @@ public interface Window {
 
     Window setTitle(String title);
 
+    default String getTag() {
+        return null;
+    }
+
+    default Window setTag(String tag) {
+        return this;
+    }
+
     boolean hasElement(int position, int row);
 
     Window setElement(int position, int row, Element e);

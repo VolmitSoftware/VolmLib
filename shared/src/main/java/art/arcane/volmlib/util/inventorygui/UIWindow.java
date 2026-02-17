@@ -31,6 +31,7 @@ public class UIWindow implements Window, Listener {
     private Inventory inventory;
     private int clickcheck;
     private boolean doubleclicked;
+    private String tag;
 
     public UIWindow(JavaPlugin plugin, Player viewer) {
         this.plugin = plugin;
@@ -43,6 +44,7 @@ public class UIWindow implements Window, Listener {
         setResolution(WindowResolution.W9_H6);
         setViewportHeight(clip(3, 1, getResolution().getMaxHeight()).intValue());
         setViewportPosition(0);
+        setTag(null);
     }
 
     @EventHandler
@@ -305,6 +307,17 @@ public class UIWindow implements Window, Listener {
             reopen();
         }
 
+        return this;
+    }
+
+    @Override
+    public String getTag() {
+        return tag;
+    }
+
+    @Override
+    public UIWindow setTag(String tag) {
+        this.tag = tag;
         return this;
     }
 

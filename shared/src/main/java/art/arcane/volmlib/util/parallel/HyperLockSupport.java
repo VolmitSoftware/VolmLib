@@ -15,6 +15,7 @@ import java.util.function.Supplier;
 
 public class HyperLockSupport {
     private final ConcurrentMap<Long, ReentrantLock> locks;
+    private final ConcurrentMap<Long, LockOwner> owners;
     private final Consumer<String> warningHandler;
     private final Consumer<Throwable> errorHandler;
     private volatile boolean enabled = true;
@@ -37,6 +38,7 @@ public class HyperLockSupport {
         this.warningHandler = warningHandler;
         this.errorHandler = errorHandler;
         locks = new ConcurrentHashMap<>(Math.max(capacity, 64));
+        owners = new ConcurrentHashMap<>(Math.max(capacity, 64));
     }
 
     public void with(int x, int z, Runnable r) {
@@ -134,7 +136,55 @@ public class HyperLockSupport {
             return;
         }
 
-        getLock(x, z).lock();
+        long key = CacheKey.key(x, z);
+        ReentrantLock lock = getLock(x, z);
+        if (lock.tryLock()) {
+            owners.put(key, new LockOwner(Thread.currentThread(), System.currentTimeMillis()));
+            return;
+        }
+
+        long started = System.currentTimeMillis();
+        while (enabled) {
+            try {
+                if (lock.tryLock(5, TimeUnit.SECONDS)) {
+                    owners.put(key, new LockOwner(Thread.currentThread(), System.currentTimeMillis()));
+                    long waited = System.currentTimeMillis() - started;
+                    if (warningHandler != null && waited >= 1000L) {
+                        warningHandler.accept("HyperLock acquired after wait: key=" + x + "," + z
+                                + " waitedMs=" + waited
+                                + " thread=" + Thread.currentThread().getName());
+                    }
+                    return;
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                if (errorHandler != null) {
+                    errorHandler.accept(e);
+                }
+                return;
+            }
+
+            if (warningHandler != null) {
+                long waited = System.currentTimeMillis() - started;
+                LockOwner owner = owners.get(key);
+                String ownerSummary = owner == null
+                        ? "none"
+                        : owner.thread().getName() + " alive=" + owner.thread().isAlive() + " heldMs=" + (System.currentTimeMillis() - owner.acquiredAtMs());
+                warningHandler.accept("HyperLock waiting: key=" + x + "," + z
+                        + " waitedMs=" + waited
+                        + " thread=" + Thread.currentThread().getName()
+                        + " holdCount=" + lock.getHoldCount()
+                        + " isLocked=" + lock.isLocked()
+                        + " owner=" + ownerSummary);
+                if (owner != null && owner.thread().isAlive()) {
+                    StackTraceElement[] trace = owner.thread().getStackTrace();
+                    int limit = Math.min(trace.length, 12);
+                    for (int i = 0; i < limit; i++) {
+                        warningHandler.accept("  owner-at " + trace[i]);
+                    }
+                }
+            }
+        }
     }
 
     public void unlock(int x, int z) {
@@ -142,11 +192,20 @@ public class HyperLockSupport {
             return;
         }
 
-        getLock(x, z).unlock();
+        long key = CacheKey.key(x, z);
+        ReentrantLock lock = getLock(x, z);
+        int holdCount = lock.getHoldCount();
+        lock.unlock();
+        if (holdCount <= 1) {
+            owners.remove(key);
+        }
     }
 
     public void disable() {
         enabled = false;
         locks.values().forEach(ReentrantLock::lock);
+    }
+
+    private record LockOwner(Thread thread, long acquiredAtMs) {
     }
 }

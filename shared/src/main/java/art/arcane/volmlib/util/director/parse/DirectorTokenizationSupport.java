@@ -1,6 +1,6 @@
 package art.arcane.volmlib.util.director.parse;
 
-import art.arcane.volmlib.util.decree.DecreeSystemSupport;
+import art.arcane.volmlib.util.director.DirectorSystemSupport;
 
 import java.util.List;
 
@@ -9,10 +9,10 @@ public final class DirectorTokenizationSupport {
     }
 
     public static List<String> tokenize(String[] args) {
-        return DecreeSystemSupport.enhanceArgs(args, true);
+        return DirectorSystemSupport.enhanceArgs(args, true);
     }
 
     public static List<String> tokenize(String[] args, boolean trim) {
-        return DecreeSystemSupport.enhanceArgs(args, trim);
+        return DirectorSystemSupport.enhanceArgs(args, trim);
     }
 }
