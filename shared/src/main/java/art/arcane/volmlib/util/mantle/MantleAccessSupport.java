@@ -33,8 +33,14 @@ public abstract class MantleAccessSupport<P> {
         boolean unload = unloadSemaphore.tryAcquire();
         try {
             if (!trim || !unload) {
+                P loaded = getLoadedRegion(x, z);
+                if (loaded != null && !isRegionClosed(loaded)) {
+                    markRegionUsed(x, z, loaded);
+                    return loaded;
+                }
+
                 try {
-                    return loadRegionSafe(x, z).get();
+                    return loadRegionBlocking(x, z);
                 } catch (Throwable e) {
                     report(e);
                 }
@@ -47,12 +53,9 @@ public abstract class MantleAccessSupport<P> {
             }
 
             try {
-                return loadRegionSafe(x, z).get();
-            } catch (InterruptedException e) {
-                warn("Failed to get " + regionName() + " " + x + " " + z + " due to thread interruption");
-                report(e);
-            } catch (ExecutionException e) {
-                warn("Failed to get " + regionName() + " " + x + " " + z + " due to execution exception");
+                return loadRegionBlocking(x, z);
+            } catch (RuntimeException e) {
+                warn("Failed to get " + regionName() + " " + x + " " + z + " due to runtime exception");
                 report(e);
             } catch (Throwable e) {
                 warn("Failed to get " + regionName() + " " + x + " " + z + " due to unknown exception");
@@ -65,6 +68,10 @@ public abstract class MantleAccessSupport<P> {
             if (unload) {
                 unloadSemaphore.release();
             }
+        }
+
+        if (Thread.currentThread().isInterrupted()) {
+            throw new IllegalStateException("Interrupted while retrying access to " + regionName() + " " + x + " " + z);
         }
 
         warn("Retrying to get " + x + " " + z + " " + regionRetryName());
@@ -107,6 +114,12 @@ public abstract class MantleAccessSupport<P> {
                 });
 
         if (!trim || !unload) {
+            P loaded = getLoadedRegion(x, z);
+            if (loaded != null && !isRegionClosed(loaded)) {
+                markRegionUsed(x, z, loaded);
+                return CompletableFuture.completedFuture(release.apply(loaded));
+            }
+
             return loadRegionSafe(x, z)
                     .thenApply(release)
                     .exceptionallyCompose(e -> {
@@ -143,6 +156,7 @@ public abstract class MantleAccessSupport<P> {
     protected abstract String regionName();
 
     protected abstract CompletableFuture<P> loadRegionSafe(int x, int z);
+    protected abstract P loadRegionBlocking(int x, int z);
 
     protected abstract P getLoadedRegion(int x, int z);
 

@@ -87,34 +87,64 @@ public class IOWorkerSupport implements Closeable {
     private SynchronizedChannel getChannel(String name) throws IOException {
         long startNanos = System.nanoTime();
         try {
-            synchronized (cache) {
-                Holder holder = cache.get(name);
-                if (holder != null) {
-                    SynchronizedChannel channel = holder.acquire();
-                    if (channel != null) {
-                        return channel;
-                    }
-
-                    cache.remove(name);
-                }
-
-                if (cache.size() >= maxCacheSize) {
-                    Iterator<Map.Entry<String, Holder>> iterator = cache.entrySet().iterator();
-                    if (iterator.hasNext()) {
-                        Map.Entry<String, Holder> eldest = iterator.next();
-                        iterator.remove();
-                        eldest.getValue().close();
+            while (true) {
+                Holder holder;
+                Holder evicted = null;
+                synchronized (cache) {
+                    holder = cache.get(name);
+                    if (holder == null && cache.size() >= maxCacheSize) {
+                        Iterator<Map.Entry<String, Holder>> iterator = cache.entrySet().iterator();
+                        if (iterator.hasNext()) {
+                            Map.Entry<String, Holder> eldest = iterator.next();
+                            iterator.remove();
+                            evicted = eldest.getValue();
+                        }
                     }
                 }
 
-                holder = new Holder(FileChannel.open(root.resolve(name), OPTIONS));
-                cache.put(name, holder);
+                if (evicted != null) {
+                    evicted.close();
+                }
+
+                if (holder == null) {
+                    Holder created = new Holder(FileChannel.open(root.resolve(name), OPTIONS));
+                    boolean createdUsed = false;
+                    try {
+                        synchronized (cache) {
+                            Holder existing = cache.get(name);
+                            if (existing == null) {
+                                cache.put(name, created);
+                                holder = created;
+                                createdUsed = true;
+                            } else {
+                                holder = existing;
+                            }
+                        }
+
+                        if (!createdUsed) {
+                            created.close();
+                        }
+                    } catch (IOException e) {
+                        if (!createdUsed) {
+                            try {
+                                created.close();
+                            } catch (IOException ignored) {
+                            }
+                        }
+                        throw e;
+                    }
+                }
+
                 SynchronizedChannel channel = holder.acquire();
-                if (channel == null) {
-                    throw new IOException("Failed to acquire synchronized channel for " + name);
+                if (channel != null) {
+                    return channel;
                 }
 
-                return channel;
+                synchronized (cache) {
+                    if (cache.get(name) == holder) {
+                        cache.remove(name);
+                    }
+                }
             }
         } finally {
             if (acquireListener != null) {
