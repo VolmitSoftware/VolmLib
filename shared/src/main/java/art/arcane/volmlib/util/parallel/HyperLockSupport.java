@@ -4,16 +4,17 @@ import art.arcane.volmlib.util.cache.CacheKey;
 import art.arcane.volmlib.util.function.NastyRunnable;
 import art.arcane.volmlib.util.function.NastySupplier;
 import art.arcane.volmlib.util.io.IORunnable;
-import com.googlecode.concurrentlinkedhashmap.ConcurrentLinkedHashMap;
 
 import java.io.IOException;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 public class HyperLockSupport {
-    private final ConcurrentLinkedHashMap<Long, ReentrantLock> locks;
+    private final ConcurrentMap<Long, ReentrantLock> locks;
     private final Consumer<String> warningHandler;
     private final Consumer<Throwable> errorHandler;
     private volatile boolean enabled = true;
@@ -35,16 +36,7 @@ public class HyperLockSupport {
         this.fair = fair;
         this.warningHandler = warningHandler;
         this.errorHandler = errorHandler;
-        locks = new ConcurrentLinkedHashMap.Builder<Long, ReentrantLock>()
-                .initialCapacity(capacity)
-                .maximumWeightedCapacity(capacity)
-                .listener((k, v) -> {
-                    if ((v.isLocked() || v.isHeldByCurrentThread()) && this.warningHandler != null) {
-                        this.warningHandler.accept("InfiniLock Eviction of " + k + " still has locks on it!");
-                    }
-                })
-                .concurrencyLevel(32)
-                .build();
+        locks = new ConcurrentHashMap<>(Math.max(capacity, 64));
     }
 
     public void with(int x, int z, Runnable r) {
