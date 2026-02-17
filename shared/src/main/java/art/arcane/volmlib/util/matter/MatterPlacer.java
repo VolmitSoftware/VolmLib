@@ -18,20 +18,19 @@
 
 package art.arcane.volmlib.util.matter;
 
-import art.arcane.volmlib.util.mantle.Mantle;
+import art.arcane.volmlib.util.mantle.runtime.Mantle;
 
 public interface MatterPlacer {
     int getHeight(int x, int z, boolean ignoreFluid);
 
-    Mantle getMantle();
+    Mantle<Matter> getMantle();
 
     default <T> void set(int x, int y, int z, T t) {
         getMantle().set(x, y, z, t);
     }
 
-    @SuppressWarnings("unchecked")
     default <T> T get(int x, int y, int z, Class<T> t) {
-        return (T) getMantle().get(x, y, z, t);
+        return getMantle().get(x, y, z, t);
     }
 
     default void set(int x, int y, int z, Matter matter) {
@@ -41,7 +40,11 @@ public interface MatterPlacer {
     }
 
     default <T> void set(int x, int y, int z, MatterSlice<T> slice) {
-        getMantle().set(x, y, z, slice);
+        if (slice.isEmpty()) {
+            return;
+        }
+
+        slice.iterateSync((xx, yy, zz, value) -> set(x + xx, y + yy, z + zz, value));
     }
 
     default int getHeight(int x, int z) {

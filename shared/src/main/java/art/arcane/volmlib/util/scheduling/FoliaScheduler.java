@@ -20,6 +20,11 @@ public final class FoliaScheduler {
     private static final Method SERVER_GET_GLOBAL_REGION_SCHEDULER = resolveServerMethod("getGlobalRegionScheduler");
     private static final Method SERVER_GET_REGION_SCHEDULER = resolveServerMethod("getRegionScheduler");
     private static final Method SERVER_GET_ASYNC_SCHEDULER = resolveServerMethod("getAsyncScheduler");
+    private static final Method SERVER_IS_TICK_THREAD = resolveServerMethod("isTickThread");
+    private static final Method SERVER_IS_GLOBAL_TICK_THREAD = resolveServerMethod("isGlobalTickThread");
+    private static final Method SERVER_IS_OWNED_LOCATION_REGION = resolveServerMethod("isOwnedByCurrentRegion", Location.class);
+    private static final Method SERVER_IS_OWNED_ENTITY_REGION = resolveServerMethod("isOwnedByCurrentRegion", Entity.class);
+    private static final Method SERVER_IS_OWNED_WORLD_CHUNK_REGION = resolveServerMethod("isOwnedByCurrentRegion", World.class, int.class, int.class);
 
     private static final Method BUKKIT_GET_GLOBAL_REGION_SCHEDULER = resolveBukkitMethod("getGlobalRegionScheduler");
     private static final Method BUKKIT_GET_REGION_SCHEDULER = resolveBukkitMethod("getRegionScheduler");
@@ -52,9 +57,31 @@ public final class FoliaScheduler {
     }
 
     public static boolean isPrimaryThread() {
+        Server server = Bukkit.getServer();
+        Boolean serverTickThread = invokeBooleanNoThrow(SERVER_IS_TICK_THREAD, server);
+        if (serverTickThread == null) {
+            serverTickThread = invokeBooleanNoThrow(server, "isTickThread", new Class<?>[0]);
+        }
+        if (serverTickThread != null) {
+            return serverTickThread;
+        }
+
         Boolean tickThread = invokeBooleanNoThrow(BUKKIT_IS_TICK_THREAD, null);
         if (tickThread != null) {
             return tickThread;
+        }
+
+        boolean bukkitPrimaryThread = Bukkit.isPrimaryThread();
+        if (bukkitPrimaryThread) {
+            return true;
+        }
+
+        Boolean serverGlobalTickThread = invokeBooleanNoThrow(SERVER_IS_GLOBAL_TICK_THREAD, server);
+        if (serverGlobalTickThread == null) {
+            serverGlobalTickThread = invokeBooleanNoThrow(server, "isGlobalTickThread", new Class<?>[0]);
+        }
+        if (serverGlobalTickThread != null) {
+            return serverGlobalTickThread;
         }
 
         Boolean globalTickThread = invokeBooleanNoThrow(BUKKIT_IS_GLOBAL_TICK_THREAD, null);
@@ -62,7 +89,7 @@ public final class FoliaScheduler {
             return globalTickThread;
         }
 
-        return Bukkit.isPrimaryThread();
+        return bukkitPrimaryThread;
     }
 
     public static boolean isOwnedByCurrentRegion(Entity entity) {
@@ -70,12 +97,18 @@ public final class FoliaScheduler {
             return false;
         }
 
-        Boolean owned = invokeBooleanNoThrow(BUKKIT_IS_OWNED_ENTITY_REGION, null, entity);
-        if (owned != null) {
-            return owned;
+        Boolean bukkitOwned = invokeBooleanNoThrow(BUKKIT_IS_OWNED_ENTITY_REGION, null, entity);
+        if (bukkitOwned != null) {
+            return bukkitOwned;
         }
 
-        if (!isFolia(Bukkit.getServer())) {
+        Server server = Bukkit.getServer();
+        Boolean serverOwned = invokeBooleanNoThrow(SERVER_IS_OWNED_ENTITY_REGION, server, entity);
+        if (serverOwned != null) {
+            return serverOwned;
+        }
+
+        if (!isFolia(server)) {
             return isPrimaryThread();
         }
 
@@ -88,12 +121,28 @@ public final class FoliaScheduler {
             return false;
         }
 
-        Boolean owned = invokeBooleanNoThrow(BUKKIT_IS_OWNED_LOCATION_REGION, null, location);
-        if (owned != null) {
-            return owned;
+        Boolean bukkitOwned = invokeBooleanNoThrow(BUKKIT_IS_OWNED_LOCATION_REGION, null, location);
+        if (bukkitOwned != null) {
+            return bukkitOwned;
         }
 
-        if (!isFolia(Bukkit.getServer())) {
+        Server server = Bukkit.getServer();
+        Boolean serverOwned = invokeBooleanNoThrow(SERVER_IS_OWNED_LOCATION_REGION, server, location);
+        if (serverOwned != null) {
+            return serverOwned;
+        }
+
+        World world = location.getWorld();
+        if (world != null) {
+            int chunkX = location.getBlockX() >> 4;
+            int chunkZ = location.getBlockZ() >> 4;
+            Boolean chunkOwned = ownershipByChunk(world, chunkX, chunkZ, server);
+            if (chunkOwned != null) {
+                return chunkOwned;
+            }
+        }
+
+        if (!isFolia(server)) {
             return isPrimaryThread();
         }
 
@@ -105,12 +154,13 @@ public final class FoliaScheduler {
             return false;
         }
 
-        Boolean owned = invokeBooleanNoThrow(BUKKIT_IS_OWNED_WORLD_CHUNK_REGION, null, world, chunkX, chunkZ);
+        Server server = Bukkit.getServer();
+        Boolean owned = ownershipByChunk(world, chunkX, chunkZ, server);
         if (owned != null) {
             return owned;
         }
 
-        if (!isFolia(Bukkit.getServer())) {
+        if (!isFolia(server)) {
             return isPrimaryThread();
         }
 
@@ -460,11 +510,24 @@ public final class FoliaScheduler {
     }
 
     private static Method resolveServerMethod(String methodName) {
+        return resolveServerMethod(methodName, new Class<?>[0]);
+    }
+
+    private static Method resolveServerMethod(String methodName, Class<?>... parameterTypes) {
         try {
-            return Server.class.getMethod(methodName);
+            return Server.class.getMethod(methodName, parameterTypes);
         } catch (Throwable ignored) {
             return null;
         }
+    }
+
+    private static Boolean ownershipByChunk(World world, int chunkX, int chunkZ, Server server) {
+        Boolean bukkitOwned = invokeBooleanNoThrow(BUKKIT_IS_OWNED_WORLD_CHUNK_REGION, null, world, chunkX, chunkZ);
+        if (bukkitOwned != null) {
+            return bukkitOwned;
+        }
+
+        return invokeBooleanNoThrow(SERVER_IS_OWNED_WORLD_CHUNK_REGION, server, world, chunkX, chunkZ);
     }
 
     private static Method resolveBukkitMethod(String methodName, Class<?>... parameterTypes) {
@@ -501,6 +564,15 @@ public final class FoliaScheduler {
 
     private static Boolean invokeBooleanNoThrow(Method method, Object target, Object... args) {
         Object value = invokeNoThrow(method, target, args);
+        if (value instanceof Boolean bool) {
+            return bool;
+        }
+
+        return null;
+    }
+
+    private static Boolean invokeBooleanNoThrow(Object target, String methodName, Class<?>[] parameterTypes, Object... args) {
+        Object value = invokeNoThrow(target, methodName, parameterTypes, args);
         if (value instanceof Boolean bool) {
             return bool;
         }

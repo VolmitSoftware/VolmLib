@@ -48,6 +48,23 @@ public class IrisMatter implements Matter {
     }
 
     @SuppressWarnings("unchecked")
+    public static void registerSliceType(MatterSlice<?> slice) {
+        if (slice == null) {
+            return;
+        }
+
+        Class<?> type = slice.getType();
+        if (type == null) {
+            return;
+        }
+
+        Class<? extends MatterSlice<?>> sliceClass = (Class<? extends MatterSlice<?>>) slice.getClass();
+        synchronized (SLICERS) {
+            SLICERS.put(type, sliceClass);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
     private static void register(Map<Class<?>, Class<? extends MatterSlice<?>>> slicers, MatterSlice<?> slice) {
         slicers.put(slice.getType(), (Class<? extends MatterSlice<?>>) slice.getClass());
     }

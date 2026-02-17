@@ -39,6 +39,7 @@ dependencies {
     implementation("com.googlecode.concurrentlinkedhashmap:concurrentlinkedhashmap-lru:1.4.2")
     implementation("org.apache.commons:commons-lang3:3.14.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
+    implementation("org.lz4:lz4-java:1.8.0")
 }
 
 publishing {

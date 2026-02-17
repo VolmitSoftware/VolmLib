@@ -67,6 +67,24 @@ public interface MatterSlice<T> extends HunkLike<T>, Writable<T> {
         return count;
     }
 
+    default boolean isEmpty() {
+        return getEntryCount() == 0;
+    }
+
+    default Object iterateSync(Consumer4<Integer, Integer, Integer, T> consumer) {
+        forEachValue(consumer);
+        return this;
+    }
+
+    default void iterate(Consumer4<Integer, Integer, Integer, T> consumer) {
+        iterateSync(consumer);
+    }
+
+    default Object iterateSyncIO(Consumer4IO<Integer, Integer, Integer, T> consumer) throws IOException {
+        forEachValueIO(consumer);
+        return this;
+    }
+
     default boolean isMapped() {
         return this instanceof PaletteOrHunk<?> palette && palette.isMapped();
     }

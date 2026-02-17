@@ -3,6 +3,9 @@ package art.arcane.volmlib.util.matter;
 import art.arcane.volmlib.util.collection.KSet;
 import art.arcane.volmlib.util.io.CountingDataInputStream;
 import art.arcane.volmlib.util.math.BlockPosition;
+import org.bukkit.World;
+import org.bukkit.block.data.BlockData;
+import org.bukkit.entity.Entity;
 
 import java.io.*;
 import java.util.ArrayList;
@@ -102,6 +105,20 @@ public interface Matter {
         return (int) Math.round(getDepth() / 2D);
     }
 
+    default Class<?> getClass(Object value) {
+        Class<?> type = value.getClass();
+
+        if (value instanceof World) {
+            type = World.class;
+        } else if (value instanceof BlockData) {
+            type = BlockData.class;
+        } else if (value instanceof Entity) {
+            type = Entity.class;
+        }
+
+        return type;
+    }
+
     @SuppressWarnings("unchecked")
     default <T> MatterSlice<T> getSlice(Class<T> t) {
         return (MatterSlice<T>) getSliceMap().get(t);
@@ -135,6 +152,10 @@ public interface Matter {
 
     default boolean hasSlice(Class<?> c) {
         return getSlice(c) != null;
+    }
+
+    default boolean isEmpty() {
+        return getSliceMap().isEmpty();
     }
 
     default void clearSlices() {
