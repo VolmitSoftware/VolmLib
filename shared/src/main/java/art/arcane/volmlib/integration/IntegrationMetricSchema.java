@@ -12,6 +12,7 @@ public final class IntegrationMetricSchema {
     public static final String ADAPT_SESSION_LOAD = "adapt.session-load";
     public static final String ADAPT_ABILITY_OPS = "adapt.ability-ops";
     public static final String ADAPT_ABILITY_CHECK_OPS = "adapt.ability-check-ops";
+    public static final String ADAPT_ABILITY_CHECK_OPS_TICK = "adapt.ability-check-ops-tick";
     public static final String ADAPT_WORLD_POLICY_LATENCY = "adapt.world-policy-latency";
 
     private static final Map<String, IntegrationMetricDescriptor> DESCRIPTORS = buildDescriptors();
@@ -50,7 +51,7 @@ public final class IntegrationMetricSchema {
     }
 
     public static Set<String> adaptKeys() {
-        return Set.of(ADAPT_SESSION_LOAD, ADAPT_ABILITY_OPS, ADAPT_ABILITY_CHECK_OPS, ADAPT_WORLD_POLICY_LATENCY);
+        return Set.of(ADAPT_SESSION_LOAD, ADAPT_ABILITY_OPS, ADAPT_ABILITY_CHECK_OPS, ADAPT_ABILITY_CHECK_OPS_TICK, ADAPT_WORLD_POLICY_LATENCY);
     }
 
     private static Map<String, IntegrationMetricDescriptor> buildDescriptors() {
@@ -92,6 +93,12 @@ public final class IntegrationMetricSchema {
                 IntegrationMetricType.DOUBLE,
                 "ops-per-minute",
                 Map.of("plugin", "adapt", "domain", "ability", "signal", "all-checks")
+        ));
+        descriptors.put(ADAPT_ABILITY_CHECK_OPS_TICK, new IntegrationMetricDescriptor(
+                ADAPT_ABILITY_CHECK_OPS_TICK,
+                IntegrationMetricType.DOUBLE,
+                "ops-per-tick",
+                Map.of("plugin", "adapt", "domain", "ability", "signal", "all-checks-per-tick")
         ));
         descriptors.put(ADAPT_WORLD_POLICY_LATENCY, new IntegrationMetricDescriptor(
                 ADAPT_WORLD_POLICY_LATENCY,

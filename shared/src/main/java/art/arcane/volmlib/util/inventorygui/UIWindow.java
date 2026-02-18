@@ -16,7 +16,12 @@ import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.plugin.java.JavaPlugin;
 
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+
 public class UIWindow implements Window, Listener {
+    private static final Map<UUID, UIWindow> ACTIVE_WINDOWS = new ConcurrentHashMap<>();
     private final JavaPlugin plugin;
     private final Player viewer;
     private final KMap<Integer, Element> elements;
@@ -57,7 +62,11 @@ public class UIWindow implements Window, Listener {
             return;
         }
 
-        if (!viewer.getOpenInventory().getTitle().equals(title)) {
+        if (inventory == null) {
+            return;
+        }
+
+        if (!e.getView().getTopInventory().equals(inventory)) {
             return;
         }
 
@@ -165,12 +174,16 @@ public class UIWindow implements Window, Listener {
             return;
         }
 
-        if (!e.getPlayer().getOpenInventory().getTitle().equals(title)) {
+        if (inventory == null) {
+            return;
+        }
+
+        if (!e.getInventory().equals(inventory)) {
             return;
         }
 
         if (isVisible()) {
-            close();
+            deactivate(false);
             callClosed();
         }
     }
@@ -231,21 +244,30 @@ public class UIWindow implements Window, Listener {
         }
 
         if (visible) {
-            Bukkit.getPluginManager().registerEvents(this, plugin);
-
-            if (getResolution().getType().equals(InventoryType.CHEST)) {
-                inventory = Bukkit.createInventory(null, getViewportHeight() * 9, getTitle());
-            } else {
-                inventory = Bukkit.createInventory(null, getResolution().getType(), getTitle());
+            UIWindow activeWindow = ACTIVE_WINDOWS.get(viewer.getUniqueId());
+            if (activeWindow != null && activeWindow != this) {
+                activeWindow.deactivate(false);
             }
 
-            viewer.openInventory(inventory);
+            Bukkit.getPluginManager().registerEvents(this, plugin);
+
+            Inventory activeTopInventory = viewer.getOpenInventory() == null ? null : viewer.getOpenInventory().getTopInventory();
+            if (canReuseInventory(activeTopInventory)) {
+                inventory = activeTopInventory;
+            } else {
+                if (getResolution().getType().equals(InventoryType.CHEST)) {
+                    inventory = Bukkit.createInventory(null, getViewportHeight() * 9, getTitle());
+                } else {
+                    inventory = Bukkit.createInventory(null, getResolution().getType(), getTitle());
+                }
+
+                viewer.openInventory(inventory);
+            }
             this.visible = true;
+            ACTIVE_WINDOWS.put(viewer.getUniqueId(), this);
             updateInventory();
         } else {
-            this.visible = false;
-            HandlerList.unregisterAll(this);
-            viewer.closeInventory();
+            deactivate(true);
         }
 
         return this;
@@ -465,5 +487,47 @@ public class UIWindow implements Window, Listener {
     @Override
     public Window reopen() {
         return this.close().open();
+    }
+
+    private boolean canReuseInventory(Inventory activeTopInventory) {
+        if (activeTopInventory == null) {
+            return false;
+        }
+
+        if (activeTopInventory.getHolder() != null) {
+            return false;
+        }
+
+        if (getResolution().getType().equals(InventoryType.CHEST)) {
+            if (!activeTopInventory.getType().equals(InventoryType.CHEST)) {
+                return false;
+            }
+
+            int expectedSize = getViewportHeight() * getResolution().getWidth();
+            if (activeTopInventory.getSize() != expectedSize) {
+                return false;
+            }
+        } else if (!activeTopInventory.getType().equals(getResolution().getType())) {
+            return false;
+        }
+
+        String activeTitle = viewer.getOpenInventory() == null ? null : viewer.getOpenInventory().getTitle();
+        return activeTitle != null && activeTitle.equals(getTitle());
+    }
+
+    private void deactivate(boolean closeInventory) {
+        this.visible = false;
+        HandlerList.unregisterAll(this);
+
+        Inventory currentInventory = inventory;
+        if (closeInventory && currentInventory != null) {
+            Inventory topInventory = viewer.getOpenInventory() == null ? null : viewer.getOpenInventory().getTopInventory();
+            if (topInventory != null && topInventory.equals(currentInventory)) {
+                viewer.closeInventory();
+            }
+        }
+
+        inventory = null;
+        ACTIVE_WINDOWS.remove(viewer.getUniqueId(), this);
     }
 }

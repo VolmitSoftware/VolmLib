@@ -90,23 +90,35 @@ public final class SchedulerRuntime {
             return;
         }
 
-        if (!runGlobalImmediate(runnable)) {
-            Plugin plugin = plugin();
-            if (plugin == null) {
+        if (runGlobalImmediate(runnable)) {
+            return;
+        }
+
+        Plugin plugin = plugin();
+        if (plugin == null) {
+            return;
+        }
+
+        if (isFoliaThreading()) {
+            if (FoliaScheduler.isPrimaryThread()) {
+                runnable.run();
                 return;
             }
 
-            try {
-                Bukkit.getScheduler().scheduleSyncDelayedTask(plugin, runnable);
-            } catch (IllegalPluginAccessException e) {
-                if (!isPluginActive()) {
-                    return;
-                }
+            warn("Failed to schedule global sync task on Folia for plugin " + plugin.getName() + "; task was not queued.");
+            return;
+        }
 
-                throw new IllegalStateException("Failed to schedule global sync task while plugin is enabled.", e);
-            } catch (UnsupportedOperationException e) {
-                throw new IllegalStateException("Failed to schedule global sync task on this server (Folia scheduler unavailable, BukkitScheduler unsupported).", e);
+        try {
+            Bukkit.getScheduler().scheduleSyncDelayedTask(plugin, runnable);
+        } catch (IllegalPluginAccessException e) {
+            if (!isPluginActive()) {
+                return;
             }
+
+            throw new IllegalStateException("Failed to schedule global sync task while plugin is enabled.", e);
+        } catch (UnsupportedOperationException e) {
+            throw new IllegalStateException("Failed to schedule global sync task on this server (Folia scheduler unavailable, BukkitScheduler unsupported).", e);
         }
     }
 
@@ -120,23 +132,31 @@ public final class SchedulerRuntime {
             return;
         }
 
-        if (!runGlobalDelayed(runnable, delayTicks)) {
-            Plugin plugin = plugin();
-            if (plugin == null) {
+        if (runGlobalDelayed(runnable, delayTicks)) {
+            return;
+        }
+
+        Plugin plugin = plugin();
+        if (plugin == null) {
+            return;
+        }
+
+        if (isFoliaThreading()) {
+            warn("Failed to schedule delayed global sync task on Folia for plugin " + plugin.getName()
+                    + " (" + delayTicks + "t); task was not queued.");
+            return;
+        }
+
+        try {
+            Bukkit.getScheduler().scheduleSyncDelayedTask(plugin, runnable, delayTicks);
+        } catch (IllegalPluginAccessException e) {
+            if (!isPluginActive()) {
                 return;
             }
 
-            try {
-                Bukkit.getScheduler().scheduleSyncDelayedTask(plugin, runnable, delayTicks);
-            } catch (IllegalPluginAccessException e) {
-                if (!isPluginActive()) {
-                    return;
-                }
-
-                throw new IllegalStateException("Failed to schedule delayed global sync task while plugin is enabled.", e);
-            } catch (UnsupportedOperationException e) {
-                throw new IllegalStateException("Failed to schedule delayed global sync task on this server (Folia scheduler unavailable, BukkitScheduler unsupported).", e);
-            }
+            throw new IllegalStateException("Failed to schedule delayed global sync task while plugin is enabled.", e);
+        } catch (UnsupportedOperationException e) {
+            throw new IllegalStateException("Failed to schedule delayed global sync task on this server (Folia scheduler unavailable, BukkitScheduler unsupported).", e);
         }
     }
 
