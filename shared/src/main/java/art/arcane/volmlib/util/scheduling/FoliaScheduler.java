@@ -238,6 +238,9 @@ public final class FoliaScheduler {
 
         Object scheduler = ENTITY_GET_SCHEDULER == null ? null : invokeNoThrow(ENTITY_GET_SCHEDULER, entity);
         if (scheduler == null) {
+            scheduler = invokeNoThrow(entity, "getScheduler", new Class<?>[0]);
+        }
+        if (scheduler == null) {
             return false;
         }
 
@@ -464,11 +467,21 @@ public final class FoliaScheduler {
             }
         }
 
-        if (BUKKIT_GET_GLOBAL_REGION_SCHEDULER != null) {
-            return invokeNoThrow(BUKKIT_GET_GLOBAL_REGION_SCHEDULER, null);
+        if (server != null) {
+            Object scheduler = invokeNoThrow(server, "getGlobalRegionScheduler", new Class<?>[0]);
+            if (scheduler != null) {
+                return scheduler;
+            }
         }
 
-        return null;
+        if (BUKKIT_GET_GLOBAL_REGION_SCHEDULER != null) {
+            Object scheduler = invokeNoThrow(BUKKIT_GET_GLOBAL_REGION_SCHEDULER, null);
+            if (scheduler != null) {
+                return scheduler;
+            }
+        }
+
+        return invokeStaticNoThrow(Bukkit.class, "getGlobalRegionScheduler", new Class<?>[0]);
     }
 
     private static Object getRegionScheduler(Plugin plugin) {
@@ -483,11 +496,21 @@ public final class FoliaScheduler {
             }
         }
 
-        if (BUKKIT_GET_REGION_SCHEDULER != null) {
-            return invokeNoThrow(BUKKIT_GET_REGION_SCHEDULER, null);
+        if (server != null) {
+            Object scheduler = invokeNoThrow(server, "getRegionScheduler", new Class<?>[0]);
+            if (scheduler != null) {
+                return scheduler;
+            }
         }
 
-        return null;
+        if (BUKKIT_GET_REGION_SCHEDULER != null) {
+            Object scheduler = invokeNoThrow(BUKKIT_GET_REGION_SCHEDULER, null);
+            if (scheduler != null) {
+                return scheduler;
+            }
+        }
+
+        return invokeStaticNoThrow(Bukkit.class, "getRegionScheduler", new Class<?>[0]);
     }
 
     private static Object getAsyncScheduler(Plugin plugin) {
@@ -502,11 +525,21 @@ public final class FoliaScheduler {
             }
         }
 
-        if (BUKKIT_GET_ASYNC_SCHEDULER != null) {
-            return invokeNoThrow(BUKKIT_GET_ASYNC_SCHEDULER, null);
+        if (server != null) {
+            Object scheduler = invokeNoThrow(server, "getAsyncScheduler", new Class<?>[0]);
+            if (scheduler != null) {
+                return scheduler;
+            }
         }
 
-        return null;
+        if (BUKKIT_GET_ASYNC_SCHEDULER != null) {
+            Object scheduler = invokeNoThrow(BUKKIT_GET_ASYNC_SCHEDULER, null);
+            if (scheduler != null) {
+                return scheduler;
+            }
+        }
+
+        return invokeStaticNoThrow(Bukkit.class, "getAsyncScheduler", new Class<?>[0]);
     }
 
     private static Method resolveServerMethod(String methodName) {
@@ -527,7 +560,31 @@ public final class FoliaScheduler {
             return bukkitOwned;
         }
 
-        return invokeBooleanNoThrow(SERVER_IS_OWNED_WORLD_CHUNK_REGION, server, world, chunkX, chunkZ);
+        bukkitOwned = invokeBooleanStaticNoThrow(
+                Bukkit.class,
+                "isOwnedByCurrentRegion",
+                new Class<?>[]{World.class, int.class, int.class},
+                world,
+                chunkX,
+                chunkZ
+        );
+        if (bukkitOwned != null) {
+            return bukkitOwned;
+        }
+
+        Boolean serverOwned = invokeBooleanNoThrow(SERVER_IS_OWNED_WORLD_CHUNK_REGION, server, world, chunkX, chunkZ);
+        if (serverOwned != null) {
+            return serverOwned;
+        }
+
+        return invokeBooleanNoThrow(
+                server,
+                "isOwnedByCurrentRegion",
+                new Class<?>[]{World.class, int.class, int.class},
+                world,
+                chunkX,
+                chunkZ
+        );
     }
 
     private static Method resolveBukkitMethod(String methodName, Class<?>... parameterTypes) {
@@ -562,6 +619,15 @@ public final class FoliaScheduler {
         }
     }
 
+    private static Object invokeStaticNoThrow(Class<?> owner, String methodName, Class<?>[] parameterTypes, Object... args) {
+        try {
+            Method method = owner.getMethod(methodName, parameterTypes);
+            return method.invoke(null, args);
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
     private static Boolean invokeBooleanNoThrow(Method method, Object target, Object... args) {
         Object value = invokeNoThrow(method, target, args);
         if (value instanceof Boolean bool) {
@@ -573,6 +639,15 @@ public final class FoliaScheduler {
 
     private static Boolean invokeBooleanNoThrow(Object target, String methodName, Class<?>[] parameterTypes, Object... args) {
         Object value = invokeNoThrow(target, methodName, parameterTypes, args);
+        if (value instanceof Boolean bool) {
+            return bool;
+        }
+
+        return null;
+    }
+
+    private static Boolean invokeBooleanStaticNoThrow(Class<?> owner, String methodName, Class<?>[] parameterTypes, Object... args) {
+        Object value = invokeStaticNoThrow(owner, methodName, parameterTypes, args);
         if (value instanceof Boolean bool) {
             return bool;
         }

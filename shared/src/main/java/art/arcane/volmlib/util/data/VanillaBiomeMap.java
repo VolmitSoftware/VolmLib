@@ -94,8 +94,6 @@ public class VanillaBiomeMap {
         add(Biome.FROZEN_PEAKS, 0xA0A0A0, Color.MONOCHROME, Luminosity.LIGHT, null);
         add(Biome.JAGGED_PEAKS, 0x3d7bc2, Color.MONOCHROME, Luminosity.BRIGHT, SaturationType.MEDIUM);
         add(Biome.STONY_PEAKS, 0x888888, Color.MONOCHROME, Luminosity.LIGHT, null);
-        add(Biome.CUSTOM, 0xffffff, Color.MONOCHROME, Luminosity.DARK, SaturationType.MONOCHROME);
-
     }
 
 
@@ -104,7 +102,7 @@ public class VanillaBiomeMap {
         BIOME_COLOR.put(biome, randomColor);
         if (luminosity != null) BIOME_LUMINOSITY.put(biome, luminosity);
         if (saturation != null) BIOME_SATURATION.put(biome, saturation);
-        BIOME_IDs.put(biome, (short) biome.ordinal());
+        BIOME_IDs.put(biome, (short) BIOME_IDs.size());
     }
 
     private static void add(Biome biome, int color, Color randomColor, Luminosity luminosity) {

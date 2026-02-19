@@ -20,20 +20,16 @@
 package art.arcane.volmlib.util.particle;
 
 
-import org.bukkit.Bukkit;
 import org.bukkit.Color;
 import org.bukkit.Particle;
 import org.bukkit.World;
-import org.bukkit.block.data.BlockData;
 import org.bukkit.entity.Player;
-import org.bukkit.material.MaterialData;
 
 /**
  * Particle sender using the Bukkit particles API for 1.9+ servers
  *
  * @author MrMicky
  */
-@SuppressWarnings("deprecation")
 interface ParticleSender {
 
     void spawnParticle(Object receiver, ParticleType particle, double x, double y, double z, int count, double offsetX, double offsetY, double offsetZ, double extra, Object data);
@@ -102,8 +98,6 @@ interface ParticleSender {
                 } else if (data == null) {
                     data = new Particle.DustOptions(Color.RED, 1);
                 }
-            } else if (bukkitParticle.getDataType() == BlockData.class && data instanceof MaterialData) {
-                data = Bukkit.createBlockData(((MaterialData) data).getItemType());
             }
 
             super.spawnParticle(receiver, particle, x, y, z, count, offsetX, offsetY, offsetZ, extra, data);
@@ -112,10 +106,6 @@ interface ParticleSender {
         @Override
         public boolean isValidDataBukkit(Particle particle, Object data) {
             if (particle.getDataType() == Particle.DustOptions.class && data instanceof Color) {
-                return true;
-            }
-
-            if (particle.getDataType() == BlockData.class && data instanceof MaterialData) {
                 return true;
             }
 

@@ -28,7 +28,6 @@ import org.bukkit.block.BlockState;
  *
  * @author cyberpwn
  */
-@SuppressWarnings("deprecation")
 public class MaterialBlock {
     private Material material;
     private Byte data;
@@ -55,12 +54,12 @@ public class MaterialBlock {
 
     public MaterialBlock(BlockState state) {
         material = state.getType();
-        data = state.getData().getData();
+        data = 0;
     }
 
     public MaterialBlock(Block block) {
         material = block.getType();
-        data = block.getData();
+        data = 0;
     }
 
     public MaterialBlock() {

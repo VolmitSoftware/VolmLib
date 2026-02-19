@@ -35,13 +35,7 @@ public final class FastParticle {
     private static final ParticleSender PARTICLE_SENDER;
 
     static {
-        if (FastReflection.optionalClass("org.bukkit.Particle$DustOptions").isPresent()) {
-            PARTICLE_SENDER = new ParticleSender.ParticleSender1_13();
-        } else if (FastReflection.optionalClass("org.bukkit.Particle").isPresent()) {
-            PARTICLE_SENDER = new ParticleSender.ParticleSenderImpl();
-        } else {
-            PARTICLE_SENDER = new ParticleSenderLegacy();
-        }
+        PARTICLE_SENDER = new ParticleSender.ParticleSender1_13();
     }
 
     private FastParticle() {

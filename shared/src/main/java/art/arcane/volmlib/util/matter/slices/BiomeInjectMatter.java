@@ -21,6 +21,8 @@ package art.arcane.volmlib.util.matter.slices;
 import art.arcane.volmlib.util.data.palette.Palette;
 import art.arcane.volmlib.util.matter.MatterBiomeInject;
 import art.arcane.volmlib.util.matter.Sliced;
+import org.bukkit.NamespacedKey;
+import org.bukkit.Registry;
 import org.bukkit.block.Biome;
 
 import java.io.DataInputStream;
@@ -61,7 +63,8 @@ public class BiomeInjectMatter extends RawMatter<MatterBiomeInject> {
         if (b.isCustom()) {
             dos.writeShort(b.getBiomeId());
         } else {
-            dos.writeByte(b.getBiome().ordinal());
+            NamespacedKey key = Registry.BIOME.getKey(b.getBiome());
+            dos.writeUTF((key == null ? NamespacedKey.minecraft("plains") : key).toString());
         }
     }
 
@@ -69,7 +72,13 @@ public class BiomeInjectMatter extends RawMatter<MatterBiomeInject> {
     public MatterBiomeInject readNode(DataInputStream din) throws IOException {
         boolean b = din.readBoolean();
         int id = b ? din.readShort() : 0;
-        Biome biome = !b ? Biome.values()[din.readByte()] : Biome.PLAINS;
+        Biome biome = Biome.PLAINS;
+
+        if (!b) {
+            NamespacedKey key = NamespacedKey.fromString(din.readUTF());
+            Biome resolved = key == null ? null : Registry.BIOME.get(key);
+            biome = resolved == null ? Biome.PLAINS : resolved;
+        }
 
         return new MatterBiomeInject(b, id, biome);
     }

@@ -21,13 +21,12 @@ package art.arcane.volmlib.util.particle;
 
 
 import org.bukkit.Color;
+import org.bukkit.block.data.BlockData;
 import org.bukkit.inventory.ItemStack;
-import org.bukkit.material.MaterialData;
 
 /**
  * @author MrMicky
  */
-@SuppressWarnings("deprecation")
 public enum ParticleType {
 
     // 1.7+
@@ -183,9 +182,7 @@ public enum ParticleType {
     public Class<?> getDataType() {
         return switch (this) {
             case ITEM_CRACK -> ItemStack.class;
-            case BLOCK_CRACK, BLOCK_DUST, FALLING_DUST ->
-                //noinspection deprecation
-                    MaterialData.class;
+            case BLOCK_CRACK, BLOCK_DUST, FALLING_DUST -> BlockData.class;
             case REDSTONE -> Color.class;
             default -> Void.class;
         };
