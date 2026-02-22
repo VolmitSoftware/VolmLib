@@ -16,6 +16,7 @@ import java.util.function.Consumer;
  */
 public final class FoliaScheduler {
     private static final long TICK_MS = 50L;
+    private static final Class<?> REGIONIZED_SERVER_CLASS = resolveClass("io.papermc.paper.threadedregions.RegionizedServer");
 
     private static final Method SERVER_GET_GLOBAL_REGION_SCHEDULER = resolveServerMethod("getGlobalRegionScheduler");
     private static final Method SERVER_GET_REGION_SCHEDULER = resolveServerMethod("getRegionScheduler");
@@ -42,9 +43,7 @@ public final class FoliaScheduler {
     }
 
     public static boolean isFolia(Server server) {
-        return getGlobalRegionScheduler(server) != null
-                || getRegionScheduler(server) != null
-                || getAsyncScheduler(server) != null;
+        return isFoliaThreading(server);
     }
 
     public static boolean isFolia(Plugin plugin) {
@@ -53,7 +52,12 @@ public final class FoliaScheduler {
     }
 
     public static boolean isFoliaThreading(Server server) {
-        return getGlobalRegionScheduler(server) != null || getRegionScheduler(server) != null;
+        Server activeServer = server == null ? Bukkit.getServer() : server;
+        if (activeServer == null || REGIONIZED_SERVER_CLASS == null) {
+            return false;
+        }
+
+        return getGlobalRegionScheduler(activeServer) != null || getRegionScheduler(activeServer) != null;
     }
 
     public static boolean isPrimaryThread() {
@@ -598,6 +602,14 @@ public final class FoliaScheduler {
     private static Method resolveEntityMethod(String methodName) {
         try {
             return Entity.class.getMethod(methodName);
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
+    private static Class<?> resolveClass(String className) {
+        try {
+            return Class.forName(className);
         } catch (Throwable ignored) {
             return null;
         }

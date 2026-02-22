@@ -5,11 +5,10 @@ import com.github.benmanes.caffeine.cache.CacheLoader;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.Scheduler;
 
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.Executor;
 
 public class KCache<K, V> extends KCacheBase<K, V> {
-    public static final ExecutorService EXECUTOR = Executors.newVirtualThreadPerTaskExecutor();
+    public static final Executor EXECUTOR = Runnable::run;
 
     public KCache(CacheLoader<K, V> loader, long max) {
         super(loader, max);
