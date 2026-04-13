@@ -17,6 +17,7 @@ import java.util.function.Consumer;
 public final class FoliaScheduler {
     private static final long TICK_MS = 50L;
     private static final Class<?> REGIONIZED_SERVER_CLASS = resolveClass("io.papermc.paper.threadedregions.RegionizedServer");
+    private static volatile boolean forcedFoliaThreading;
 
     private static final Method SERVER_GET_GLOBAL_REGION_SCHEDULER = resolveServerMethod("getGlobalRegionScheduler");
     private static final Method SERVER_GET_REGION_SCHEDULER = resolveServerMethod("getRegionScheduler");
@@ -52,12 +53,24 @@ public final class FoliaScheduler {
     }
 
     public static boolean isFoliaThreading(Server server) {
+        if (forcedFoliaThreading) {
+            return true;
+        }
+
         Server activeServer = server == null ? Bukkit.getServer() : server;
         if (activeServer == null || REGIONIZED_SERVER_CLASS == null) {
             return false;
         }
 
         return getGlobalRegionScheduler(activeServer) != null || getRegionScheduler(activeServer) != null;
+    }
+
+    public static boolean isRegionizedRuntime(Server server) {
+        return isFoliaThreading(server);
+    }
+
+    public static void forceFoliaThreading(Server server) {
+        forcedFoliaThreading = true;
     }
 
     public static boolean isPrimaryThread() {

@@ -32,6 +32,23 @@ public class WorldCache2D<T> {
         return chunk.get(x, z, resolver);
     }
 
+    public void fillChunk(int chunkX, int chunkZ, Object[] target) {
+        if (target == null || target.length != 256) {
+            throw new IllegalArgumentException("Expected a 16x16 target array.");
+        }
+
+        ChunkCache2D<T> chunk = chunks.computeIfAbsent(CacheKey.key(chunkX, chunkZ), $ -> chunkSupplier.get());
+        int worldX = chunkX << 4;
+        int worldZ = chunkZ << 4;
+        for (int row = 0; row < 16; row++) {
+            int rowOffset = row * 16;
+            int sampleZ = worldZ + row;
+            for (int column = 0; column < 16; column++) {
+                target[rowOffset + column] = chunk.get(worldX + column, sampleZ, resolver);
+            }
+        }
+    }
+
     public long getSize() {
         return chunks.size() * 256L;
     }
