@@ -36,7 +36,8 @@ public class ReactiveFolder {
         checkCycle++;
         boolean modified = false;
 
-        if (checkCycle % 3 == 0 ? fw.checkModified() : fw.checkModifiedFast()) {
+        boolean detected = checkCycle % 3 == 0 ? fw.checkModified() : fw.checkModifiedFast();
+        if (detected) {
             modified = matchesAny(fw.getCreated()) || matchesAny(fw.getChanged()) || matchesAny(fw.getDeleted());
         }
 
@@ -44,7 +45,7 @@ public class ReactiveFolder {
             hotload.accept(fw.getCreated(), fw.getChanged(), fw.getDeleted());
         }
 
-        return fw.checkModified();
+        return modified;
     }
 
     private boolean matchesAny(KList<File> files) {

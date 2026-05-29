@@ -11,16 +11,27 @@ import java.util.concurrent.locks.ReentrantLock;
 
 public abstract class FlaggedChunk {
     private final AtomicBooleanArray flags = new AtomicBooleanArray(MantleFlag.MAX_ORDINAL + 1);
-    private final ReentrantLock[] locks;
+    private volatile ReentrantLock[] locks;
 
     protected FlaggedChunk() {
-        this.locks = new ReentrantLock[flags.length()];
-        for (int i = 0; i < locks.length; i++) {
-            locks[i] = new ReentrantLock();
-        }
     }
 
     public abstract boolean isClosed();
+
+    private ReentrantLock[] ensureLocks() {
+        ReentrantLock[] arr = locks;
+        if (arr != null) return arr;
+        synchronized (this) {
+            arr = locks;
+            if (arr != null) return arr;
+            arr = new ReentrantLock[flags.length()];
+            for (int i = 0; i < arr.length; i++) {
+                arr[i] = new ReentrantLock();
+            }
+            locks = arr;
+            return arr;
+        }
+    }
 
     protected void copyFrom(FlaggedChunk other, Runnable action) {
         lockAll();
@@ -54,7 +65,7 @@ public abstract class FlaggedChunk {
         }
 
         int index = flag.ordinal();
-        ReentrantLock lock = locks[index];
+        ReentrantLock lock = ensureLocks()[index];
         lock.lock();
         try {
             if (isFlagged(flag)) {
@@ -126,14 +137,17 @@ public abstract class FlaggedChunk {
     }
 
     private void lockAll() {
-        for (ReentrantLock lock : locks) {
+        ReentrantLock[] arr = ensureLocks();
+        for (ReentrantLock lock : arr) {
             lock.lock();
         }
     }
 
     private void unlockAll() {
-        for (int i = locks.length - 1; i >= 0; i--) {
-            locks[i].unlock();
+        ReentrantLock[] arr = locks;
+        if (arr == null) return;
+        for (int i = arr.length - 1; i >= 0; i--) {
+            arr[i].unlock();
         }
     }
 }

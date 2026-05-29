@@ -9,67 +9,91 @@ import java.util.function.BiFunction;
  * {@code <prefix>.cache.fast} and {@code <prefix>.cache.dynamic}.
  */
 public class ChunkCache2DAtomic<T> {
-    private static final VarHandle AA = MethodHandles.arrayElementVarHandle(Entry[].class);
+    private static final VarHandle VALUE_HANDLE = MethodHandles.arrayElementVarHandle(Object[].class);
+    private static final VarHandle STATE_HANDLE = MethodHandles.arrayElementVarHandle(byte[].class);
+    private static final byte STATE_EMPTY = 0;
+    private static final byte STATE_COMPUTING = 1;
+    private static final byte STATE_READY = 2;
 
     private final boolean fast;
     private final boolean dynamic;
-    private final Entry<T>[] cache;
+    private final Object[] values;
+    private final byte[] states;
 
-    @SuppressWarnings("unchecked")
     public ChunkCache2DAtomic(String propertyPrefix) {
         this.fast = Boolean.getBoolean(propertyPrefix + ".cache.fast");
         this.dynamic = Boolean.getBoolean(propertyPrefix + ".cache.dynamic");
-        this.cache = new Entry[256];
-
-        if (dynamic) {
-            return;
-        }
-
-        for (int i = 0; i < cache.length; i++) {
-            cache[i] = fast ? new FastEntry<>() : new Entry<>();
-        }
+        this.values = new Object[256];
+        this.states = new byte[256];
     }
 
     @SuppressWarnings("unchecked")
     protected T getComputed(int x, int z, BiFunction<Integer, Integer, T> resolver) {
-        int key = ((z & 15) * 16) + (x & 15);
-        Entry<T> entry = cache[key];
-
-        if (entry == null) {
-            entry = fast ? new FastEntry<>() : new Entry<>();
-            if (!AA.compareAndSet(cache, key, null, entry)) {
-                entry = (Entry<T>) AA.getVolatile(cache, key);
-            }
+        int key = ((z & 15) << 4) | (x & 15);
+        Object cached = VALUE_HANDLE.getAcquire(values, key);
+        if (cached != null) {
+            return (T) cached;
         }
 
-        return entry.compute(x, z, resolver);
+        return compute(key, x, z, resolver);
     }
 
-    private static class Entry<T> {
-        protected volatile T value;
-
-        protected T compute(int x, int z, BiFunction<Integer, Integer, T> resolver) {
-            if (value != null) {
-                return value;
-            }
-
-            synchronized (this) {
-                if (value == null) {
-                    value = resolver.apply(x, z);
+    protected void fillComputed(int worldX, int worldZ, Object[] target, BiFunction<Integer, Integer, T> resolver) {
+        for (int row = 0; row < 16; row++) {
+            int rowOffset = row << 4;
+            int sampleZ = worldZ + row;
+            for (int column = 0; column < 16; column++) {
+                int key = rowOffset + column;
+                Object cached = VALUE_HANDLE.getAcquire(values, key);
+                if (cached != null) {
+                    target[key] = cached;
+                    continue;
                 }
-                return value;
+
+                target[key] = compute(key, worldX + column, sampleZ, resolver);
             }
         }
     }
 
-    private static class FastEntry<T> extends Entry<T> {
-        @Override
-        protected T compute(int x, int z, BiFunction<Integer, Integer, T> resolver) {
-            if (value != null) {
-                return value;
+    @SuppressWarnings("unchecked")
+    private T compute(int key, int x, int z, BiFunction<Integer, Integer, T> resolver) {
+        if (fast) {
+            T resolvedFast = resolver.apply(x, z);
+            if (resolvedFast != null) {
+                VALUE_HANDLE.compareAndSet(values, key, null, resolvedFast);
+                STATE_HANDLE.compareAndSet(states, key, STATE_EMPTY, STATE_READY);
             }
 
-            return value = resolver.apply(x, z);
+            return resolvedFast;
+        }
+
+        int spins = dynamic ? 8 : 32;
+        while (true) {
+            Object cached = VALUE_HANDLE.getAcquire(values, key);
+            if (cached != null) {
+                return (T) cached;
+            }
+
+            byte state = (byte) STATE_HANDLE.getAcquire(states, key);
+            if (state == STATE_EMPTY && STATE_HANDLE.compareAndSet(states, key, STATE_EMPTY, STATE_COMPUTING)) {
+                T resolved = resolver.apply(x, z);
+                if (resolved != null) {
+                    VALUE_HANDLE.setRelease(values, key, resolved);
+                    STATE_HANDLE.setRelease(states, key, STATE_READY);
+                } else {
+                    STATE_HANDLE.setRelease(states, key, STATE_EMPTY);
+                }
+
+                return resolved;
+            }
+
+            if (spins > 0) {
+                spins--;
+                Thread.onSpinWait();
+                continue;
+            }
+
+            Thread.yield();
         }
     }
 }

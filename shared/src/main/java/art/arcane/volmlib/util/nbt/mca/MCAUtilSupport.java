@@ -18,6 +18,8 @@
 
 package art.arcane.volmlib.util.nbt.mca;
 
+import art.arcane.volmlib.util.math.PowerOfTwoCoordinates;
+
 import java.io.File;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -41,27 +43,27 @@ public final class MCAUtilSupport {
     }
 
     public static int blockToChunk(int block) {
-        return block >> 4;
+        return PowerOfTwoCoordinates.blockToChunkFloor(block);
     }
 
     public static int blockToRegion(int block) {
-        return block >> 9;
+        return PowerOfTwoCoordinates.blockToRegionFloor(block);
     }
 
     public static int chunkToRegion(int chunk) {
-        return chunk >> 5;
+        return PowerOfTwoCoordinates.chunkToRegion(chunk);
     }
 
     public static int regionToChunk(int region) {
-        return region << 5;
+        return PowerOfTwoCoordinates.regionToChunk(region);
     }
 
     public static int regionToBlock(int region) {
-        return region << 9;
+        return PowerOfTwoCoordinates.regionToBlock(region);
     }
 
     public static int chunkToBlock(int chunk) {
-        return chunk << 4;
+        return PowerOfTwoCoordinates.chunkToBlock(chunk);
     }
 
     public static int[] parseRegionCoordinates(File file) {

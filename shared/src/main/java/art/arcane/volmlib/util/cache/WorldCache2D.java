@@ -12,6 +12,7 @@ public class WorldCache2D<T> {
     private final ConcurrentLinkedHashMap<Long, ChunkCache2D<T>> chunks;
     private final Function2<Integer, Integer, T> resolver;
     private final Supplier<? extends ChunkCache2D<T>> chunkSupplier;
+    private final ThreadLocal<LocalChunk<T>> localChunk = ThreadLocal.withInitial(LocalChunk::new);
 
     public WorldCache2D(Function2<Integer, Integer, T> resolver, Supplier<? extends ChunkCache2D<T>> chunkSupplier) {
         this(resolver, 1024, chunkSupplier);
@@ -28,7 +29,15 @@ public class WorldCache2D<T> {
     }
 
     public T get(int x, int z) {
-        ChunkCache2D<T> chunk = chunks.computeIfAbsent(CacheKey.key(x >> 4, z >> 4), $ -> chunkSupplier.get());
+        long key = CacheKey.key(x >> 4, z >> 4);
+        LocalChunk<T> local = localChunk.get();
+        ChunkCache2D<T> chunk = local.chunk;
+        if (chunk == null || local.key != key) {
+            chunk = chunks.computeIfAbsent(key, $ -> chunkSupplier.get());
+            local.key = key;
+            local.chunk = chunk;
+        }
+
         return chunk.get(x, z, resolver);
     }
 
@@ -37,16 +46,14 @@ public class WorldCache2D<T> {
             throw new IllegalArgumentException("Expected a 16x16 target array.");
         }
 
-        ChunkCache2D<T> chunk = chunks.computeIfAbsent(CacheKey.key(chunkX, chunkZ), $ -> chunkSupplier.get());
+        long key = CacheKey.key(chunkX, chunkZ);
+        ChunkCache2D<T> chunk = chunks.computeIfAbsent(key, $ -> chunkSupplier.get());
+        LocalChunk<T> local = localChunk.get();
+        local.key = key;
+        local.chunk = chunk;
         int worldX = chunkX << 4;
         int worldZ = chunkZ << 4;
-        for (int row = 0; row < 16; row++) {
-            int rowOffset = row * 16;
-            int sampleZ = worldZ + row;
-            for (int column = 0; column < 16; column++) {
-                target[rowOffset + column] = chunk.get(worldX + column, sampleZ, resolver);
-            }
-        }
+        chunk.fill(worldX, worldZ, target, resolver);
     }
 
     public long getSize() {
@@ -55,5 +62,10 @@ public class WorldCache2D<T> {
 
     public long getMaxSize() {
         return chunks.capacity() * 256L;
+    }
+
+    private static final class LocalChunk<T> {
+        private long key = Long.MIN_VALUE;
+        private ChunkCache2D<T> chunk;
     }
 }

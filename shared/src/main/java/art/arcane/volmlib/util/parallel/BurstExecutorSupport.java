@@ -8,6 +8,8 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.ForkJoinWorkerThread;
 import java.util.concurrent.Future;
 import java.util.function.Consumer;
 
@@ -32,7 +34,7 @@ public class BurstExecutorSupport {
 
     @SuppressWarnings("UnusedReturnValue")
     public Future<?> queue(Runnable r) {
-        if (!multicore) {
+        if (shouldRunInline()) {
             r.run();
             return CompletableFuture.completedFuture(null);
         }
@@ -45,7 +47,7 @@ public class BurstExecutorSupport {
     }
 
     public BurstExecutorSupport queue(List<Runnable> r) {
-        if (!multicore) {
+        if (shouldRunInline()) {
             for (Runnable i : new KList<>(r)) {
                 i.run();
             }
@@ -63,7 +65,7 @@ public class BurstExecutorSupport {
     }
 
     public BurstExecutorSupport queue(Runnable[] r) {
-        if (!multicore) {
+        if (shouldRunInline()) {
             for (Runnable i : new KList<>(r)) {
                 i.run();
             }
@@ -81,21 +83,22 @@ public class BurstExecutorSupport {
     }
 
     public void complete() {
-        if (!multicore) {
+        if (shouldRunInline()) {
             return;
         }
 
+        List<Future<?>> queued;
         synchronized (futures) {
             if (futures.isEmpty()) {
                 return;
             }
+            queued = new KList<>(futures);
+            futures.clear();
+        }
 
+        for (Future<?> i : queued) {
             try {
-                for (Future<?> i : futures) {
-                    i.get();
-                }
-
-                futures.clear();
+                i.get();
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 errorHandler.accept(e);
@@ -103,5 +106,24 @@ public class BurstExecutorSupport {
                 errorHandler.accept(e);
             }
         }
+    }
+
+    private boolean shouldRunInline() {
+        if (!multicore) {
+            return true;
+        }
+
+        if (!(executor instanceof ForkJoinPool)) {
+            return false;
+        }
+        ForkJoinPool pool = (ForkJoinPool) executor;
+
+        Thread thread = Thread.currentThread();
+        if (!(thread instanceof ForkJoinWorkerThread)) {
+            return false;
+        }
+        ForkJoinWorkerThread worker = (ForkJoinWorkerThread) thread;
+
+        return worker.getPool() == pool;
     }
 }

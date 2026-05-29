@@ -55,6 +55,15 @@ public final class DirectorThemes {
             "minecraft:block.respawn_anchor.deplete"
     );
 
+    public static final DirectorTheme WORMHOLES = new DirectorTheme(
+            DirectorProduct.WORMHOLES,
+            "#6e6e6e",
+            "#a8a8a8",
+            "#d0d0d0",
+            "minecraft:block.amethyst_cluster.break",
+            "minecraft:block.note_block.bass"
+    );
+
     private DirectorThemes() {
     }
 
@@ -70,6 +79,7 @@ public final class DirectorThemes {
             case BILE -> BILE;
             case HIDDENORE -> HIDDENORE;
             case HOLOUI -> HOLOUI;
+            case WORMHOLES -> WORMHOLES;
         };
     }
 }

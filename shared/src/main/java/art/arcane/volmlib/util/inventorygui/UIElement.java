@@ -127,27 +127,39 @@ public class UIElement implements Element {
         try {
             switch (event) {
                 case DRAG_INTO -> {
-                    eDraggedInto.run(context);
+                    if (eDraggedInto != null) {
+                        eDraggedInto.run(context);
+                    }
                     return this;
                 }
                 case LEFT -> {
-                    eLeft.run(context);
+                    if (eLeft != null) {
+                        eLeft.run(context);
+                    }
                     return this;
                 }
                 case OTHER_DRAG_INTO -> {
-                    eOtherDraggedInto.run(context);
+                    if (eOtherDraggedInto != null) {
+                        eOtherDraggedInto.run(context);
+                    }
                     return this;
                 }
                 case RIGHT -> {
-                    eRight.run(context);
+                    if (eRight != null) {
+                        eRight.run(context);
+                    }
                     return this;
                 }
                 case SHIFT_LEFT -> {
-                    eShiftLeft.run(context);
+                    if (eShiftLeft != null) {
+                        eShiftLeft.run(context);
+                    }
                     return this;
                 }
                 case SHIFT_RIGHT -> {
-                    eShiftRight.run(context);
+                    if (eShiftRight != null) {
+                        eShiftRight.run(context);
+                    }
                     return this;
                 }
             }

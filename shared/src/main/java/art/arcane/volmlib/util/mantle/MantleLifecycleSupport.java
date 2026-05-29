@@ -13,8 +13,9 @@ public final class MantleLifecycleSupport {
 
     public static double adjustIdleDuration(double baseIdleDuration, int loadedRegions, int tectonicLimit) {
         double idleDuration = baseIdleDuration;
+        double minimumIdleDuration = Math.max(500D, Math.min(baseIdleDuration, 4000D));
         if (loadedRegions > tectonicLimit) {
-            idleDuration = Math.max(idleDuration - (1000 * (((loadedRegions - tectonicLimit) / (double) tectonicLimit) * 100) * 0.4), 4000);
+            idleDuration = Math.max(idleDuration - (1000 * (((loadedRegions - tectonicLimit) / (double) tectonicLimit) * 100) * 0.4), minimumIdleDuration);
         }
         return idleDuration;
     }

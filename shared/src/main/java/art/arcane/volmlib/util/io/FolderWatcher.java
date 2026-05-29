@@ -59,6 +59,9 @@ public class FolderWatcher extends FileWatcher {
                     created.add(i);
                 } else {
                     FolderWatcher fw = watchers.get(i);
+                    if (fw == null) {
+                        continue;
+                    }
                     if (fw.checkModified()) {
                         changed.add(fw.file);
                     }
@@ -87,6 +90,9 @@ public class FolderWatcher extends FileWatcher {
         if (file.isDirectory()) {
             for (File i : watchers.keySet()) {
                 FolderWatcher fw = watchers.get(i);
+                if (fw == null) {
+                    continue;
+                }
                 if (fw.checkModifiedFast()) {
                     changed.add(fw.file);
                 }
