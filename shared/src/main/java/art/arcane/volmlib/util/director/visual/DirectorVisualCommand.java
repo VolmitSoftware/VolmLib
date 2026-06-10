@@ -156,12 +156,21 @@ public final class DirectorVisualCommand {
     }
 
     private static boolean isHelpToken(String arg) {
-        return arg != null && arg.toLowerCase().startsWith("help=");
+        if (arg == null) {
+            return false;
+        }
+
+        String lowered = arg.trim().toLowerCase();
+        return lowered.equals("help") || lowered.equals("?") || lowered.startsWith("help=");
     }
 
     private static int readHelpPage(String arg) {
+        if (arg == null || !arg.trim().toLowerCase().startsWith("help=")) {
+            return 0;
+        }
+
         try {
-            int page = Integer.parseInt(arg.substring("help=".length()).trim());
+            int page = Integer.parseInt(arg.trim().substring("help=".length()).trim());
             return Math.max(0, page - 1);
         } catch (Throwable ignored) {
             return 0;

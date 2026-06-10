@@ -29,27 +29,12 @@ public abstract class MantleAccessSupport<P> {
     }
 
     protected P accessRegion(int x, int z) {
-        boolean trim = trimSemaphore.tryAcquire();
         boolean unload = unloadSemaphore.tryAcquire();
         try {
-            if (!trim || !unload) {
-                P loaded = getLoadedRegion(x, z);
-                if (loaded != null && !isRegionClosed(loaded)) {
-                    markRegionUsed(x, z, loaded);
-                    return loaded;
-                }
-
-                try {
-                    return loadRegionBlocking(x, z);
-                } catch (Throwable e) {
-                    report(e);
-                }
-            } else {
-                P p = getLoadedRegion(x, z);
-                if (p != null && !isRegionClosed(p)) {
-                    markRegionUsed(x, z, p);
-                    return p;
-                }
+            P loaded = getLoadedRegion(x, z);
+            if (loaded != null && !isRegionClosed(loaded)) {
+                markRegionUsed(x, z, loaded);
+                return loaded;
             }
 
             try {
@@ -62,9 +47,6 @@ public abstract class MantleAccessSupport<P> {
                 report(e);
             }
         } finally {
-            if (trim) {
-                trimSemaphore.release();
-            }
             if (unload) {
                 unloadSemaphore.release();
             }

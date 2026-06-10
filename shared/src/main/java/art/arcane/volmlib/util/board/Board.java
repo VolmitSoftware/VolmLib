@@ -190,7 +190,15 @@ public class Board {
     public void resetScoreboard() {
         ready = false;
         if (useNormalBackend) {
-            player.setScoreboard(Bukkit.getScoreboardManager().getMainScoreboard());
+            if (objective != null) {
+                try {
+                    objective.unregister();
+                } catch (Throwable ignored) {
+                }
+            }
+            if (Bukkit.getScoreboardManager() != null) {
+                player.setScoreboard(Bukkit.getScoreboardManager().getMainScoreboard());
+            }
             return;
         }
         packetSidebar.reset();

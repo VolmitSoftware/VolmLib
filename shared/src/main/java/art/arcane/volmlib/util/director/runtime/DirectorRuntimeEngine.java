@@ -145,8 +145,12 @@ public final class DirectorRuntimeEngine implements DirectorCommandEngine {
         contextMap.put(DirectorInvocation.class, invocation);
 
         MappingResult mapping = mapArguments(node, rawArgs);
-        for (String warning : mapping.warnings) {
-            sender.sendMessage(warning);
+        if (!mapping.errors.isEmpty()) {
+            for (String error : mapping.errors) {
+                sender.sendMessage(error);
+            }
+            sender.sendMessage(usage(node));
+            return DirectorExecutionResult.failure(String.join("; ", mapping.errors));
         }
 
         Object[] params = new Object[node.getParameters().size()];
@@ -223,7 +227,7 @@ public final class DirectorRuntimeEngine implements DirectorCommandEngine {
 
     private MappingResult mapArguments(DirectorRuntimeNode node, List<String> args) {
         Map<DirectorRuntimeParameter, String> mapped = new LinkedHashMap<>();
-        List<String> warnings = new ArrayList<>();
+        List<String> errors = new ArrayList<>();
         List<String> positional = new ArrayList<>();
 
         for (String token : args) {
@@ -240,10 +244,7 @@ public final class DirectorRuntimeEngine implements DirectorCommandEngine {
                 if (parameter != null) {
                     mapped.putIfAbsent(parameter, value);
                 } else {
-                    warnings.add("Unknown parameter key: " + key);
-                    if (!value.isEmpty()) {
-                        positional.add(value);
-                    }
+                    errors.add("Unknown parameter key: " + key);
                 }
             } else {
                 positional.add(token);
@@ -256,7 +257,8 @@ public final class DirectorRuntimeEngine implements DirectorCommandEngine {
                 continue;
             }
 
-            if (parameter.getDescriptor().isContextual()) {
+            DirectorParameterDescriptor descriptor = parameter.getDescriptor();
+            if (descriptor.isContextual() || !descriptor.isRequired()) {
                 continue;
             }
 
@@ -266,10 +268,28 @@ public final class DirectorRuntimeEngine implements DirectorCommandEngine {
         }
 
         for (int i = position; i < positional.size(); i++) {
-            warnings.add("Unknown argument: " + positional.get(i));
+            errors.add("Unexpected argument \"" + positional.get(i) + "\". Optional parameters must be keyed, e.g. seed=123");
         }
 
-        return new MappingResult(mapped, warnings);
+        return new MappingResult(mapped, errors);
+    }
+
+    private String usage(DirectorRuntimeNode node) {
+        StringBuilder out = new StringBuilder("Usage: ").append(node.path());
+        for (DirectorRuntimeParameter parameter : node.getParameters()) {
+            DirectorParameterDescriptor descriptor = parameter.getDescriptor();
+            if (descriptor.isContextual()) {
+                continue;
+            }
+
+            if (descriptor.isRequired()) {
+                out.append(" <").append(descriptor.getName()).append('>');
+            } else {
+                out.append(" [").append(descriptor.getName()).append("=...]");
+            }
+        }
+
+        return out.toString();
     }
 
     private ValueResult parseValue(DirectorRuntimeParameter parameter, String raw) {
@@ -402,9 +422,11 @@ public final class DirectorRuntimeEngine implements DirectorCommandEngine {
         List<String> previous = args.size() <= 1 ? List.of() : args.subList(0, args.size() - 1);
 
         Set<DirectorRuntimeParameter> consumed = new LinkedHashSet<>();
+        int positionalCount = 0;
         for (String token : previous) {
             int split = token.indexOf('=');
             if (split < 0) {
+                positionalCount++;
                 continue;
             }
             String key = token.substring(0, split);
@@ -412,6 +434,20 @@ public final class DirectorRuntimeEngine implements DirectorCommandEngine {
             if (parameter != null) {
                 consumed.add(parameter);
             }
+        }
+
+        for (DirectorRuntimeParameter parameter : node.getParameters()) {
+            if (positionalCount <= 0) {
+                break;
+            }
+
+            DirectorParameterDescriptor descriptor = parameter.getDescriptor();
+            if (descriptor.isContextual() || !descriptor.isRequired() || consumed.contains(parameter)) {
+                continue;
+            }
+
+            consumed.add(parameter);
+            positionalCount--;
         }
 
         Set<String> suggestions = new LinkedHashSet<>();
@@ -456,7 +492,8 @@ public final class DirectorRuntimeEngine implements DirectorCommandEngine {
 
         DirectorRuntimeParameter nextUnconsumed = null;
         for (DirectorRuntimeParameter parameter : node.getParameters()) {
-            if (!consumed.contains(parameter) && !parameter.getDescriptor().isContextual()) {
+            DirectorParameterDescriptor descriptor = parameter.getDescriptor();
+            if (!consumed.contains(parameter) && !descriptor.isContextual() && descriptor.isRequired()) {
                 nextUnconsumed = parameter;
                 break;
             }
@@ -695,7 +732,7 @@ public final class DirectorRuntimeEngine implements DirectorCommandEngine {
     private record Traversal(DirectorRuntimeNode node, List<String> remainingArgs) {
     }
 
-    private record MappingResult(Map<DirectorRuntimeParameter, String> mappedValues, List<String> warnings) {
+    private record MappingResult(Map<DirectorRuntimeParameter, String> mappedValues, List<String> errors) {
     }
 
     private record ValueResult(boolean valid, Object value) {

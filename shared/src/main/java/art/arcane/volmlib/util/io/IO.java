@@ -173,6 +173,43 @@ public class IO {
         return 0;
     }
 
+    public static long hashRecursiveMeta(File... bases) {
+        LinkedList<File> files = new LinkedList<>();
+        Set<File> processed = new HashSet<>();
+        Arrays.parallelSort(bases, Comparator.comparing(File::getName));
+        files.addAll(Arrays.asList(bases));
+
+        CRC32 crc = new CRC32();
+        try {
+            while (!files.isEmpty()) {
+                File file = files.removeFirst();
+                if (!processed.add(file)) {
+                    continue;
+                }
+
+                if (file.isDirectory()) {
+                    File[] arr = file.listFiles();
+                    if (arr == null) {
+                        continue;
+                    }
+
+                    Arrays.parallelSort(arr, Comparator.comparing(File::getName));
+                    files.addAll(Arrays.asList(arr));
+                    continue;
+                }
+
+                crc.update((file.getPath() + ":" + file.lastModified() + ":" + file.length())
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            }
+
+            return crc.getValue();
+        } catch (Throwable e) {
+            e.printStackTrace();
+        }
+
+        return 0;
+    }
+
     public static InputStream readDeterministic(File file) throws IOException {
         if (!file.getName().endsWith(".json")) {
             return new FileInputStream(file);

@@ -27,6 +27,10 @@ public class FolderWatcher extends FileWatcher {
             File[] files = file.listFiles();
             if (files != null) {
                 for (File i : files) {
+                    if (i.isDirectory() && i.getName().startsWith(".")) {
+                        continue;
+                    }
+
                     if (!watchers.containsKey(i)) {
                         watchers.put(i, new FolderWatcher(i));
                     }
