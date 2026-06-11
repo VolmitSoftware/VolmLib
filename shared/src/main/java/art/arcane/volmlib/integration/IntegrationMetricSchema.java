@@ -15,6 +15,15 @@ public final class IntegrationMetricSchema {
     public static final String ADAPT_ABILITY_CHECK_OPS_TICK = "adapt.ability-check-ops-tick";
     public static final String ADAPT_WORLD_POLICY_LATENCY = "adapt.world-policy-latency";
 
+    public static final String WORMHOLES_PORTALS = "wormholes.portals";
+    public static final String WORMHOLES_PROJECTIONS_ACTIVE = "wormholes.projections-active";
+    public static final String WORMHOLES_PROJECTION_OBSERVERS = "wormholes.projection-observers";
+    public static final String WORMHOLES_PROJECTION_RENDER_MS = "wormholes.projection-render-ms";
+    public static final String WORMHOLES_BLOCK_CHANGES_PER_SECOND = "wormholes.block-changes-per-second";
+    public static final String WORMHOLES_PACKETS_PER_SECOND = "wormholes.packets-per-second";
+    public static final String WORMHOLES_SPOOFED_ENTITIES = "wormholes.spoofed-entities";
+    public static final String WORMHOLES_TRAVERSALS_PER_MINUTE = "wormholes.traversals-per-minute";
+
     private static final Map<String, IntegrationMetricDescriptor> DESCRIPTORS = buildDescriptors();
 
     private IntegrationMetricSchema() {
@@ -52,6 +61,19 @@ public final class IntegrationMetricSchema {
 
     public static Set<String> adaptKeys() {
         return Set.of(ADAPT_SESSION_LOAD, ADAPT_ABILITY_OPS, ADAPT_ABILITY_CHECK_OPS, ADAPT_ABILITY_CHECK_OPS_TICK, ADAPT_WORLD_POLICY_LATENCY);
+    }
+
+    public static Set<String> wormholesKeys() {
+        return Set.of(
+                WORMHOLES_PORTALS,
+                WORMHOLES_PROJECTIONS_ACTIVE,
+                WORMHOLES_PROJECTION_OBSERVERS,
+                WORMHOLES_PROJECTION_RENDER_MS,
+                WORMHOLES_BLOCK_CHANGES_PER_SECOND,
+                WORMHOLES_PACKETS_PER_SECOND,
+                WORMHOLES_SPOOFED_ENTITIES,
+                WORMHOLES_TRAVERSALS_PER_MINUTE
+        );
     }
 
     private static Map<String, IntegrationMetricDescriptor> buildDescriptors() {
@@ -105,6 +127,55 @@ public final class IntegrationMetricSchema {
                 IntegrationMetricType.DOUBLE,
                 "ms",
                 Map.of("plugin", "adapt", "domain", "policy")
+        ));
+
+        descriptors.put(WORMHOLES_PORTALS, new IntegrationMetricDescriptor(
+                WORMHOLES_PORTALS,
+                IntegrationMetricType.LONG,
+                "portals",
+                Map.of("plugin", "wormholes", "domain", "portals")
+        ));
+        descriptors.put(WORMHOLES_PROJECTIONS_ACTIVE, new IntegrationMetricDescriptor(
+                WORMHOLES_PROJECTIONS_ACTIVE,
+                IntegrationMetricType.LONG,
+                "portals",
+                Map.of("plugin", "wormholes", "domain", "projection")
+        ));
+        descriptors.put(WORMHOLES_PROJECTION_OBSERVERS, new IntegrationMetricDescriptor(
+                WORMHOLES_PROJECTION_OBSERVERS,
+                IntegrationMetricType.LONG,
+                "players",
+                Map.of("plugin", "wormholes", "domain", "projection")
+        ));
+        descriptors.put(WORMHOLES_PROJECTION_RENDER_MS, new IntegrationMetricDescriptor(
+                WORMHOLES_PROJECTION_RENDER_MS,
+                IntegrationMetricType.DOUBLE,
+                "ms-per-second",
+                Map.of("plugin", "wormholes", "domain", "projection")
+        ));
+        descriptors.put(WORMHOLES_BLOCK_CHANGES_PER_SECOND, new IntegrationMetricDescriptor(
+                WORMHOLES_BLOCK_CHANGES_PER_SECOND,
+                IntegrationMetricType.DOUBLE,
+                "blocks-per-second",
+                Map.of("plugin", "wormholes", "domain", "network")
+        ));
+        descriptors.put(WORMHOLES_PACKETS_PER_SECOND, new IntegrationMetricDescriptor(
+                WORMHOLES_PACKETS_PER_SECOND,
+                IntegrationMetricType.DOUBLE,
+                "packets-per-second",
+                Map.of("plugin", "wormholes", "domain", "network")
+        ));
+        descriptors.put(WORMHOLES_SPOOFED_ENTITIES, new IntegrationMetricDescriptor(
+                WORMHOLES_SPOOFED_ENTITIES,
+                IntegrationMetricType.LONG,
+                "entities",
+                Map.of("plugin", "wormholes", "domain", "projection")
+        ));
+        descriptors.put(WORMHOLES_TRAVERSALS_PER_MINUTE, new IntegrationMetricDescriptor(
+                WORMHOLES_TRAVERSALS_PER_MINUTE,
+                IntegrationMetricType.DOUBLE,
+                "traversals-per-minute",
+                Map.of("plugin", "wormholes", "domain", "travel")
         ));
 
         return Map.copyOf(descriptors);

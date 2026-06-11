@@ -170,10 +170,90 @@ public class UIElement implements Element {
         return this;
     }
 
+    private static final int LORE_WRAP_VISIBLE_WIDTH = 42;
+
     @Override
     public Element addLore(String loreLine) {
-        getLore().add(loreLine);
+        if (loreLine == null) {
+            getLore().add(loreLine);
+            return this;
+        }
+
+        if (loreLine.indexOf('\n') >= 0) {
+            for (String line : loreLine.split("\n", -1)) {
+                addWrappedLore(line);
+            }
+
+            return this;
+        }
+
+        addWrappedLore(loreLine);
         return this;
+    }
+
+    private void addWrappedLore(String line) {
+        String carry = "";
+        String rest = line;
+
+        while (true) {
+            String candidate = carry.isEmpty() ? rest : carry + rest;
+            int length = candidate.length();
+            int visible = 0;
+            int breakAt = -1;
+            String breakColor = "";
+            StringBuilder color = new StringBuilder();
+            int i = 0;
+
+            while (i < length) {
+                char c = candidate.charAt(i);
+
+                if (c == '§' && i + 1 < length) {
+                    char code = Character.toLowerCase(candidate.charAt(i + 1));
+
+                    if (code == 'x') {
+                        int end = Math.min(length, i + 14);
+                        color.setLength(0);
+                        color.append(candidate, i, end);
+                        i = end;
+                        continue;
+                    }
+
+                    if ((code >= '0' && code <= '9') || (code >= 'a' && code <= 'f')) {
+                        color.setLength(0);
+                        color.append(c).append(candidate.charAt(i + 1));
+                    } else if (code == 'r') {
+                        color.setLength(0);
+                    } else {
+                        color.append(c).append(candidate.charAt(i + 1));
+                    }
+
+                    i += 2;
+                    continue;
+                }
+
+                if (c == ' ' && visible <= LORE_WRAP_VISIBLE_WIDTH && i > 0) {
+                    breakAt = i;
+                    breakColor = color.toString();
+                }
+
+                visible++;
+
+                if (visible > LORE_WRAP_VISIBLE_WIDTH && breakAt >= 0) {
+                    break;
+                }
+
+                i++;
+            }
+
+            if (visible <= LORE_WRAP_VISIBLE_WIDTH || breakAt < 0) {
+                getLore().add(candidate);
+                return;
+            }
+
+            getLore().add(candidate.substring(0, breakAt));
+            carry = breakColor;
+            rest = candidate.substring(breakAt + 1);
+        }
     }
 
     @Override
