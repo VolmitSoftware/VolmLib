@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
@@ -39,8 +40,8 @@ public class ConfigHotloadEngine {
 
     private final List<WatchedFile> fileWatchers = new ArrayList<>();
     private final List<FolderWatcher> directoryWatchers = new ArrayList<>();
-    private final Map<String, String> knownSignatures = new HashMap<>();
-    private final Map<String, String> knownContents = new HashMap<>();
+    private final Map<String, String> knownSignatures = new ConcurrentHashMap<>();
+    private final Map<String, String> knownContents = new ConcurrentHashMap<>();
 
     private int fullWatchScanEveryPolls = 1;
     private int fullWatchScanCountdown = 0;
@@ -143,6 +144,14 @@ public class ConfigHotloadEngine {
 
         touched.removeIf(file -> file == null || !managedConfigFilePredicate.test(file));
         return touched;
+    }
+
+    public void noteSelfWrite(File file, String rawContent) {
+        if (file == null || !managedConfigFilePredicate.test(file)) {
+            return;
+        }
+
+        updateKnownSnapshot(file, normalize(rawContent));
     }
 
     public boolean processFileChange(File file,
