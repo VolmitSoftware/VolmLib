@@ -8,7 +8,17 @@ import java.util.Map;
 import java.util.Objects;
 
 public class IrisMatter implements Matter {
+    private static final boolean BUKKIT_PRESENT = detectBukkit();
     private static final KMap<Class<?>, Class<? extends MatterSlice<?>>> SLICERS = buildSlicers();
+
+    private static boolean detectBukkit() {
+        try {
+            Class.forName("org.bukkit.block.data.BlockData", false, IrisMatter.class.getClassLoader());
+            return true;
+        } catch (ClassNotFoundException e) {
+            return false;
+        }
+    }
 
     private final MatterHeader header;
     private final int width;
@@ -30,8 +40,10 @@ public class IrisMatter implements Matter {
 
     private static KMap<Class<?>, Class<? extends MatterSlice<?>>> buildSlicers() {
         KMap<Class<?>, Class<? extends MatterSlice<?>>> slicers = new KMap<>();
-        register(slicers, new BiomeInjectMatter());
-        register(slicers, new BlockMatter());
+        if (BUKKIT_PRESENT) {
+            register(slicers, new BiomeInjectMatter());
+            register(slicers, new BlockMatter());
+        }
         register(slicers, new BooleanMatter());
         register(slicers, new CavernMatter());
         register(slicers, new CompoundMatter());
@@ -99,7 +111,7 @@ public class IrisMatter implements Matter {
     public <T> MatterSlice<T> createSlice(Class<T> type, Matter matter) {
         Class<? extends MatterSlice<?>> slicer = SLICERS.get(type);
 
-        if (slicer == null && BlockData.class.isAssignableFrom(type)) {
+        if (slicer == null && BUKKIT_PRESENT && BlockData.class.isAssignableFrom(type)) {
             slicer = SLICERS.get(BlockData.class);
         }
 

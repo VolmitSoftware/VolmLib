@@ -134,6 +134,10 @@ public interface MatterSlice<T> extends HunkLike<T>, Writable<T> {
     default Class<?> getClass(Object w) {
         Class<?> c = w.getClass();
 
+        if (!Matter.BukkitDetection.PRESENT) {
+            return c;
+        }
+
         if (w instanceof World) {
             c = World.class;
         } else if (w instanceof BlockData) {

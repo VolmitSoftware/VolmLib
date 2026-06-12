@@ -16,6 +16,22 @@ import java.util.function.Function;
 public interface Matter {
     int VERSION = 1;
 
+    final class BukkitDetection {
+        static final boolean PRESENT = detect();
+
+        private BukkitDetection() {
+        }
+
+        private static boolean detect() {
+            try {
+                Class.forName("org.bukkit.World", false, BukkitDetection.class.getClassLoader());
+                return true;
+            } catch (ClassNotFoundException e) {
+                return false;
+            }
+        }
+    }
+
     static Matter read(File file) throws IOException {
         try (InputStream in = new FileInputStream(file)) {
             return read(in);
@@ -107,6 +123,10 @@ public interface Matter {
 
     default Class<?> getClass(Object value) {
         Class<?> type = value.getClass();
+
+        if (!BukkitDetection.PRESENT) {
+            return type;
+        }
 
         if (value instanceof World) {
             type = World.class;
