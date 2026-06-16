@@ -141,6 +141,10 @@ public class DataBits {
 
     public int get(int var0) {
         Validate.inclusiveBetween(0L, (size - 1), var0);
+        return getUnchecked(var0);
+    }
+
+    public int getUnchecked(int var0) {
         int var1 = cellIndex(var0);
         long var2 = this.data.get(var1);
         int var4 = (var0 - var1 * valuesPerLong) * this.bits;

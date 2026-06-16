@@ -19,9 +19,13 @@
 package art.arcane.volmlib.util.hunk.bits;
 
 import art.arcane.volmlib.util.data.Varint;
-import it.unimi.dsi.fastutil.ints.*;
+import it.unimi.dsi.fastutil.ints.Int2IntRBTreeMap;
 
-import java.io.*;
+import java.io.ByteArrayOutputStream;
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
+import java.io.IOException;
+import java.io.OutputStream;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
@@ -39,7 +43,7 @@ public class DataContainer<T> {
     private final Writable<T> writer;
 
     public DataContainer(Writable<T> writer, int length) {
-        var lock = new ReentrantReadWriteLock();
+        ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
         this.read = lock.readLock();
         this.write = lock.writeLock();
 
@@ -50,7 +54,7 @@ public class DataContainer<T> {
     }
 
     public DataContainer(DataInputStream din, Writable<T> writer) throws IOException {
-        var lock = new ReentrantReadWriteLock();
+        ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
         this.read = lock.readLock();
         this.write = lock.writeLock();
 
@@ -169,15 +173,39 @@ public class DataContainer<T> {
     }
 
     public T get(int position) {
+        DataBits localData = data;
+        int id = localData.getUnchecked(position);
+
+        if (id <= 0) {
+            return null;
+        }
+
+        return palette.get(id);
+    }
+
+    public void iteratePresent(IndexedConsumer<T> consumer) {
         read.lock();
         try {
-            int id = data.get(position);
-
-            if (id <= 0) {
-                return null;
+            for (int position = 0; position < length; position++) {
+                int id = data.getUnchecked(position);
+                if (id > 0) {
+                    consumer.accept(position, palette.get(id));
+                }
             }
+        } finally {
+            read.unlock();
+        }
+    }
 
-            return palette.get(id);
+    public void iteratePresentIO(IndexedIOConsumer<T> consumer) throws IOException {
+        read.lock();
+        try {
+            for (int position = 0; position < length; position++) {
+                int id = data.getUnchecked(position);
+                if (id > 0) {
+                    consumer.accept(position, palette.get(id));
+                }
+            }
         } finally {
             read.unlock();
         }
@@ -188,7 +216,7 @@ public class DataContainer<T> {
     }
 
     private void trim() {
-        var ints = new Int2IntRBTreeMap();
+        Int2IntRBTreeMap ints = new Int2IntRBTreeMap();
         for (int i = 0; i < length; i++) {
             int x = data.get(i);
             if (x <= 0) continue;
@@ -198,14 +226,24 @@ public class DataContainer<T> {
             return;
 
         int bits = bits(ints.size() + 1);
-        var trimmed = newPalette(bits);
+        Palette<T> trimmed = newPalette(bits);
         ints.replaceAll((k, v) -> trimmed.add(palette.get(k)));
-        var tBits = new DataBits(bits, length);
+        DataBits tBits = new DataBits(bits, length);
         for (int i = 0; i < length; i++) {
             tBits.set(i, ints.get(data.get(i)));
         }
 
         data = tBits;
         palette = trimmed;
+    }
+
+    @FunctionalInterface
+    public interface IndexedConsumer<T> {
+        void accept(int position, T value);
+    }
+
+    @FunctionalInterface
+    public interface IndexedIOConsumer<T> {
+        void accept(int position, T value) throws IOException;
     }
 }

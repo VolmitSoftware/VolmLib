@@ -61,26 +61,26 @@ public final class IOWorkerRuntimeSupport {
     }
 
     public <T> void writeAtomically(String name, String tempPrefix, String tempSuffix, T value, PlateWriter<T> writer) throws IOException {
-        ioWorkerSupport.withChannel(name, channel -> {
-            File file = ioWorkerSupport.createTempFile(tempPrefix, tempSuffix);
-            try {
-                try (OutputStream raw = new FileOutputStream(file);
-                     OutputStream encoded = codecSupport.encode(raw);
-                     DataOutputStream out = new DataOutputStream(new BufferedOutputStream(encoded))) {
-                    writer.write(value, out);
-                    out.flush();
-                }
+        File file = ioWorkerSupport.createTempFile(tempPrefix, tempSuffix);
+        try {
+            try (OutputStream raw = new FileOutputStream(file);
+                 OutputStream encoded = codecSupport.encode(raw);
+                 DataOutputStream out = new DataOutputStream(new BufferedOutputStream(encoded))) {
+                writer.write(value, out);
+                out.flush();
+            }
 
+            ioWorkerSupport.withChannel(name, channel -> {
                 try (OutputStream out = channel.write()) {
                     Files.copy(file.toPath(), out);
                     out.flush();
                 }
-            } finally {
-                if (!file.delete()) {
-                    file.deleteOnExit();
-                }
+            });
+        } finally {
+            if (!file.delete()) {
+                file.deleteOnExit();
             }
-        });
+        }
     }
 
     public void dumpDecoded(String name, Path target) throws IOException {

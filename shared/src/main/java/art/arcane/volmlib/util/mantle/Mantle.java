@@ -15,6 +15,8 @@ import org.bukkit.Chunk;
 
 import java.io.File;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -33,6 +35,7 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
     private final int worldHeight;
     private final KMap<Long, Long> lastUse;
     private final KMap<Long, P> loadedRegions;
+    private final ConcurrentMap<Long, CompletableFuture<P>> loadingRegions;
     private final HyperLockSupport hyperLock;
     private final AtomicBoolean closed;
     private final MultiBurstSupport ioBurst;
@@ -62,6 +65,7 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
         this.ioBurst = ioBurst;
         this.regionIO = regionIO;
         this.loadedRegions = new KMap<>();
+        this.loadingRegions = new ConcurrentHashMap<>();
         this.lastUse = new KMap<>();
         this.toUnload = new KSet<>();
         this.closed = new AtomicBoolean(false);
@@ -97,6 +101,7 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
     public void clear() {
         loadedRegions.values().forEach(TectonicPlate::clear);
         loadedRegions.clear();
+        loadingRegions.clear();
         lastUse.clear();
         toUnload.clear();
     }
@@ -136,17 +141,51 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
             parallelism = 1;
         }
 
-        final int minRegionX = minChunkX >> 5;
-        final int maxRegionX = maxChunkX >> 5;
-        final int minRegionZ = minChunkZ >> 5;
-        final int maxRegionZ = maxChunkZ >> 5;
+        unloadSemaphore().acquireUninterruptibly();
+        try {
+            final int minRegionX = minChunkX >> 5;
+            final int maxRegionX = maxChunkX >> 5;
+            final int minRegionZ = minChunkZ >> 5;
+            final int maxRegionZ = maxChunkZ >> 5;
 
-        final int minRelativeX = minChunkX & 31;
-        final int maxRelativeX = maxChunkX & 31;
-        final int minRelativeZ = minChunkZ & 31;
-        final int maxRelativeZ = maxChunkZ & 31;
+            final int minRelativeX = minChunkX & 31;
+            final int maxRelativeX = maxChunkX & 31;
+            final int minRelativeZ = minChunkZ & 31;
+            final int maxRelativeZ = maxChunkZ & 31;
 
-        if (parallelism <= 1) {
+            if (parallelism <= 1) {
+                for (int rX = minRegionX; rX <= maxRegionX; rX++) {
+                    final int minX = rX == minRegionX ? minRelativeX : 0;
+                    final int maxX = rX == maxRegionX ? maxRelativeX : 31;
+                    for (int rZ = minRegionZ; rZ <= maxRegionZ; rZ++) {
+                        final int minZ = rZ == minRegionZ ? minRelativeZ : 0;
+                        final int maxZ = rZ == maxRegionZ ? maxRelativeZ : 31;
+                        final int realX = rX << 5;
+                        final int realZ = rZ << 5;
+
+                        P region = get(rX, rZ);
+                        C zero = region.getOrCreate(0, 0);
+                        zero.use();
+                        try {
+                            for (int xx = minX; xx <= maxX; xx++) {
+                                for (int zz = minZ; zz <= maxZ; zz++) {
+                                    consumer.accept(realX + xx, realZ + zz, region.getOrCreate(xx, zz));
+                                }
+                            }
+                        } finally {
+                            zero.release();
+                        }
+                    }
+                }
+                return;
+            }
+
+            final Semaphore lock = new Semaphore(parallelism);
+            final AtomicInteger queued = new AtomicInteger();
+            final AtomicInteger completed = new AtomicInteger();
+            final AtomicLong waitStart = new AtomicLong(nowMillis());
+
+            final AtomicReference<Throwable> error = new AtomicReference<>();
             for (int rX = minRegionX; rX <= maxRegionX; rX++) {
                 final int minX = rX == minRegionX ? minRelativeX : 0;
                 final int maxX = rX == maxRegionX ? maxRelativeX : 31;
@@ -156,110 +195,81 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
                     final int realX = rX << 5;
                     final int realZ = rZ << 5;
 
-                    P region = get(rX, rZ);
-                    C zero = region.getOrCreate(0, 0);
-                    zero.use();
-                    try {
-                        for (int xx = minX; xx <= maxX; xx++) {
-                            for (int zz = minZ; zz <= maxZ; zz++) {
-                                consumer.accept(realX + xx, realZ + zz, region.getOrCreate(xx, zz));
+                    while (true) {
+                        try {
+                            if (lock.tryAcquire(5, TimeUnit.SECONDS)) {
+                                break;
                             }
+                        } catch (InterruptedException e) {
+                            onWarn("Mantle.getChunks interrupted while waiting for permit.");
+                            onError(e);
+                            Thread.currentThread().interrupt();
+                            throw new IllegalStateException("Interrupted while waiting for Mantle.getChunks permit", e);
                         }
-                    } finally {
-                        zero.release();
+
+                        onWarn("Mantle.getChunks permit wait " + (nowMillis() - waitStart.get()) + "ms"
+                                + " queued=" + queued.get()
+                                + " completed=" + completed.get()
+                                + " parallelism=" + parallelism
+                                + " range=" + minChunkX + "," + minChunkZ + "->" + maxChunkX + "," + maxChunkZ);
                     }
-                }
-            }
-            return;
-        }
-
-        final Semaphore lock = new Semaphore(parallelism);
-        final AtomicInteger queued = new AtomicInteger();
-        final AtomicInteger completed = new AtomicInteger();
-        final AtomicLong waitStart = new AtomicLong(nowMillis());
-
-        final AtomicReference<Throwable> error = new AtomicReference<>();
-        for (int rX = minRegionX; rX <= maxRegionX; rX++) {
-            final int minX = rX == minRegionX ? minRelativeX : 0;
-            final int maxX = rX == maxRegionX ? maxRelativeX : 31;
-            for (int rZ = minRegionZ; rZ <= maxRegionZ; rZ++) {
-                final int minZ = rZ == minRegionZ ? minRelativeZ : 0;
-                final int maxZ = rZ == maxRegionZ ? maxRelativeZ : 31;
-                final int realX = rX << 5;
-                final int realZ = rZ << 5;
-
-                while (true) {
-                    try {
-                        if (lock.tryAcquire(5, TimeUnit.SECONDS)) {
-                            break;
+                    Throwable failure = error.get();
+                    if (failure != null) {
+                        if (failure instanceof RuntimeException re) {
+                            throw re;
                         }
-                    } catch (InterruptedException e) {
-                        onWarn("Mantle.getChunks interrupted while waiting for permit.");
-                        onError(e);
-                        Thread.currentThread().interrupt();
-                        throw new IllegalStateException("Interrupted while waiting for Mantle.getChunks permit", e);
+                        if (failure instanceof Error err) {
+                            throw err;
+                        }
+                        throw new RuntimeException(failure);
                     }
 
-                    onWarn("Mantle.getChunks permit wait " + (nowMillis() - waitStart.get()) + "ms"
-                            + " queued=" + queued.get()
-                            + " completed=" + completed.get()
-                            + " parallelism=" + parallelism
-                            + " range=" + minChunkX + "," + minChunkZ + "->" + maxChunkX + "," + maxChunkZ);
-                }
-                Throwable failure = error.get();
-                if (failure != null) {
-                    if (failure instanceof RuntimeException re) {
-                        throw re;
-                    }
-                    if (failure instanceof Error err) {
-                        throw err;
-                    }
-                    throw new RuntimeException(failure);
-                }
-
-                queued.incrementAndGet();
-                getFuture(rX, rZ)
-                        .thenAccept(region -> {
-                            C zero = region.getOrCreate(0, 0);
-                            zero.use();
-                            try {
-                                for (int xx = minX; xx <= maxX; xx++) {
-                                    for (int zz = minZ; zz <= maxZ; zz++) {
-                                        consumer.accept(realX + xx, realZ + zz, region.getOrCreate(xx, zz));
+                    queued.incrementAndGet();
+                    getFuture(rX, rZ)
+                            .thenAccept(region -> {
+                                C zero = region.getOrCreate(0, 0);
+                                zero.use();
+                                try {
+                                    for (int xx = minX; xx <= maxX; xx++) {
+                                        for (int zz = minZ; zz <= maxZ; zz++) {
+                                            consumer.accept(realX + xx, realZ + zz, region.getOrCreate(xx, zz));
+                                        }
                                     }
+                                } finally {
+                                    zero.release();
                                 }
-                            } finally {
-                                zero.release();
-                            }
-                        })
-                        .exceptionally(ex -> {
-                            error.set(ex);
-                            return null;
-                        })
-                        .thenRun(() -> {
-                            completed.incrementAndGet();
-                            lock.release();
-                        });
-            }
-        }
-
-        while (true) {
-            try {
-                if (lock.tryAcquire(parallelism, 5, TimeUnit.SECONDS)) {
-                    break;
+                            })
+                            .exceptionally(ex -> {
+                                error.set(ex);
+                                return null;
+                            })
+                            .thenRun(() -> {
+                                completed.incrementAndGet();
+                                lock.release();
+                            });
                 }
-            } catch (InterruptedException e) {
-                onWarn("Mantle.getChunks interrupted while waiting for completion.");
-                onError(e);
-                Thread.currentThread().interrupt();
-                throw new IllegalStateException("Interrupted while waiting for Mantle.getChunks completion", e);
             }
 
-            onWarn("Mantle.getChunks completion wait " + (nowMillis() - waitStart.get()) + "ms"
-                    + " queued=" + queued.get()
-                    + " completed=" + completed.get()
-                    + " parallelism=" + parallelism
-                    + " range=" + minChunkX + "," + minChunkZ + "->" + maxChunkX + "," + maxChunkZ);
+            while (true) {
+                try {
+                    if (lock.tryAcquire(parallelism, 5, TimeUnit.SECONDS)) {
+                        break;
+                    }
+                } catch (InterruptedException e) {
+                    onWarn("Mantle.getChunks interrupted while waiting for completion.");
+                    onError(e);
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException("Interrupted while waiting for Mantle.getChunks completion", e);
+                }
+
+                onWarn("Mantle.getChunks completion wait " + (nowMillis() - waitStart.get()) + "ms"
+                        + " queued=" + queued.get()
+                        + " completed=" + completed.get()
+                        + " parallelism=" + parallelism
+                        + " range=" + minChunkX + "," + minChunkZ + "->" + maxChunkX + "," + maxChunkZ);
+            }
+        } finally {
+            unloadSemaphore().release();
         }
     }
 
@@ -341,10 +351,16 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
         }
 
         hyperLock.disable();
-        flushLoadedRegions();
-        loadedRegions.clear();
-        lastUse.clear();
-        toUnload.clear();
+        unloadSemaphore().acquireUninterruptibly(DEFAULT_LOCK_SIZE);
+        try {
+            flushLoadedRegions();
+            loadedRegions.clear();
+            loadingRegions.clear();
+            lastUse.clear();
+            toUnload.clear();
+        } finally {
+            unloadSemaphore().release(DEFAULT_LOCK_SIZE);
+        }
 
         try {
             regionIO.close();
@@ -435,12 +451,18 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
         return accessRegionFuture(x, z);
     }
 
-    public void saveAll() {
+    public synchronized void saveAll() {
         ensureOpen();
-        flushLoadedRegions();
-        loadedRegions.clear();
-        lastUse.clear();
-        toUnload.clear();
+        unloadSemaphore().acquireUninterruptibly(DEFAULT_LOCK_SIZE);
+        try {
+            flushLoadedRegions();
+            loadedRegions.clear();
+            loadingRegions.clear();
+            lastUse.clear();
+            toUnload.clear();
+        } finally {
+            unloadSemaphore().release(DEFAULT_LOCK_SIZE);
+        }
     }
 
     public void deleteChunkSlice(int x, int z, Class<?> type) {
@@ -521,7 +543,18 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
     }
 
     protected CompletableFuture<P> getSafe(int x, int z) {
-        return ioBurst.completableFuture(() -> loadRegionNow(x, z));
+        Long k = key(x, z);
+        P loaded = loadedRegions.get(k);
+        if (loaded != null && !loaded.isClosed()) {
+            use(k);
+            return CompletableFuture.completedFuture(loaded);
+        }
+
+        return loadingRegions.computeIfAbsent(k, id -> {
+            CompletableFuture<P> created = ioBurst.completableFuture(() -> loadRegionNow(x, z));
+            created.whenComplete((region, throwable) -> loadingRegions.remove(id, created));
+            return created;
+        });
     }
 
     private P loadRegionNow(int x, int z) {
@@ -536,6 +569,18 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
 
             File file = fileForRegion(dataFolder, x, z);
             if (file.exists()) {
+                if (file.length() == 0L) {
+                    if (!file.delete()) {
+                        file.deleteOnExit();
+                    }
+
+                    P fallback = createRegion(x, z);
+                    loadedRegions.put(k, fallback);
+                    onDebug("Created new Tectonic Plate (Due to Empty File) " + x + " " + z);
+                    use(k);
+                    return fallback;
+                }
+
                 try {
                     P region = regionIO.read(file.getName());
                     if (region.getX() != x || region.getZ() != z) {

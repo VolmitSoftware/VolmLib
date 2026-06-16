@@ -72,6 +72,11 @@ public abstract class PaletteOrHunk<T> extends StorageHunk<T> implements Writabl
             return this;
         }
 
+        if (hunk instanceof PaletteHunk<?>) {
+            ((PaletteHunk<T>) hunk).iterateSync(c);
+            return this;
+        }
+
         for (int i = 0; i < getWidth(); i++) {
             for (int j = 0; j < getHeight(); j++) {
                 for (int k = 0; k < getDepth(); k++) {
@@ -94,6 +99,11 @@ public abstract class PaletteOrHunk<T> extends StorageHunk<T> implements Writabl
 
         if (hunk instanceof MappedSyncHunk<?>) {
             ((MappedSyncHunk<T>) hunk).iterateSyncIO(c);
+            return this;
+        }
+
+        if (hunk instanceof PaletteHunk<?>) {
+            ((PaletteHunk<T>) hunk).iterateSyncIO(c);
             return this;
         }
 
