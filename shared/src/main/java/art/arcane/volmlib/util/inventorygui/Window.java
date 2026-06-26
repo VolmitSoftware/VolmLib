@@ -77,5 +77,12 @@ public interface Window {
 
     Window reopen();
 
+    default Window batch(Runnable mutations) {
+        if (mutations != null) {
+            mutations.run();
+        }
+        return this;
+    }
+
     Window onClosed(Callback<Window> window);
 }

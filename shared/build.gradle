@@ -21,7 +21,7 @@ tasks.named('compileJava', JavaCompile).configure {
 }
 
 dependencies {
-    compileOnly('io.papermc.paper:paper-api:26.1.2.build.66-stable')
+    compileOnly('io.papermc.paper:paper-api:26.2.build.25-alpha')
 
     compileOnly('org.projectlombok:lombok:1.18.44')
     annotationProcessor('org.projectlombok:lombok:1.18.44')

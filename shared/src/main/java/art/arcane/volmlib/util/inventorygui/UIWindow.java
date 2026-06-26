@@ -35,6 +35,7 @@ public class UIWindow implements Window, Listener {
     private int highestRow;
     private Inventory inventory;
     private int clickcheck;
+    private boolean batching;
     private boolean doubleclicked;
     private String tag;
 
@@ -350,7 +351,9 @@ public class UIWindow implements Window, Listener {
         }
 
         elements.put(getRealPosition((int) clip(position, -getResolution().getMaxWidthOffset(), getResolution().getMaxWidthOffset()).doubleValue(), row), e);
-        updateInventory();
+        if (!batching) {
+            updateInventory();
+        }
         return this;
     }
 
@@ -440,7 +443,27 @@ public class UIWindow implements Window, Listener {
     public Window clearElements() {
         highestRow = 0;
         elements.clear();
-        updateInventory();
+        if (!batching) {
+            updateInventory();
+        }
+        return this;
+    }
+
+    @Override
+    public Window batch(Runnable mutations) {
+        if (mutations == null) {
+            return this;
+        }
+        boolean wasBatching = batching;
+        batching = true;
+        try {
+            mutations.run();
+        } finally {
+            batching = wasBatching;
+        }
+        if (!batching) {
+            updateInventory();
+        }
         return this;
     }
 
