@@ -8,6 +8,8 @@ import org.bukkit.entity.Entity;
 import org.bukkit.plugin.Plugin;
 
 import java.lang.reflect.Method;
+import java.util.Arrays;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
@@ -39,6 +41,13 @@ public final class FoliaScheduler {
     private static final Method BUKKIT_IS_OWNED_WORLD_CHUNK_REGION = resolveBukkitMethod("isOwnedByCurrentRegion", World.class, int.class, int.class);
 
     private static final Method ENTITY_GET_SCHEDULER = resolveEntityMethod("getScheduler");
+
+    private static final Object METHOD_MISS = new Object();
+    private static final ConcurrentHashMap<MethodKey, Object> METHOD_CACHE = new ConcurrentHashMap<>(64);
+
+    private static volatile SchedulerHandle globalRegionSchedulerHandle;
+    private static volatile SchedulerHandle regionSchedulerHandle;
+    private static volatile SchedulerHandle asyncSchedulerHandle;
 
     private FoliaScheduler() {
     }
@@ -477,6 +486,20 @@ public final class FoliaScheduler {
     }
 
     private static Object getGlobalRegionScheduler(Server server) {
+        SchedulerHandle handle = globalRegionSchedulerHandle;
+        if (handle != null && handle.server == server) {
+            return handle.scheduler;
+        }
+
+        Object scheduler = resolveGlobalRegionScheduler(server);
+        if (scheduler != null) {
+            globalRegionSchedulerHandle = new SchedulerHandle(server, scheduler);
+        }
+
+        return scheduler;
+    }
+
+    private static Object resolveGlobalRegionScheduler(Server server) {
         if (server != null && SERVER_GET_GLOBAL_REGION_SCHEDULER != null) {
             Object scheduler = invokeNoThrow(SERVER_GET_GLOBAL_REGION_SCHEDULER, server);
             if (scheduler != null) {
@@ -506,6 +529,20 @@ public final class FoliaScheduler {
     }
 
     private static Object getRegionScheduler(Server server) {
+        SchedulerHandle handle = regionSchedulerHandle;
+        if (handle != null && handle.server == server) {
+            return handle.scheduler;
+        }
+
+        Object scheduler = resolveRegionScheduler(server);
+        if (scheduler != null) {
+            regionSchedulerHandle = new SchedulerHandle(server, scheduler);
+        }
+
+        return scheduler;
+    }
+
+    private static Object resolveRegionScheduler(Server server) {
         if (server != null && SERVER_GET_REGION_SCHEDULER != null) {
             Object scheduler = invokeNoThrow(SERVER_GET_REGION_SCHEDULER, server);
             if (scheduler != null) {
@@ -535,6 +572,20 @@ public final class FoliaScheduler {
     }
 
     private static Object getAsyncScheduler(Server server) {
+        SchedulerHandle handle = asyncSchedulerHandle;
+        if (handle != null && handle.server == server) {
+            return handle.scheduler;
+        }
+
+        Object scheduler = resolveAsyncScheduler(server);
+        if (scheduler != null) {
+            asyncSchedulerHandle = new SchedulerHandle(server, scheduler);
+        }
+
+        return scheduler;
+    }
+
+    private static Object resolveAsyncScheduler(Server server) {
         if (server != null && SERVER_GET_ASYNC_SCHEDULER != null) {
             Object scheduler = invokeNoThrow(SERVER_GET_ASYNC_SCHEDULER, server);
             if (scheduler != null) {
@@ -645,12 +696,34 @@ public final class FoliaScheduler {
     }
 
     private static Object invokeStaticNoThrow(Class<?> owner, String methodName, Class<?>[] parameterTypes, Object... args) {
+        Method method = cachedMethod(owner, methodName, parameterTypes);
+        if (method == null) {
+            return null;
+        }
+
         try {
-            Method method = owner.getMethod(methodName, parameterTypes);
             return method.invoke(null, args);
         } catch (Throwable ignored) {
             return null;
         }
+    }
+
+    private static Method cachedMethod(Class<?> owner, String methodName, Class<?>[] parameterTypes) {
+        MethodKey key = new MethodKey(owner, methodName, parameterTypes);
+        Object cached = METHOD_CACHE.get(key);
+        if (cached != null) {
+            return cached instanceof Method method ? method : null;
+        }
+
+        Method resolved;
+        try {
+            resolved = owner.getMethod(methodName, parameterTypes);
+        } catch (Throwable ignored) {
+            resolved = null;
+        }
+
+        METHOD_CACHE.put(key, resolved == null ? METHOD_MISS : resolved);
+        return resolved;
     }
 
     private static Boolean invokeBooleanNoThrow(Method method, Object target, Object... args) {
@@ -685,8 +758,12 @@ public final class FoliaScheduler {
             return null;
         }
 
+        Method method = cachedMethod(target.getClass(), methodName, parameterTypes);
+        if (method == null) {
+            return null;
+        }
+
         try {
-            Method method = target.getClass().getMethod(methodName, parameterTypes);
             return method.invoke(target, args);
         } catch (Throwable ignored) {
             return null;
@@ -698,8 +775,12 @@ public final class FoliaScheduler {
             return false;
         }
 
+        Method method = cachedMethod(target.getClass(), methodName, parameterTypes);
+        if (method == null) {
+            return false;
+        }
+
         try {
-            Method method = target.getClass().getMethod(methodName, parameterTypes);
             method.invoke(target, args);
             return true;
         } catch (Throwable ignored) {
@@ -717,5 +798,47 @@ public final class FoliaScheduler {
 
     private static boolean isPluginActive(Plugin plugin) {
         return plugin != null && plugin.isEnabled();
+    }
+
+    private static final class SchedulerHandle {
+        private final Server server;
+        private final Object scheduler;
+
+        private SchedulerHandle(Server server, Object scheduler) {
+            this.server = server;
+            this.scheduler = scheduler;
+        }
+    }
+
+    private static final class MethodKey {
+        private final Class<?> owner;
+        private final String methodName;
+        private final Class<?>[] parameterTypes;
+        private final int hash;
+
+        private MethodKey(Class<?> owner, String methodName, Class<?>[] parameterTypes) {
+            this.owner = owner;
+            this.methodName = methodName;
+            this.parameterTypes = parameterTypes;
+            this.hash = (owner.hashCode() * 31 + methodName.hashCode()) * 31 + Arrays.hashCode(parameterTypes);
+        }
+
+        @Override
+        public boolean equals(Object other) {
+            if (this == other) {
+                return true;
+            }
+
+            if (!(other instanceof MethodKey key)) {
+                return false;
+            }
+
+            return owner == key.owner && methodName.equals(key.methodName) && Arrays.equals(parameterTypes, key.parameterTypes);
+        }
+
+        @Override
+        public int hashCode() {
+            return hash;
+        }
     }
 }
