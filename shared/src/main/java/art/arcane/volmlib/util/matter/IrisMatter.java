@@ -40,8 +40,8 @@ public class IrisMatter implements Matter {
 
     private static KMap<Class<?>, Class<? extends MatterSlice<?>>> buildSlicers() {
         KMap<Class<?>, Class<? extends MatterSlice<?>>> slicers = new KMap<>();
+        register(slicers, new BiomeInjectMatter());
         if (BUKKIT_PRESENT) {
-            register(slicers, new BiomeInjectMatter());
             register(slicers, new BlockMatter());
         }
         register(slicers, new BooleanMatter());

@@ -163,18 +163,7 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
                         final int realX = rX << 5;
                         final int realZ = rZ << 5;
 
-                        P region = get(rX, rZ);
-                        C zero = region.getOrCreate(0, 0);
-                        zero.use();
-                        try {
-                            for (int xx = minX; xx <= maxX; xx++) {
-                                for (int zz = minZ; zz <= maxZ; zz++) {
-                                    consumer.accept(realX + xx, realZ + zz, region.getOrCreate(xx, zz));
-                                }
-                            }
-                        } finally {
-                            zero.release();
-                        }
+                        visitRegionChunks(get(rX, rZ), rX, rZ, minX, maxX, minZ, maxZ, realX, realZ, consumer);
                     }
                 }
                 return;
@@ -186,90 +175,108 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
             final AtomicLong waitStart = new AtomicLong(nowMillis());
 
             final AtomicReference<Throwable> error = new AtomicReference<>();
-            for (int rX = minRegionX; rX <= maxRegionX; rX++) {
-                final int minX = rX == minRegionX ? minRelativeX : 0;
-                final int maxX = rX == maxRegionX ? maxRelativeX : 31;
-                for (int rZ = minRegionZ; rZ <= maxRegionZ; rZ++) {
-                    final int minZ = rZ == minRegionZ ? minRelativeZ : 0;
-                    final int maxZ = rZ == maxRegionZ ? maxRelativeZ : 31;
-                    final int realX = rX << 5;
-                    final int realZ = rZ << 5;
+            try {
+                for (int rX = minRegionX; rX <= maxRegionX; rX++) {
+                    final int minX = rX == minRegionX ? minRelativeX : 0;
+                    final int maxX = rX == maxRegionX ? maxRelativeX : 31;
+                    for (int rZ = minRegionZ; rZ <= maxRegionZ; rZ++) {
+                        final int minZ = rZ == minRegionZ ? minRelativeZ : 0;
+                        final int maxZ = rZ == maxRegionZ ? maxRelativeZ : 31;
+                        final int realX = rX << 5;
+                        final int realZ = rZ << 5;
+                        final int regionX = rX;
+                        final int regionZ = rZ;
 
-                    while (true) {
-                        try {
-                            if (lock.tryAcquire(5, TimeUnit.SECONDS)) {
-                                break;
+                        Throwable pending = error.get();
+                        if (pending != null) {
+                            if (pending instanceof RuntimeException re) {
+                                throw re;
                             }
-                        } catch (InterruptedException e) {
-                            onWarn("Mantle.getChunks interrupted while waiting for permit.");
-                            onError(e);
-                            Thread.currentThread().interrupt();
-                            throw new IllegalStateException("Interrupted while waiting for Mantle.getChunks permit", e);
+                            if (pending instanceof Error err) {
+                                throw err;
+                            }
+                            throw new RuntimeException(pending);
                         }
 
-                        onWarn("Mantle.getChunks permit wait " + (nowMillis() - waitStart.get()) + "ms"
-                                + " queued=" + queued.get()
-                                + " completed=" + completed.get()
-                                + " parallelism=" + parallelism
-                                + " range=" + minChunkX + "," + minChunkZ + "->" + maxChunkX + "," + maxChunkZ);
-                    }
-                    Throwable failure = error.get();
-                    if (failure != null) {
-                        if (failure instanceof RuntimeException re) {
-                            throw re;
-                        }
-                        if (failure instanceof Error err) {
-                            throw err;
-                        }
-                        throw new RuntimeException(failure);
-                    }
-
-                    queued.incrementAndGet();
-                    getFuture(rX, rZ)
-                            .thenAccept(region -> {
-                                C zero = region.getOrCreate(0, 0);
-                                zero.use();
-                                try {
-                                    for (int xx = minX; xx <= maxX; xx++) {
-                                        for (int zz = minZ; zz <= maxZ; zz++) {
-                                            consumer.accept(realX + xx, realZ + zz, region.getOrCreate(xx, zz));
-                                        }
-                                    }
-                                } finally {
-                                    zero.release();
+                        while (true) {
+                            try {
+                                if (lock.tryAcquire(5, TimeUnit.SECONDS)) {
+                                    break;
                                 }
-                            })
-                            .exceptionally(ex -> {
-                                error.set(ex);
-                                return null;
-                            })
-                            .thenRun(() -> {
-                                completed.incrementAndGet();
-                                lock.release();
-                            });
+                            } catch (InterruptedException e) {
+                                onWarn("Mantle.getChunks interrupted while waiting for permit.");
+                                onError(e);
+                                Thread.currentThread().interrupt();
+                                throw new IllegalStateException("Interrupted while waiting for Mantle.getChunks permit", e);
+                            }
+
+                            onWarn("Mantle.getChunks permit wait " + (nowMillis() - waitStart.get()) + "ms"
+                                    + " queued=" + queued.get()
+                                    + " completed=" + completed.get()
+                                    + " parallelism=" + parallelism
+                                    + " range=" + minChunkX + "," + minChunkZ + "->" + maxChunkX + "," + maxChunkZ);
+                        }
+
+                        queued.incrementAndGet();
+                        getFuture(rX, rZ)
+                                .thenAccept(region -> visitRegionChunks(region, regionX, regionZ, minX, maxX, minZ, maxZ, realX, realZ, consumer))
+                                .exceptionally(ex -> {
+                                    error.set(ex);
+                                    return null;
+                                })
+                                .thenRun(() -> {
+                                    completed.incrementAndGet();
+                                    lock.release();
+                                });
+                    }
                 }
+            } finally {
+                lock.acquireUninterruptibly(parallelism);
             }
 
-            while (true) {
-                try {
-                    if (lock.tryAcquire(parallelism, 5, TimeUnit.SECONDS)) {
-                        break;
-                    }
-                } catch (InterruptedException e) {
-                    onWarn("Mantle.getChunks interrupted while waiting for completion.");
-                    onError(e);
-                    Thread.currentThread().interrupt();
-                    throw new IllegalStateException("Interrupted while waiting for Mantle.getChunks completion", e);
+            Throwable failure = error.get();
+            if (failure != null) {
+                if (failure instanceof RuntimeException re) {
+                    throw re;
                 }
-
-                onWarn("Mantle.getChunks completion wait " + (nowMillis() - waitStart.get()) + "ms"
-                        + " queued=" + queued.get()
-                        + " completed=" + completed.get()
-                        + " parallelism=" + parallelism
-                        + " range=" + minChunkX + "," + minChunkZ + "->" + maxChunkX + "," + maxChunkZ);
+                if (failure instanceof Error err) {
+                    throw err;
+                }
+                throw new RuntimeException(failure);
             }
         } finally {
             unloadSemaphore().release();
+        }
+    }
+
+    private void visitRegionChunks(P region, int rX, int rZ, int minX, int maxX, int minZ, int maxZ,
+                                   int realX, int realZ, Consumer3<Integer, Integer, C> consumer) {
+        int attempts = 0;
+        P plate = region;
+        while (true) {
+            C zero = plate.getOrCreate(0, 0);
+            try {
+                zero.use();
+            } catch (IllegalStateException closed) {
+                String message = closed.getMessage();
+                if (attempts++ >= 8 || message == null || !message.contains("Chunk is closed")) {
+                    throw closed;
+                }
+
+                plate = get(rX, rZ);
+                continue;
+            }
+
+            try {
+                for (int xx = minX; xx <= maxX; xx++) {
+                    for (int zz = minZ; zz <= maxZ; zz++) {
+                        consumer.accept(realX + xx, realZ + zz, plate.getOrCreate(xx, zz));
+                    }
+                }
+            } finally {
+                zero.release();
+            }
+            return;
         }
     }
 
@@ -520,6 +527,19 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
     @Override
     protected P getLoadedRegion(int x, int z) {
         return loadedRegions.get(key(x, z));
+    }
+
+    @Override
+    protected P acquireLoadedRegion(int x, int z) {
+        return hyperLock.withResult(x, z, () -> {
+            P region = getLoadedRegion(x, z);
+            if (region != null && !isRegionClosed(region)) {
+                markRegionUsed(x, z, region);
+                return region;
+            }
+
+            return null;
+        });
     }
 
     @Override

@@ -51,7 +51,7 @@ public abstract class BSupport<P> {
     private final IntSet storageCache = buildStorageCache();
     private final IntSet storageChestCache = buildStorageChestCache();
     private final IntSet litCache = buildLitCache();
-    private long lastWarnMs;
+    private final UnresolvedKeyLog unresolved = new UnresolvedKeyLog("Block resolution", 30_000L);
 
     protected void warn(String message) {
         System.err.println(message);
@@ -115,14 +115,14 @@ public abstract class BSupport<P> {
         return new KMap<>();
     }
 
-    private boolean shouldWarn() {
-        long now = System.currentTimeMillis();
-        if (now - lastWarnMs >= 1000) {
-            lastWarnMs = now;
-            return true;
+    private void warnUnresolved(String key, String message) {
+        if (unresolved.firstOccurrence(key)) {
+            warn(message);
         }
-
-        return false;
+        String summary = unresolved.pollSummary();
+        if (summary != null) {
+            warn(summary);
+        }
     }
 
     private IntSet buildFoliageCache() {
@@ -464,9 +464,7 @@ public abstract class BSupport<P> {
             return Material.valueOf(bdx.trim().toUpperCase());
         } catch (Throwable e) {
             reportError(e);
-            if (shouldWarn()) {
-                warn("Unknown Material: " + bdx);
-            }
+            warnUnresolved("material:" + bdx, "Unknown Material: " + bdx);
             return null;
         }
     }
@@ -510,8 +508,8 @@ public abstract class BSupport<P> {
             BlockData bdx = parseBlockData(bd, warn);
 
             if (bdx == null) {
-                if (warn && shouldWarn()) {
-                    warn("Unknown Block Data '" + bd + "'");
+                if (warn) {
+                    warnUnresolved(bd, "Unknown Block Data '" + bd + "'");
                 }
                 return AIR;
             }
@@ -519,8 +517,8 @@ public abstract class BSupport<P> {
             return bdx;
         } catch (Throwable e) {
             e.printStackTrace();
-            if (warn && shouldWarn()) {
-                warn("Unknown Block Data '" + bdxf + "'");
+            if (warn) {
+                warnUnresolved(bdxf, "Unknown Block Data '" + bdxf + "'");
             }
         }
 
@@ -560,7 +558,7 @@ public abstract class BSupport<P> {
         }
 
         if (warn) {
-            warn("Can't find block data for " + s);
+            warnUnresolved(s, "Can't find block data for " + s);
         }
         return null;
     }
@@ -602,8 +600,8 @@ public abstract class BSupport<P> {
             }
 
             if (bx == null) {
-                if (warn && shouldWarn()) {
-                    warn("Unknown Block Data: " + ix);
+                if (warn) {
+                    warnUnresolved(ix, "Unknown Block Data: " + ix);
                 }
                 return null;
             }

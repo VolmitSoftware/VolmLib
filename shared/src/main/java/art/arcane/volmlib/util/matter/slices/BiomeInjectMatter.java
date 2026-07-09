@@ -21,9 +21,6 @@ package art.arcane.volmlib.util.matter.slices;
 import art.arcane.volmlib.util.data.palette.Palette;
 import art.arcane.volmlib.util.matter.MatterBiomeInject;
 import art.arcane.volmlib.util.matter.Sliced;
-import org.bukkit.NamespacedKey;
-import org.bukkit.Registry;
-import org.bukkit.block.Biome;
 
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
@@ -39,16 +36,16 @@ public class BiomeInjectMatter extends RawMatter<MatterBiomeInject> {
         super(width, height, depth, MatterBiomeInject.class);
     }
 
-    public static MatterBiomeInject get(Biome biome) {
-        return get(false, 0, biome);
-    }
-
     public static MatterBiomeInject get(int customBiome) {
         return get(true, customBiome, null);
     }
 
-    public static MatterBiomeInject get(boolean custom, int customBiome, Biome biome) {
-        return new MatterBiomeInject(custom, customBiome, biome);
+    public static MatterBiomeInject get(String biomeKey) {
+        return get(false, 0, biomeKey);
+    }
+
+    public static MatterBiomeInject get(boolean custom, int customBiome, String biomeKey) {
+        return new MatterBiomeInject(custom, customBiome, biomeKey);
     }
 
     @Override
@@ -63,23 +60,19 @@ public class BiomeInjectMatter extends RawMatter<MatterBiomeInject> {
         if (b.isCustom()) {
             dos.writeShort(b.getBiomeId());
         } else {
-            NamespacedKey key = Registry.BIOME.getKey(b.getBiome());
-            dos.writeUTF((key == null ? NamespacedKey.minecraft("plains") : key).toString());
+            String key = b.getBiomeKey();
+            dos.writeUTF(key == null || key.isBlank() ? "minecraft:plains" : key);
         }
     }
 
     @Override
     public MatterBiomeInject readNode(DataInputStream din) throws IOException {
-        boolean b = din.readBoolean();
-        int id = b ? din.readShort() : 0;
-        Biome biome = Biome.PLAINS;
+        boolean custom = din.readBoolean();
 
-        if (!b) {
-            NamespacedKey key = NamespacedKey.fromString(din.readUTF());
-            Biome resolved = key == null ? null : Registry.BIOME.get(key);
-            biome = resolved == null ? Biome.PLAINS : resolved;
+        if (custom) {
+            return new MatterBiomeInject(true, (int) din.readShort(), null);
         }
 
-        return new MatterBiomeInject(b, id, biome);
+        return new MatterBiomeInject(false, 0, din.readUTF());
     }
 }

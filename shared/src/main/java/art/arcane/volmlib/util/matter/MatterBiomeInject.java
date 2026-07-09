@@ -20,12 +20,11 @@ package art.arcane.volmlib.util.matter;
 
 import lombok.AllArgsConstructor;
 import lombok.Data;
-import org.bukkit.block.Biome;
 
 @Data
 @AllArgsConstructor
 public class MatterBiomeInject {
     private final boolean custom;
     private final Integer biomeId;
-    private final Biome biome;
+    private final String biomeKey;
 }
