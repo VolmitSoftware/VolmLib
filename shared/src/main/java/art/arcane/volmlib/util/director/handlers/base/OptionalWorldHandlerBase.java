@@ -1,5 +1,6 @@
 package art.arcane.volmlib.util.director.handlers.base;
 
+import art.arcane.volmlib.util.bukkit.WorldIdentity;
 import art.arcane.volmlib.util.collection.KList;
 import art.arcane.volmlib.util.director.DirectorParameterHandler;
 import art.arcane.volmlib.util.director.exceptions.DirectorParsingException;
@@ -16,8 +17,9 @@ public abstract class OptionalWorldHandlerBase implements DirectorParameterHandl
         String prefix = excludedPrefix() == null ? "" : excludedPrefix().toLowerCase();
 
         for (World world : Bukkit.getWorlds()) {
-            if (prefix.isEmpty() || !world.getName().toLowerCase().startsWith(prefix)) {
-                options.add(world.getName());
+            String keyPath = WorldIdentity.key(world).getKey().toLowerCase();
+            if (prefix.isEmpty() || !keyPath.startsWith(prefix)) {
+                options.add(WorldIdentity.serialize(world));
             }
         }
 
@@ -31,7 +33,22 @@ public abstract class OptionalWorldHandlerBase implements DirectorParameterHandl
 
     @Override
     public String parse(String in, boolean force) throws DirectorParsingException {
-        return in;
+        if ("ALL".equalsIgnoreCase(in)) {
+            return "ALL";
+        }
+
+        World world;
+        try {
+            world = WorldIdentity.resolve(in).orElse(null);
+        } catch (IllegalArgumentException exception) {
+            throw new DirectorParsingException("Invalid world key \"" + in + "\"");
+        }
+
+        String serialized = world == null ? null : WorldIdentity.serialize(world);
+        if (serialized == null || !getPossibilities().contains(serialized)) {
+            throw new DirectorParsingException("Unable to find World \"" + in + "\"");
+        }
+        return serialized;
     }
 
     @Override

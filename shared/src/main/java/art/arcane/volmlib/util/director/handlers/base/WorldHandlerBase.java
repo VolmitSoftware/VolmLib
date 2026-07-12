@@ -1,5 +1,6 @@
 package art.arcane.volmlib.util.director.handlers.base;
 
+import art.arcane.volmlib.util.bukkit.WorldIdentity;
 import art.arcane.volmlib.util.collection.KList;
 import art.arcane.volmlib.util.director.exceptions.DirectorParsingException;
 import org.bukkit.Bukkit;
@@ -16,7 +17,8 @@ public abstract class WorldHandlerBase {
         String prefix = excludedPrefix() == null ? "" : excludedPrefix().toLowerCase();
 
         for (World world : Bukkit.getWorlds()) {
-            if (prefix.isEmpty() || !world.getName().toLowerCase().startsWith(prefix)) {
+            String keyPath = WorldIdentity.key(world).getKey().toLowerCase();
+            if (prefix.isEmpty() || !keyPath.startsWith(prefix)) {
                 options.add(world);
             }
         }
@@ -29,29 +31,21 @@ public abstract class WorldHandlerBase {
     }
 
     public String toString(World world) {
-        return world.getName();
+        return WorldIdentity.serialize(world);
     }
 
     public World parse(String in, boolean force) throws DirectorParsingException {
-        List<World> options = new ArrayList<>();
-        for (World world : worldOptions()) {
-            String name = toString(world);
-            if (name.equalsIgnoreCase(in) || name.toLowerCase().contains(in.toLowerCase()) || in.toLowerCase().contains(name.toLowerCase())) {
-                options.add(world);
-            }
+        World world;
+        try {
+            world = WorldIdentity.resolve(in).orElse(null);
+        } catch (IllegalArgumentException exception) {
+            throw new DirectorParsingException("Invalid world key \"" + in + "\"");
         }
 
-        if (options.isEmpty()) {
+        if (world == null || !worldOptions().contains(world)) {
             throw new DirectorParsingException("Unable to find World \"" + in + "\"");
         }
-
-        for (World world : options) {
-            if (toString(world).equalsIgnoreCase(in)) {
-                return world;
-            }
-        }
-
-        throw new DirectorParsingException("Unable to filter which World \"" + in + "\"");
+        return world;
     }
 
     public boolean supports(Class<?> type) {
@@ -59,6 +53,6 @@ public abstract class WorldHandlerBase {
     }
 
     public String getRandomDefault() {
-        return "world";
+        return "minecraft:overworld";
     }
 }
