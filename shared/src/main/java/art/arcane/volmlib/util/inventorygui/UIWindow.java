@@ -14,6 +14,7 @@ import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.event.inventory.InventoryType;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.plugin.IllegalPluginAccessException;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.util.Map;
@@ -185,28 +186,35 @@ public class UIWindow implements Window, Listener {
 
         if (isVisible()) {
             deactivate(false);
-            callClosed();
+            boolean immediate = switch (e.getReason()) {
+                case DISCONNECT, UNLOADED, DEATH -> true;
+                default -> false;
+            };
+
+            if (immediate || !queueSync(this::callClosed)) {
+                callClosed();
+            }
         }
     }
 
-    private void queueSync(Runnable runnable) {
+    private boolean queueSync(Runnable runnable) {
         if (runnable == null || plugin == null || !plugin.isEnabled()) {
-            return;
+            return false;
         }
 
-        // Mirror Bukkit's no-delay scheduleSyncDelayedTask behavior: run on the next tick.
         if (FoliaScheduler.runEntity(plugin, viewer, runnable, 1L)) {
-            return;
+            return true;
         }
 
         if (FoliaScheduler.runGlobal(plugin, runnable, 1L)) {
-            return;
+            return true;
         }
 
         try {
-            Bukkit.getScheduler().scheduleSyncDelayedTask(plugin, runnable);
-        } catch (UnsupportedOperationException e) {
-            throw new IllegalStateException("Failed to schedule sync task on Folia-safe scheduler.", e);
+            int taskId = Bukkit.getScheduler().scheduleSyncDelayedTask(plugin, runnable);
+            return taskId != -1;
+        } catch (UnsupportedOperationException | IllegalPluginAccessException ex) {
+            return false;
         }
     }
 
@@ -253,20 +261,22 @@ public class UIWindow implements Window, Listener {
             Bukkit.getPluginManager().registerEvents(this, plugin);
 
             Inventory activeTopInventory = viewer.getOpenInventory() == null ? null : viewer.getOpenInventory().getTopInventory();
-            if (canReuseInventory(activeTopInventory)) {
+            boolean reuse = canReuseInventory(activeTopInventory);
+            if (reuse) {
                 inventory = activeTopInventory;
+            } else if (getResolution().getType().equals(InventoryType.CHEST)) {
+                inventory = Bukkit.createInventory(null, getViewportHeight() * 9, getTitle());
             } else {
-                if (getResolution().getType().equals(InventoryType.CHEST)) {
-                    inventory = Bukkit.createInventory(null, getViewportHeight() * 9, getTitle());
-                } else {
-                    inventory = Bukkit.createInventory(null, getResolution().getType(), getTitle());
-                }
-
-                viewer.openInventory(inventory);
+                inventory = Bukkit.createInventory(null, getResolution().getType(), getTitle());
             }
+
             this.visible = true;
             ACTIVE_WINDOWS.put(viewer.getUniqueId(), this);
             updateInventory();
+
+            if (!reuse) {
+                viewer.openInventory(inventory);
+            }
         } else {
             deactivate(true);
         }
