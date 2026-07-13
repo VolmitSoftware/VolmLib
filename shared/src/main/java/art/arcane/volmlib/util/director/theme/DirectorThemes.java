@@ -57,9 +57,9 @@ public final class DirectorThemes {
 
     public static final DirectorTheme WORMHOLES = new DirectorTheme(
             DirectorProduct.WORMHOLES,
-            "#6e6e6e",
-            "#a8a8a8",
-            "#d0d0d0",
+            "#d4af37",
+            "#8c7a45",
+            "#f4d35e",
             "minecraft:block.amethyst_cluster.break",
             "minecraft:block.note_block.bass"
     );

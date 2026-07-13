@@ -5,7 +5,10 @@ import org.bukkit.Location;
 import org.bukkit.Server;
 import org.bukkit.World;
 import org.bukkit.entity.Entity;
+import org.bukkit.plugin.IllegalPluginAccessException;
 import org.bukkit.plugin.Plugin;
+import org.bukkit.scheduler.BukkitScheduler;
+import org.bukkit.scheduler.BukkitTask;
 
 import java.lang.reflect.Method;
 import java.util.Arrays;
@@ -203,21 +206,23 @@ public final class FoliaScheduler {
         }
 
         Object scheduler = getGlobalRegionScheduler(plugin);
-        if (scheduler == null) {
-            return false;
-        }
-
         long safeDelay = Math.max(0L, delayTicks);
-        Consumer<Object> consumer = task -> runnable.run();
-        if (safeDelay <= 0L) {
-            if (invokeVoidNoThrow(scheduler, "execute", new Class<?>[]{Plugin.class, Runnable.class}, plugin, runnable)) {
+        if (scheduler != null) {
+            Consumer<Object> consumer = task -> runnable.run();
+            if (safeDelay <= 0L) {
+                if (invokeVoidNoThrow(scheduler, "execute", new Class<?>[]{Plugin.class, Runnable.class}, plugin, runnable)) {
+                    return true;
+                }
+
+                if (invokeVoidNoThrow(scheduler, "run", new Class<?>[]{Plugin.class, Consumer.class}, plugin, consumer)) {
+                    return true;
+                }
+            } else if (invokeVoidNoThrow(scheduler, "runDelayed", new Class<?>[]{Plugin.class, Consumer.class, long.class}, plugin, consumer, safeDelay)) {
                 return true;
             }
-
-            return invokeVoidNoThrow(scheduler, "run", new Class<?>[]{Plugin.class, Consumer.class}, plugin, consumer);
         }
 
-        return invokeVoidNoThrow(scheduler, "runDelayed", new Class<?>[]{Plugin.class, Consumer.class, long.class}, plugin, consumer, safeDelay);
+        return !isFoliaThreading(plugin.getServer()) && runBukkitSync(plugin, runnable, safeDelay);
     }
 
     public static boolean runRegion(Plugin plugin, Location location, Runnable runnable) {
@@ -267,7 +272,7 @@ public final class FoliaScheduler {
             scheduler = invokeNoThrow(entity, "getScheduler", new Class<?>[0]);
         }
         if (scheduler == null) {
-            return false;
+            return !isFoliaThreading(plugin.getServer()) && runBukkitSync(plugin, runnable, safeDelay);
         }
 
         Runnable retired = () -> {
@@ -285,8 +290,8 @@ public final class FoliaScheduler {
                     0L
             );
 
-            if (executed instanceof Boolean done) {
-                return done;
+            if (executed instanceof Boolean done && done) {
+                return true;
             }
 
             if (invokeVoidNoThrow(
@@ -300,7 +305,7 @@ public final class FoliaScheduler {
                 return true;
             }
 
-            return invokeVoidNoThrow(
+            if (invokeVoidNoThrow(
                     scheduler,
                     "runDelayed",
                     new Class<?>[]{Plugin.class, Consumer.class, Runnable.class, long.class},
@@ -308,7 +313,11 @@ public final class FoliaScheduler {
                     consumer,
                     retired,
                     1L
-            );
+            )) {
+                return true;
+            }
+
+            return !isFoliaThreading(plugin.getServer()) && runBukkitSync(plugin, runnable, safeDelay);
         }
 
         if (invokeVoidNoThrow(
@@ -333,7 +342,11 @@ public final class FoliaScheduler {
                 safeDelay
         );
 
-        return executed instanceof Boolean done && done;
+        if (executed instanceof Boolean done && done) {
+            return true;
+        }
+
+        return !isFoliaThreading(plugin.getServer()) && runBukkitSync(plugin, runnable, safeDelay);
     }
 
     public static boolean runAsync(Plugin plugin, Runnable runnable) {
@@ -346,50 +359,54 @@ public final class FoliaScheduler {
         }
 
         Object scheduler = getAsyncScheduler(plugin);
-        if (scheduler == null) {
-            return false;
-        }
-
         long safeDelay = Math.max(0L, delayTicks);
-        Consumer<Object> consumer = task -> runnable.run();
-        if (safeDelay <= 0L) {
-            if (invokeVoidNoThrow(scheduler, "runNow", new Class<?>[]{Plugin.class, Consumer.class}, plugin, consumer)) {
-                return true;
+        if (scheduler != null) {
+            Consumer<Object> consumer = task -> runnable.run();
+            if (safeDelay <= 0L) {
+                if (invokeVoidNoThrow(scheduler, "runNow", new Class<?>[]{Plugin.class, Consumer.class}, plugin, consumer)) {
+                    return true;
+                }
+
+                if (invokeVoidNoThrow(scheduler, "runNow", new Class<?>[]{Plugin.class, Runnable.class}, plugin, runnable)) {
+                    return true;
+                }
+            } else {
+                long delayMs = ticksToMilliseconds(safeDelay);
+                if (invokeVoidNoThrow(
+                        scheduler,
+                        "runDelayed",
+                        new Class<?>[]{Plugin.class, Consumer.class, long.class, TimeUnit.class},
+                        plugin,
+                        consumer,
+                        delayMs,
+                        TimeUnit.MILLISECONDS
+                )) {
+                    return true;
+                }
+
+                if (invokeVoidNoThrow(
+                        scheduler,
+                        "runDelayed",
+                        new Class<?>[]{Plugin.class, Runnable.class, long.class, TimeUnit.class},
+                        plugin,
+                        runnable,
+                        delayMs,
+                        TimeUnit.MILLISECONDS
+                )) {
+                    return true;
+                }
+
+                if (invokeVoidNoThrow(scheduler, "runDelayed", new Class<?>[]{Plugin.class, Consumer.class, long.class}, plugin, consumer, safeDelay)) {
+                    return true;
+                }
+
+                if (invokeVoidNoThrow(scheduler, "runDelayed", new Class<?>[]{Plugin.class, Runnable.class, long.class}, plugin, runnable, safeDelay)) {
+                    return true;
+                }
             }
-
-            return invokeVoidNoThrow(scheduler, "runNow", new Class<?>[]{Plugin.class, Runnable.class}, plugin, runnable);
         }
 
-        long delayMs = ticksToMilliseconds(safeDelay);
-        if (invokeVoidNoThrow(
-                scheduler,
-                "runDelayed",
-                new Class<?>[]{Plugin.class, Consumer.class, long.class, TimeUnit.class},
-                plugin,
-                consumer,
-                delayMs,
-                TimeUnit.MILLISECONDS
-        )) {
-            return true;
-        }
-
-        if (invokeVoidNoThrow(
-                scheduler,
-                "runDelayed",
-                new Class<?>[]{Plugin.class, Runnable.class, long.class, TimeUnit.class},
-                plugin,
-                runnable,
-                delayMs,
-                TimeUnit.MILLISECONDS
-        )) {
-            return true;
-        }
-
-        if (invokeVoidNoThrow(scheduler, "runDelayed", new Class<?>[]{Plugin.class, Consumer.class, long.class}, plugin, consumer, safeDelay)) {
-            return true;
-        }
-
-        return invokeVoidNoThrow(scheduler, "runDelayed", new Class<?>[]{Plugin.class, Runnable.class, long.class}, plugin, runnable, safeDelay);
+        return !isFoliaThreading(plugin.getServer()) && runBukkitAsync(plugin, runnable, safeDelay);
     }
 
     public static void cancelTasks(Plugin plugin) {
@@ -406,6 +423,10 @@ public final class FoliaScheduler {
         if (asyncScheduler != null) {
             invokeNoThrow(asyncScheduler, "cancelTasks", new Class<?>[]{Plugin.class}, plugin);
         }
+
+        if (!isFoliaThreading(plugin.getServer())) {
+            cancelBukkitTasks(plugin);
+        }
     }
 
     private static boolean runRegion(Plugin plugin, World world, int chunkX, int chunkZ, Location location, Runnable runnable, long delayTicks) {
@@ -414,71 +435,103 @@ public final class FoliaScheduler {
         }
 
         Object scheduler = getRegionScheduler(plugin);
-        if (scheduler == null) {
+        long safeDelay = Math.max(0L, delayTicks);
+        if (scheduler != null) {
+            Consumer<Object> consumer = task -> runnable.run();
+            if (safeDelay <= 0L) {
+                if (location != null) {
+                    if (invokeVoidNoThrow(scheduler, "execute", new Class<?>[]{Plugin.class, Location.class, Runnable.class}, plugin, location, runnable)) {
+                        return true;
+                    }
+
+                    if (invokeVoidNoThrow(scheduler, "run", new Class<?>[]{Plugin.class, Location.class, Consumer.class}, plugin, location, consumer)) {
+                        return true;
+                    }
+                }
+
+                if (invokeVoidNoThrow(
+                        scheduler,
+                        "execute",
+                        new Class<?>[]{Plugin.class, World.class, int.class, int.class, Runnable.class},
+                        plugin,
+                        world,
+                        chunkX,
+                        chunkZ,
+                        runnable
+                )) {
+                    return true;
+                }
+
+                if (invokeVoidNoThrow(
+                        scheduler,
+                        "run",
+                        new Class<?>[]{Plugin.class, World.class, int.class, int.class, Consumer.class},
+                        plugin,
+                        world,
+                        chunkX,
+                        chunkZ,
+                        consumer
+                )) {
+                    return true;
+                }
+            } else {
+                if (location != null && invokeVoidNoThrow(
+                        scheduler,
+                        "runDelayed",
+                        new Class<?>[]{Plugin.class, Location.class, Consumer.class, long.class},
+                        plugin,
+                        location,
+                        consumer,
+                        safeDelay
+                )) {
+                    return true;
+                }
+
+                if (invokeVoidNoThrow(
+                        scheduler,
+                        "runDelayed",
+                        new Class<?>[]{Plugin.class, World.class, int.class, int.class, Consumer.class, long.class},
+                        plugin,
+                        world,
+                        chunkX,
+                        chunkZ,
+                        consumer,
+                        safeDelay
+                )) {
+                    return true;
+                }
+            }
+        }
+
+        return !isFoliaThreading(plugin.getServer()) && runBukkitSync(plugin, runnable, safeDelay);
+    }
+
+    private static boolean runBukkitSync(Plugin plugin, Runnable runnable, long delayTicks) {
+        try {
+            BukkitScheduler scheduler = Bukkit.getScheduler();
+            BukkitTask task = delayTicks <= 0L
+                    ? scheduler.runTask(plugin, runnable)
+                    : scheduler.runTaskLater(plugin, runnable, delayTicks);
+            return task != null;
+        } catch (IllegalPluginAccessException | UnsupportedOperationException exception) {
             return false;
         }
+    }
 
-        long safeDelay = Math.max(0L, delayTicks);
-        Consumer<Object> consumer = task -> runnable.run();
-        if (safeDelay <= 0L) {
-            if (location != null) {
-                if (invokeVoidNoThrow(scheduler, "execute", new Class<?>[]{Plugin.class, Location.class, Runnable.class}, plugin, location, runnable)) {
-                    return true;
-                }
-
-                if (invokeVoidNoThrow(scheduler, "run", new Class<?>[]{Plugin.class, Location.class, Consumer.class}, plugin, location, consumer)) {
-                    return true;
-                }
-            }
-
-            if (invokeVoidNoThrow(
-                    scheduler,
-                    "execute",
-                    new Class<?>[]{Plugin.class, World.class, int.class, int.class, Runnable.class},
-                    plugin,
-                    world,
-                    chunkX,
-                    chunkZ,
-                    runnable
-            )) {
-                return true;
-            }
-
-            return invokeVoidNoThrow(
-                    scheduler,
-                    "run",
-                    new Class<?>[]{Plugin.class, World.class, int.class, int.class, Consumer.class},
-                    plugin,
-                    world,
-                    chunkX,
-                    chunkZ,
-                    consumer
-            );
+    private static boolean runBukkitAsync(Plugin plugin, Runnable runnable, long delayTicks) {
+        try {
+            BukkitScheduler scheduler = Bukkit.getScheduler();
+            BukkitTask task = delayTicks <= 0L
+                    ? scheduler.runTaskAsynchronously(plugin, runnable)
+                    : scheduler.runTaskLaterAsynchronously(plugin, runnable, delayTicks);
+            return task != null;
+        } catch (IllegalPluginAccessException | UnsupportedOperationException exception) {
+            return false;
         }
+    }
 
-        if (location != null && invokeVoidNoThrow(
-                scheduler,
-                "runDelayed",
-                new Class<?>[]{Plugin.class, Location.class, Consumer.class, long.class},
-                plugin,
-                location,
-                consumer,
-                safeDelay
-        )) {
-            return true;
-        }
-
-        return invokeVoidNoThrow(
-                scheduler,
-                "runDelayed",
-                new Class<?>[]{Plugin.class, World.class, int.class, int.class, Consumer.class, long.class},
-                plugin,
-                world,
-                chunkX,
-                chunkZ,
-                consumer,
-                safeDelay
-        );
+    private static void cancelBukkitTasks(Plugin plugin) {
+        Bukkit.getScheduler().cancelTasks(plugin);
     }
 
     private static Object getGlobalRegionScheduler(Plugin plugin) {
