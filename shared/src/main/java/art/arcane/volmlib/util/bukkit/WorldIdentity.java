@@ -1,19 +1,35 @@
 package art.arcane.volmlib.util.bukkit;
 
 import org.bukkit.Bukkit;
+import org.bukkit.Keyed;
 import org.bukkit.NamespacedKey;
 import org.bukkit.World;
 import org.bukkit.generator.WorldInfo;
 
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
 public final class WorldIdentity {
+    private static final Method WORLD_INFO_GET_KEY = resolveWorldInfoGetKey();
+
     private WorldIdentity() {
     }
 
     public static NamespacedKey key(WorldInfo world) {
-        return Objects.requireNonNull(world, "world").getKey();
+        WorldInfo requiredWorld = Objects.requireNonNull(world, "world");
+        if (requiredWorld instanceof Keyed keyed) {
+            return Objects.requireNonNull(keyed.getKey(), "world key");
+        }
+
+        NamespacedKey reflectedKey = invokeWorldInfoGetKey(requiredWorld);
+        if (reflectedKey != null) {
+            return reflectedKey;
+        }
+
+        throw new IllegalStateException("WorldInfo does not expose a namespaced key: " + requiredWorld.getName());
     }
 
     public static String serialize(WorldInfo world) {
@@ -39,6 +55,36 @@ public final class WorldIdentity {
     }
 
     public static Optional<World> resolve(NamespacedKey key) {
-        return Optional.ofNullable(Bukkit.getWorld(Objects.requireNonNull(key, "key")));
+        return resolve(Objects.requireNonNull(key, "key"), Bukkit.getWorlds());
+    }
+
+    static Optional<World> resolve(NamespacedKey key, List<World> worlds) {
+        NamespacedKey requiredKey = Objects.requireNonNull(key, "key");
+        for (World world : Objects.requireNonNull(worlds, "worlds")) {
+            if (requiredKey.equals(key(world))) {
+                return Optional.of(world);
+            }
+        }
+        return Optional.empty();
+    }
+
+    private static Method resolveWorldInfoGetKey() {
+        try {
+            return WorldInfo.class.getMethod("getKey");
+        } catch (NoSuchMethodException exception) {
+            return null;
+        }
+    }
+
+    private static NamespacedKey invokeWorldInfoGetKey(WorldInfo world) {
+        if (WORLD_INFO_GET_KEY == null) {
+            return null;
+        }
+        try {
+            Object value = WORLD_INFO_GET_KEY.invoke(world);
+            return value instanceof NamespacedKey key ? key : null;
+        } catch (IllegalAccessException | InvocationTargetException exception) {
+            return null;
+        }
     }
 }

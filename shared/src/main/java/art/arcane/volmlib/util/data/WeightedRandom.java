@@ -32,16 +32,18 @@ public class WeightedRandom<T> {
     }
 
     public T pullRandom() {
-        int pull = random.nextInt(totalWeight);
-        int index = 0;
-        while (pull > 0) {
-            pull -= weightedObjects.get(index).getV();
-            if (pull <= 0) {
-                break;
+        return pullRandom(random);
+    }
+
+    public T pullRandom(Random source) {
+        int pull = source.nextInt(totalWeight);
+        for (KeyPair<T, Integer> weightedObject : weightedObjects) {
+            pull -= weightedObject.getV();
+            if (pull < 0) {
+                return weightedObject.getK();
             }
-            index++;
         }
-        return weightedObjects.get(index).getK();
+        return weightedObjects.getLast().getK();
     }
 
     public int getSize() {

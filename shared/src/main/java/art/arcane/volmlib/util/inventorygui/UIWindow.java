@@ -17,11 +17,14 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.plugin.IllegalPluginAccessException;
 import org.bukkit.plugin.java.JavaPlugin;
 
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class UIWindow implements Window, Listener {
+    private static final Method INVENTORY_CLOSE_GET_REASON = resolveInventoryCloseGetReason();
     private static final Map<UUID, UIWindow> ACTIVE_WINDOWS = new ConcurrentHashMap<>();
     private final JavaPlugin plugin;
     private final Player viewer;
@@ -186,15 +189,22 @@ public class UIWindow implements Window, Listener {
 
         if (isVisible()) {
             deactivate(false);
-            boolean immediate = switch (e.getReason()) {
-                case DISCONNECT, UNLOADED, DEATH -> true;
-                default -> false;
-            };
+            boolean immediate = isImmediateCloseReason(inventoryCloseReason(e));
 
             if (immediate || !queueSync(this::callClosed)) {
                 callClosed();
             }
         }
+    }
+
+    static boolean isImmediateCloseReason(Object reason) {
+        if (!(reason instanceof Enum<?> closeReason)) {
+            return false;
+        }
+        return switch (closeReason.name()) {
+            case "DISCONNECT", "UNLOADED", "DEATH" -> true;
+            default -> false;
+        };
     }
 
     private boolean queueSync(Runnable runnable) {
@@ -215,6 +225,25 @@ public class UIWindow implements Window, Listener {
             return taskId != -1;
         } catch (UnsupportedOperationException | IllegalPluginAccessException ex) {
             return false;
+        }
+    }
+
+    private static Method resolveInventoryCloseGetReason() {
+        try {
+            return InventoryCloseEvent.class.getMethod("getReason");
+        } catch (NoSuchMethodException exception) {
+            return null;
+        }
+    }
+
+    private static Object inventoryCloseReason(InventoryCloseEvent event) {
+        if (INVENTORY_CLOSE_GET_REASON == null) {
+            return null;
+        }
+        try {
+            return INVENTORY_CLOSE_GET_REASON.invoke(event);
+        } catch (IllegalAccessException | InvocationTargetException exception) {
+            return null;
         }
     }
 

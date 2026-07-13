@@ -28,8 +28,9 @@ import org.bukkit.Material;
 import org.bukkit.block.data.BlockData;
 import org.bukkit.block.data.Waterlogged;
 import org.bukkit.block.data.type.Leaves;
-import org.bukkit.block.data.type.PointedDripstone;
 
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
@@ -39,6 +40,9 @@ import java.util.stream.Collectors;
 import static org.bukkit.Material.*;
 
 public abstract class BSupport<P> {
+    private static final Class<?> POINTED_DRIPSTONE_CLASS = resolvePointedDripstoneClass();
+    private static final Method POINTED_DRIPSTONE_GET_THICKNESS = resolvePointedDripstoneGetThickness();
+
     private final KMap<String, BlockData> custom = new KMap<>();
 
     private final Material AIR_MATERIAL = Material.AIR;
@@ -680,8 +684,43 @@ public abstract class BSupport<P> {
     public boolean isUpdatable(BlockData mat) {
         return (includeLitInUpdatable() && isLit(mat))
                 || isStorage(mat)
-                || (mat instanceof PointedDripstone
-                && ((PointedDripstone) mat).getThickness().equals(PointedDripstone.Thickness.TIP));
+                || isPointedDripstoneTip(mat);
+    }
+
+    static boolean isPointedDripstoneTip(BlockData blockData) {
+        if (POINTED_DRIPSTONE_CLASS == null || !POINTED_DRIPSTONE_CLASS.isInstance(blockData)
+                || POINTED_DRIPSTONE_GET_THICKNESS == null) {
+            return false;
+        }
+        try {
+            Object value = POINTED_DRIPSTONE_GET_THICKNESS.invoke(blockData);
+            return value instanceof Enum<?> thickness && thickness.name().equals("TIP");
+        } catch (IllegalAccessException | InvocationTargetException exception) {
+            return false;
+        }
+    }
+
+    private static Class<?> resolvePointedDripstoneClass() {
+        try {
+            return Class.forName("org.bukkit.block.data.type.PointedDripstone");
+        } catch (ClassNotFoundException exception) {
+            try {
+                return Class.forName("org.bukkit.block.data.type.Speleothem");
+            } catch (ClassNotFoundException ignored) {
+                return null;
+            }
+        }
+    }
+
+    private static Method resolvePointedDripstoneGetThickness() {
+        if (POINTED_DRIPSTONE_CLASS == null) {
+            return null;
+        }
+        try {
+            return POINTED_DRIPSTONE_CLASS.getMethod("getThickness");
+        } catch (NoSuchMethodException exception) {
+            return null;
+        }
     }
 
     public boolean isFoliage(Material d) {
