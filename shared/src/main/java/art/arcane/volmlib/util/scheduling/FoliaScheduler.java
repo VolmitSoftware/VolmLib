@@ -210,14 +210,14 @@ public final class FoliaScheduler {
         if (scheduler != null) {
             Consumer<Object> consumer = task -> runnable.run();
             if (safeDelay <= 0L) {
-                if (invokeVoidNoThrow(scheduler, "execute", new Class<?>[]{Plugin.class, Runnable.class}, plugin, runnable)) {
+                if (invokeScheduleNoThrow(scheduler, "execute", new Class<?>[]{Plugin.class, Runnable.class}, plugin, runnable) == ScheduleResult.SCHEDULED) {
                     return true;
                 }
 
-                if (invokeVoidNoThrow(scheduler, "run", new Class<?>[]{Plugin.class, Consumer.class}, plugin, consumer)) {
+                if (invokeScheduleNoThrow(scheduler, "run", new Class<?>[]{Plugin.class, Consumer.class}, plugin, consumer) == ScheduleResult.SCHEDULED) {
                     return true;
                 }
-            } else if (invokeVoidNoThrow(scheduler, "runDelayed", new Class<?>[]{Plugin.class, Consumer.class, long.class}, plugin, consumer, safeDelay)) {
+            } else if (invokeScheduleNoThrow(scheduler, "runDelayed", new Class<?>[]{Plugin.class, Consumer.class, long.class}, plugin, consumer, safeDelay) == ScheduleResult.SCHEDULED) {
                 return true;
             }
         }
@@ -257,12 +257,20 @@ public final class FoliaScheduler {
     }
 
     public static boolean runEntity(Plugin plugin, Entity entity, Runnable runnable, long delayTicks) {
+        return runEntity(plugin, entity, runnable, delayTicks, null);
+    }
+
+    public static boolean runEntity(Plugin plugin, Entity entity, Runnable runnable, long delayTicks, Runnable retired) {
         if (!isPluginActive(plugin) || entity == null || runnable == null) {
             return false;
         }
 
         long safeDelay = Math.max(0L, delayTicks);
         if (safeDelay <= 0L && isOwnedByCurrentRegion(entity)) {
+            if (retired != null && !isEntityActive(entity)) {
+                retired.run();
+                return true;
+            }
             runnable.run();
             return true;
         }
@@ -271,82 +279,140 @@ public final class FoliaScheduler {
         if (scheduler == null) {
             scheduler = invokeNoThrow(entity, "getScheduler", new Class<?>[0]);
         }
+
+        Runnable fallbackTask = guardedEntityTask(entity, runnable, retired);
         if (scheduler == null) {
-            return !isFoliaThreading(plugin.getServer()) && runBukkitSync(plugin, runnable, safeDelay);
+            return !isFoliaThreading(plugin.getServer()) && runBukkitSync(plugin, fallbackTask, safeDelay);
         }
 
-        Runnable retired = () -> {
-        };
+        Runnable retireCallback = retired == null ? () -> {
+        } : retired;
         Consumer<Object> consumer = task -> runnable.run();
 
         if (safeDelay <= 0L) {
-            Object executed = invokeNoThrow(
+            ScheduleResult executed = invokeScheduleNoThrow(
                     scheduler,
                     "execute",
                     new Class<?>[]{Plugin.class, Runnable.class, Runnable.class, long.class},
                     plugin,
                     runnable,
-                    retired,
+                    retireCallback,
                     0L
             );
 
-            if (executed instanceof Boolean done && done) {
+            if (executed == ScheduleResult.SCHEDULED) {
                 return true;
             }
 
-            if (invokeVoidNoThrow(
+            if (executed == ScheduleResult.REJECTED) {
+                return notScheduled(retired);
+            }
+
+            ScheduleResult ran = invokeScheduleNoThrow(
                     scheduler,
                     "run",
                     new Class<?>[]{Plugin.class, Consumer.class, Runnable.class},
                     plugin,
                     consumer,
-                    retired
-            )) {
+                    retireCallback
+            );
+
+            if (ran == ScheduleResult.SCHEDULED) {
                 return true;
             }
 
-            if (invokeVoidNoThrow(
+            if (ran == ScheduleResult.REJECTED) {
+                return notScheduled(retired);
+            }
+
+            ScheduleResult delayedOnce = invokeScheduleNoThrow(
                     scheduler,
                     "runDelayed",
                     new Class<?>[]{Plugin.class, Consumer.class, Runnable.class, long.class},
                     plugin,
                     consumer,
-                    retired,
+                    retireCallback,
                     1L
-            )) {
+            );
+
+            if (delayedOnce == ScheduleResult.SCHEDULED) {
                 return true;
             }
 
-            return !isFoliaThreading(plugin.getServer()) && runBukkitSync(plugin, runnable, safeDelay);
+            if (delayedOnce == ScheduleResult.REJECTED) {
+                return notScheduled(retired);
+            }
+
+            return !isFoliaThreading(plugin.getServer()) && runBukkitSync(plugin, fallbackTask, safeDelay);
         }
 
-        if (invokeVoidNoThrow(
+        ScheduleResult delayed = invokeScheduleNoThrow(
                 scheduler,
                 "runDelayed",
                 new Class<?>[]{Plugin.class, Consumer.class, Runnable.class, long.class},
                 plugin,
                 consumer,
-                retired,
+                retireCallback,
                 safeDelay
-        )) {
+        );
+
+        if (delayed == ScheduleResult.SCHEDULED) {
             return true;
         }
 
-        Object executed = invokeNoThrow(
+        if (delayed == ScheduleResult.REJECTED) {
+            return notScheduled(retired);
+        }
+
+        ScheduleResult executed = invokeScheduleNoThrow(
                 scheduler,
                 "execute",
                 new Class<?>[]{Plugin.class, Runnable.class, Runnable.class, long.class},
                 plugin,
                 runnable,
-                retired,
+                retireCallback,
                 safeDelay
         );
 
-        if (executed instanceof Boolean done && done) {
+        if (executed == ScheduleResult.SCHEDULED) {
             return true;
         }
 
-        return !isFoliaThreading(plugin.getServer()) && runBukkitSync(plugin, runnable, safeDelay);
+        if (executed == ScheduleResult.REJECTED) {
+            return notScheduled(retired);
+        }
+
+        return !isFoliaThreading(plugin.getServer()) && runBukkitSync(plugin, fallbackTask, safeDelay);
+    }
+
+    private static boolean notScheduled(Runnable retired) {
+        if (retired != null) {
+            retired.run();
+        }
+
+        return false;
+    }
+
+    private static Runnable guardedEntityTask(Entity entity, Runnable runnable, Runnable retired) {
+        if (retired == null) {
+            return runnable;
+        }
+
+        return () -> {
+            if (isEntityActive(entity)) {
+                runnable.run();
+            } else {
+                retired.run();
+            }
+        };
+    }
+
+    private static boolean isEntityActive(Entity entity) {
+        try {
+            return entity.isValid();
+        } catch (Throwable ignored) {
+            return false;
+        }
     }
 
     public static boolean runAsync(Plugin plugin, Runnable runnable) {
@@ -363,16 +429,16 @@ public final class FoliaScheduler {
         if (scheduler != null) {
             Consumer<Object> consumer = task -> runnable.run();
             if (safeDelay <= 0L) {
-                if (invokeVoidNoThrow(scheduler, "runNow", new Class<?>[]{Plugin.class, Consumer.class}, plugin, consumer)) {
+                if (invokeScheduleNoThrow(scheduler, "runNow", new Class<?>[]{Plugin.class, Consumer.class}, plugin, consumer) == ScheduleResult.SCHEDULED) {
                     return true;
                 }
 
-                if (invokeVoidNoThrow(scheduler, "runNow", new Class<?>[]{Plugin.class, Runnable.class}, plugin, runnable)) {
+                if (invokeScheduleNoThrow(scheduler, "runNow", new Class<?>[]{Plugin.class, Runnable.class}, plugin, runnable) == ScheduleResult.SCHEDULED) {
                     return true;
                 }
             } else {
                 long delayMs = ticksToMilliseconds(safeDelay);
-                if (invokeVoidNoThrow(
+                if (invokeScheduleNoThrow(
                         scheduler,
                         "runDelayed",
                         new Class<?>[]{Plugin.class, Consumer.class, long.class, TimeUnit.class},
@@ -380,11 +446,11 @@ public final class FoliaScheduler {
                         consumer,
                         delayMs,
                         TimeUnit.MILLISECONDS
-                )) {
+                ) == ScheduleResult.SCHEDULED) {
                     return true;
                 }
 
-                if (invokeVoidNoThrow(
+                if (invokeScheduleNoThrow(
                         scheduler,
                         "runDelayed",
                         new Class<?>[]{Plugin.class, Runnable.class, long.class, TimeUnit.class},
@@ -392,15 +458,15 @@ public final class FoliaScheduler {
                         runnable,
                         delayMs,
                         TimeUnit.MILLISECONDS
-                )) {
+                ) == ScheduleResult.SCHEDULED) {
                     return true;
                 }
 
-                if (invokeVoidNoThrow(scheduler, "runDelayed", new Class<?>[]{Plugin.class, Consumer.class, long.class}, plugin, consumer, safeDelay)) {
+                if (invokeScheduleNoThrow(scheduler, "runDelayed", new Class<?>[]{Plugin.class, Consumer.class, long.class}, plugin, consumer, safeDelay) == ScheduleResult.SCHEDULED) {
                     return true;
                 }
 
-                if (invokeVoidNoThrow(scheduler, "runDelayed", new Class<?>[]{Plugin.class, Runnable.class, long.class}, plugin, runnable, safeDelay)) {
+                if (invokeScheduleNoThrow(scheduler, "runDelayed", new Class<?>[]{Plugin.class, Runnable.class, long.class}, plugin, runnable, safeDelay) == ScheduleResult.SCHEDULED) {
                     return true;
                 }
             }
@@ -440,16 +506,16 @@ public final class FoliaScheduler {
             Consumer<Object> consumer = task -> runnable.run();
             if (safeDelay <= 0L) {
                 if (location != null) {
-                    if (invokeVoidNoThrow(scheduler, "execute", new Class<?>[]{Plugin.class, Location.class, Runnable.class}, plugin, location, runnable)) {
+                    if (invokeScheduleNoThrow(scheduler, "execute", new Class<?>[]{Plugin.class, Location.class, Runnable.class}, plugin, location, runnable) == ScheduleResult.SCHEDULED) {
                         return true;
                     }
 
-                    if (invokeVoidNoThrow(scheduler, "run", new Class<?>[]{Plugin.class, Location.class, Consumer.class}, plugin, location, consumer)) {
+                    if (invokeScheduleNoThrow(scheduler, "run", new Class<?>[]{Plugin.class, Location.class, Consumer.class}, plugin, location, consumer) == ScheduleResult.SCHEDULED) {
                         return true;
                     }
                 }
 
-                if (invokeVoidNoThrow(
+                if (invokeScheduleNoThrow(
                         scheduler,
                         "execute",
                         new Class<?>[]{Plugin.class, World.class, int.class, int.class, Runnable.class},
@@ -458,11 +524,11 @@ public final class FoliaScheduler {
                         chunkX,
                         chunkZ,
                         runnable
-                )) {
+                ) == ScheduleResult.SCHEDULED) {
                     return true;
                 }
 
-                if (invokeVoidNoThrow(
+                if (invokeScheduleNoThrow(
                         scheduler,
                         "run",
                         new Class<?>[]{Plugin.class, World.class, int.class, int.class, Consumer.class},
@@ -471,11 +537,11 @@ public final class FoliaScheduler {
                         chunkX,
                         chunkZ,
                         consumer
-                )) {
+                ) == ScheduleResult.SCHEDULED) {
                     return true;
                 }
             } else {
-                if (location != null && invokeVoidNoThrow(
+                if (location != null && invokeScheduleNoThrow(
                         scheduler,
                         "runDelayed",
                         new Class<?>[]{Plugin.class, Location.class, Consumer.class, long.class},
@@ -483,11 +549,11 @@ public final class FoliaScheduler {
                         location,
                         consumer,
                         safeDelay
-                )) {
+                ) == ScheduleResult.SCHEDULED) {
                     return true;
                 }
 
-                if (invokeVoidNoThrow(
+                if (invokeScheduleNoThrow(
                         scheduler,
                         "runDelayed",
                         new Class<?>[]{Plugin.class, World.class, int.class, int.class, Consumer.class, long.class},
@@ -497,7 +563,7 @@ public final class FoliaScheduler {
                         chunkZ,
                         consumer,
                         safeDelay
-                )) {
+                ) == ScheduleResult.SCHEDULED) {
                     return true;
                 }
             }
@@ -823,22 +889,39 @@ public final class FoliaScheduler {
         }
     }
 
-    private static boolean invokeVoidNoThrow(Object target, String methodName, Class<?>[] parameterTypes, Object... args) {
+    private static ScheduleResult invokeScheduleNoThrow(Object target, String methodName, Class<?>[] parameterTypes, Object... args) {
         if (target == null) {
-            return false;
+            return ScheduleResult.UNAVAILABLE;
         }
 
         Method method = cachedMethod(target.getClass(), methodName, parameterTypes);
         if (method == null) {
-            return false;
+            return ScheduleResult.UNAVAILABLE;
         }
 
         try {
-            method.invoke(target, args);
-            return true;
+            return classifyScheduleOutcome(method.getReturnType() == void.class, method.invoke(target, args));
         } catch (Throwable ignored) {
-            return false;
+            return ScheduleResult.UNAVAILABLE;
         }
+    }
+
+    static ScheduleResult classifyScheduleOutcome(boolean voidReturn, Object result) {
+        if (voidReturn) {
+            return ScheduleResult.SCHEDULED;
+        }
+
+        if (result instanceof Boolean scheduled) {
+            return scheduled ? ScheduleResult.SCHEDULED : ScheduleResult.REJECTED;
+        }
+
+        return result == null ? ScheduleResult.REJECTED : ScheduleResult.SCHEDULED;
+    }
+
+    enum ScheduleResult {
+        SCHEDULED,
+        REJECTED,
+        UNAVAILABLE
     }
 
     private static Location safeEntityLocation(Entity entity) {

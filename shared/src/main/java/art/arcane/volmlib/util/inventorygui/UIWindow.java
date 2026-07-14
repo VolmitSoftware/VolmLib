@@ -22,6 +22,7 @@ import java.lang.reflect.Method;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class UIWindow implements Window, Listener {
     private static final Method INVENTORY_CLOSE_GET_REASON = resolveInventoryCloseGetReason();
@@ -189,10 +190,21 @@ public class UIWindow implements Window, Listener {
 
         if (isVisible()) {
             deactivate(false);
-            boolean immediate = isImmediateCloseReason(inventoryCloseReason(e));
 
-            if (immediate || !queueSync(this::callClosed)) {
+            if (isImmediateCloseReason(inventoryCloseReason(e))) {
                 callClosed();
+                return;
+            }
+
+            AtomicBoolean closedOnce = new AtomicBoolean(false);
+            Runnable closeOnce = () -> {
+                if (closedOnce.compareAndSet(false, true)) {
+                    callClosed();
+                }
+            };
+
+            if (!queueSync(closeOnce, closeOnce)) {
+                closeOnce.run();
             }
         }
     }
@@ -208,11 +220,15 @@ public class UIWindow implements Window, Listener {
     }
 
     private boolean queueSync(Runnable runnable) {
+        return queueSync(runnable, null);
+    }
+
+    private boolean queueSync(Runnable runnable, Runnable retired) {
         if (runnable == null || plugin == null || !plugin.isEnabled()) {
             return false;
         }
 
-        if (FoliaScheduler.runEntity(plugin, viewer, runnable, 1L)) {
+        if (FoliaScheduler.runEntity(plugin, viewer, runnable, 1L, retired)) {
             return true;
         }
 

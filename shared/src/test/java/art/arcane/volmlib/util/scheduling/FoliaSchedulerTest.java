@@ -1,5 +1,6 @@
 package art.arcane.volmlib.util.scheduling;
 
+import io.papermc.paper.threadedregions.scheduler.EntityScheduler;
 import org.bukkit.Bukkit;
 import org.bukkit.Server;
 import org.bukkit.World;
@@ -101,6 +102,72 @@ public class FoliaSchedulerTest {
     public void nonFoliaCancellationUsesBukkitScheduler() {
         FoliaScheduler.cancelTasks(plugin);
         assertEquals(List.of("cancelTasks"), schedulerHandler.methodNames());
+    }
+
+    @Test
+    public void classifyScheduleOutcomeReportsSchedulingAccurately() {
+        assertEquals(FoliaScheduler.ScheduleResult.SCHEDULED, FoliaScheduler.classifyScheduleOutcome(true, null));
+        assertEquals(FoliaScheduler.ScheduleResult.SCHEDULED, FoliaScheduler.classifyScheduleOutcome(false, Boolean.TRUE));
+        assertEquals(FoliaScheduler.ScheduleResult.REJECTED, FoliaScheduler.classifyScheduleOutcome(false, Boolean.FALSE));
+        assertEquals(FoliaScheduler.ScheduleResult.REJECTED, FoliaScheduler.classifyScheduleOutcome(false, null));
+        assertEquals(FoliaScheduler.ScheduleResult.SCHEDULED, FoliaScheduler.classifyScheduleOutcome(false, new Object()));
+    }
+
+    @Test
+    public void retiredEntitySchedulingInvokesRetiredAndReportsFailure() {
+        List<String> invoked = new ArrayList<>();
+        Entity entity = entityWithScheduler(retiredEntityScheduler());
+
+        assertFalse(FoliaScheduler.runEntity(plugin, entity, () -> invoked.add("task"), 0L, () -> invoked.add("retired")));
+        assertEquals(List.of("retired"), invoked);
+
+        invoked.clear();
+        assertFalse(FoliaScheduler.runEntity(plugin, entity, () -> invoked.add("task"), 5L, () -> invoked.add("retired")));
+        assertEquals(List.of("retired"), invoked);
+        assertTrue(schedulerHandler.methodNames().isEmpty());
+    }
+
+    @Test
+    public void retiredEntitySchedulingWithoutRetiredCallbackReturnsFalse() {
+        Entity entity = entityWithScheduler(retiredEntityScheduler());
+
+        assertFalse(FoliaScheduler.runEntity(plugin, entity, () -> {
+        }, 0L));
+        assertFalse(FoliaScheduler.runEntity(plugin, entity, () -> {
+        }, 5L));
+        assertTrue(schedulerHandler.methodNames().isEmpty());
+    }
+
+    @Test
+    public void activeEntitySchedulingReportsSuccessWithoutInvokingCallbacks() {
+        List<String> invoked = new ArrayList<>();
+        EntityScheduler entityScheduler = proxy(EntityScheduler.class, (proxy, method, arguments) -> switch (method.getName()) {
+            case "execute" -> true;
+            default -> defaultValue(method.getReturnType());
+        });
+        Entity entity = entityWithScheduler(entityScheduler);
+
+        assertTrue(FoliaScheduler.runEntity(plugin, entity, () -> invoked.add("task"), 0L, () -> invoked.add("retired")));
+        assertTrue(invoked.isEmpty());
+        assertTrue(schedulerHandler.methodNames().isEmpty());
+    }
+
+    private static EntityScheduler retiredEntityScheduler() {
+        return proxy(EntityScheduler.class, (proxy, method, arguments) -> switch (method.getName()) {
+            case "execute" -> false;
+            case "run", "runDelayed", "runAtFixedRate" -> null;
+            default -> defaultValue(method.getReturnType());
+        });
+    }
+
+    private static Entity entityWithScheduler(EntityScheduler entityScheduler) {
+        return proxy(Entity.class, (proxy, method, arguments) -> switch (method.getName()) {
+            case "getScheduler" -> entityScheduler;
+            case "isValid" -> false;
+            case "equals" -> proxy == arguments[0];
+            case "hashCode" -> System.identityHashCode(proxy);
+            default -> defaultValue(method.getReturnType());
+        });
     }
 
     private Plugin plugin(boolean enabled) {
