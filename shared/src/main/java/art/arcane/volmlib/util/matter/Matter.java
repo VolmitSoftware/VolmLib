@@ -156,18 +156,13 @@ public interface Matter {
 
     @SuppressWarnings("unchecked")
     default <T> MatterSlice<T> slice(Class<?> c) {
-        MatterSlice<T> slice = (MatterSlice<T>) getSlice(c);
-        if (slice != null) {
+        return (MatterSlice<T>) getSliceMap().computeIfAbsent(c, type -> {
+            MatterSlice<T> slice = createSlice((Class<T>) type, this);
+            if (slice == null) {
+                throw new IllegalArgumentException("Unsupported matter slice type " + type.getCanonicalName());
+            }
             return slice;
-        }
-
-        slice = (MatterSlice<T>) createSlice((Class<T>) c, this);
-        if (slice == null) {
-            throw new IllegalArgumentException("Unsupported matter slice type " + c.getCanonicalName());
-        }
-
-        putSlice(c, slice);
-        return slice;
+        });
     }
 
     default boolean hasSlice(Class<?> c) {

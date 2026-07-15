@@ -121,11 +121,14 @@ public class DataBits {
         Validate.inclusiveBetween(0L, (this.size - 1), var0);
         Validate.inclusiveBetween(0L, this.mask, var1);
         int var2 = cellIndex(var0);
-        long var3 = this.data.get(var2);
         int var5 = (var0 - var2 * this.valuesPerLong) * this.bits;
-        int var6 = (int) (var3 >> var5 & this.mask);
-        this.data.set(var2, var3 & (this.mask << var5 ^ 0xFFFFFFFFFFFFFFFFL) | (var1 & this.mask) << var5);
-        return var6;
+        long var3;
+        long var4;
+        do {
+            var3 = this.data.get(var2);
+            var4 = var3 & (this.mask << var5 ^ 0xFFFFFFFFFFFFFFFFL) | (var1 & this.mask) << var5;
+        } while (!this.data.compareAndSet(var2, var3, var4));
+        return (int) (var3 >> var5 & this.mask);
     }
 
     @SuppressWarnings("PointlessBitwiseExpression")
@@ -133,10 +136,13 @@ public class DataBits {
         Validate.inclusiveBetween(0L, (this.size - 1), var0);
         Validate.inclusiveBetween(0L, this.mask, var1);
         int var2 = cellIndex(var0);
-        long var3 = this.data.get(var2);
         int var5 = (var0 - var2 * this.valuesPerLong) * this.bits;
-
-        this.data.set(var2, var3 & (this.mask << var5 ^ 0xFFFFFFFFFFFFFFFFL) | (var1 & this.mask) << var5);
+        long var3;
+        long var4;
+        do {
+            var3 = this.data.get(var2);
+            var4 = var3 & (this.mask << var5 ^ 0xFFFFFFFFFFFFFFFFL) | (var1 & this.mask) << var5;
+        } while (!this.data.compareAndSet(var2, var3, var4));
     }
 
     public int get(int var0) {
