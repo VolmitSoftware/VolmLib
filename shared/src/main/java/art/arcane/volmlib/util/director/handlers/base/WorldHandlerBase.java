@@ -4,6 +4,7 @@ import art.arcane.volmlib.util.bukkit.WorldIdentity;
 import art.arcane.volmlib.util.collection.KList;
 import art.arcane.volmlib.util.director.exceptions.DirectorParsingException;
 import org.bukkit.Bukkit;
+import org.bukkit.NamespacedKey;
 import org.bukkit.World;
 
 import java.util.ArrayList;
@@ -35,17 +36,41 @@ public abstract class WorldHandlerBase {
     }
 
     public World parse(String in, boolean force) throws DirectorParsingException {
-        World world;
+        String value = in == null ? "" : in.trim();
+        List<World> options = worldOptions();
+        if (!value.contains(":")) {
+            World match = null;
+            for (World world : options) {
+                boolean matchesName = world.getName().equalsIgnoreCase(value);
+                boolean matchesKeyPath = WorldIdentity.key(world).getKey().equalsIgnoreCase(value);
+                if (!matchesName && !matchesKeyPath) {
+                    continue;
+                }
+                if (match != null && match != world) {
+                    throw new DirectorParsingException("Unable to filter which World \"" + in + "\"");
+                }
+                match = world;
+            }
+
+            if (match != null) {
+                return match;
+            }
+            throw new DirectorParsingException("Unable to find World \"" + in + "\"");
+        }
+
+        NamespacedKey key;
         try {
-            world = WorldIdentity.resolve(in).orElse(null);
+            key = WorldIdentity.parse(value);
         } catch (IllegalArgumentException exception) {
             throw new DirectorParsingException("Invalid world key \"" + in + "\"");
         }
 
-        if (world == null || !worldOptions().contains(world)) {
-            throw new DirectorParsingException("Unable to find World \"" + in + "\"");
+        for (World world : options) {
+            if (key.equals(WorldIdentity.key(world))) {
+                return world;
+            }
         }
-        return world;
+        throw new DirectorParsingException("Unable to find World \"" + in + "\"");
     }
 
     public boolean supports(Class<?> type) {
