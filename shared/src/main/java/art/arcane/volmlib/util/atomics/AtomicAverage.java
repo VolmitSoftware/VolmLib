@@ -40,7 +40,7 @@ public class AtomicAverage {
         cursor = cursor + 1 < size() ? cursor + 1 : 0;
     }
 
-    public double getAverage() {
+    public synchronized double getAverage() {
         if (dirty) {
             calculateAverage();
             return getAverage();

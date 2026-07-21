@@ -1,5 +1,6 @@
 package art.arcane.volmlib.integration;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -19,4 +20,8 @@ public interface IntegrationServiceContract {
     IntegrationHeartbeat heartbeat();
 
     Map<String, IntegrationMetricSample> sampleMetrics(Set<String> metricKeys);
+
+    default List<IntegrationMetricGroup> metricGroups() {
+        return List.of();
+    }
 }

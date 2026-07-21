@@ -1,9 +1,9 @@
 package art.arcane.volmlib.integration;
 
 import java.util.Collection;
-import java.util.HashMap;
-import java.util.Map;
+import java.util.HashSet;
 import java.util.Optional;
+import java.util.Set;
 
 public final class IntegrationProtocolNegotiator {
     private IntegrationProtocolNegotiator() {
@@ -17,36 +17,17 @@ public final class IntegrationProtocolNegotiator {
             return Optional.empty();
         }
 
-        Map<Integer, Integer> localMaxMinorByMajor = toMaxMinorByMajor(local);
-        Map<Integer, Integer> remoteMaxMinorByMajor = toMaxMinorByMajor(remote);
+        Set<IntegrationProtocolVersion> remoteVersions = new HashSet<>(remote);
         IntegrationProtocolVersion selected = null;
-
-        for (Map.Entry<Integer, Integer> entry : localMaxMinorByMajor.entrySet()) {
-            int major = entry.getKey();
-            Integer remoteMaxMinor = remoteMaxMinorByMajor.get(major);
-            if (remoteMaxMinor == null) {
+        for (IntegrationProtocolVersion version : local) {
+            if (version == null || !remoteVersions.contains(version)) {
                 continue;
             }
-
-            int negotiatedMinor = Math.min(entry.getValue(), remoteMaxMinor);
-            IntegrationProtocolVersion candidate = new IntegrationProtocolVersion(major, negotiatedMinor);
-            if (selected == null || candidate.compareTo(selected) > 0) {
-                selected = candidate;
+            if (selected == null || version.compareTo(selected) > 0) {
+                selected = version;
             }
         }
 
         return Optional.ofNullable(selected);
-    }
-
-    private static Map<Integer, Integer> toMaxMinorByMajor(Collection<IntegrationProtocolVersion> versions) {
-        Map<Integer, Integer> out = new HashMap<>();
-        for (IntegrationProtocolVersion version : versions) {
-            if (version == null) {
-                continue;
-            }
-
-            out.merge(version.major(), version.minor(), Math::max);
-        }
-        return out;
     }
 }

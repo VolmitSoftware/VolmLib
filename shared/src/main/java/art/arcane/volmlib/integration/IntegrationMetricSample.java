@@ -12,6 +12,14 @@ public record IntegrationMetricSample(
             throw new IllegalArgumentException("Descriptor cannot be null");
         }
 
+        if (available && (numericValue == null || !Double.isFinite(numericValue))) {
+            throw new IllegalArgumentException("Available metric samples require a finite numeric value");
+        }
+        if (available
+                && (descriptor.type() == IntegrationMetricType.INTEGER || descriptor.type() == IntegrationMetricType.LONG)
+                && numericValue != Math.rint(numericValue)) {
+            throw new IllegalArgumentException("Integral metric samples require an integral numeric value");
+        }
         if (!available) {
             numericValue = null;
         }
