@@ -6,6 +6,14 @@ import art.arcane.volmlib.util.io.FileWatcher;
 import art.arcane.volmlib.util.io.FolderWatcher;
 
 import java.io.File;
+import java.io.IOException;
+import java.nio.file.ClosedWatchServiceException;
+import java.nio.file.FileSystems;
+import java.nio.file.Path;
+import java.nio.file.StandardWatchEventKinds;
+import java.nio.file.WatchEvent;
+import java.nio.file.WatchKey;
+import java.nio.file.WatchService;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
@@ -38,11 +46,15 @@ public class ConfigHotloadEngine {
     private final long fullWatchScanWindowMs;
     private final long signatureScanWindowMs;
 
+    private final Object watcherStateLock = new Object();
     private final List<WatchedFile> fileWatchers = new ArrayList<>();
-    private final List<FolderWatcher> directoryWatchers = new ArrayList<>();
+    private final List<WatchedDirectory> directoryWatchers = new ArrayList<>();
+    private final Map<WatchKey, WatchedDirectory> directoryWatchKeys = new HashMap<>();
+    private final Map<String, WatchKey> directoryWatchKeysByPath = new HashMap<>();
     private final Map<String, String> knownSignatures = new ConcurrentHashMap<>();
     private final Map<String, String> knownContents = new ConcurrentHashMap<>();
 
+    private WatchService directoryWatchService;
     private int fullWatchScanEveryPolls = 1;
     private int fullWatchScanCountdown = 0;
     private int signatureScanEveryPolls = 1;
@@ -77,73 +89,21 @@ public class ConfigHotloadEngine {
     }
 
     public void configure(long pollIntervalMs, Collection<File> watchedFiles, Collection<File> watchedDirectories) {
-        fileWatchers.clear();
-        directoryWatchers.clear();
-        knownSignatures.clear();
-        knownContents.clear();
-
-        long effectivePollInterval = Math.max(100L, pollIntervalMs);
-        fullWatchScanEveryPolls = cycleCountForWindow(effectivePollInterval, fullWatchScanWindowMs);
-        signatureScanEveryPolls = cycleCountForWindow(effectivePollInterval, signatureScanWindowMs);
-        fullWatchScanCountdown = 0;
-        signatureScanCountdown = 0;
-
-        if (watchedFiles != null) {
-            for (File file : watchedFiles) {
-                if (file == null) {
-                    continue;
-                }
-                fileWatchers.add(new WatchedFile(file, new FileWatcher(file)));
-            }
+        synchronized (watcherStateLock) {
+            configureWatcherState(pollIntervalMs, watchedFiles, watchedDirectories);
         }
-
-        if (watchedDirectories != null) {
-            for (File directory : watchedDirectories) {
-                if (directory == null) {
-                    continue;
-                }
-                directoryWatchers.add(new FolderWatcher(directory));
-            }
-        }
-
-        primeKnownSnapshots();
     }
 
     public void clear() {
-        fileWatchers.clear();
-        directoryWatchers.clear();
-        knownSignatures.clear();
-        knownContents.clear();
-        fullWatchScanCountdown = 0;
-        signatureScanCountdown = 0;
+        synchronized (watcherStateLock) {
+            clearWatcherState();
+        }
     }
 
     public Set<File> pollTouchedFiles() {
-        Set<File> touched = new HashSet<>();
-        for (WatchedFile watchedFile : fileWatchers) {
-            if (watchedFile.watcher().checkModified()) {
-                touched.add(watchedFile.file());
-            }
+        synchronized (watcherStateLock) {
+            return pollTouchedFilesLocked();
         }
-
-        boolean fullWatchScan = shouldRunFullWatchScan();
-        for (FolderWatcher watcher : directoryWatchers) {
-            boolean changed = fullWatchScan ? watcher.checkModified() : watcher.checkModifiedFast();
-            if (!changed) {
-                continue;
-            }
-
-            touched.addAll(watcher.getCreated());
-            touched.addAll(watcher.getChanged());
-            touched.addAll(watcher.getDeleted());
-        }
-
-        if (shouldRunSignatureScan()) {
-            touched.addAll(scanForMissedChanges());
-        }
-
-        touched.removeIf(file -> file == null || !managedConfigFilePredicate.test(file));
-        return touched;
     }
 
     public void noteSelfWrite(File file, String rawContent) {
@@ -151,7 +111,9 @@ public class ConfigHotloadEngine {
             return;
         }
 
-        updateKnownSnapshot(file, normalize(rawContent));
+        synchronized (watcherStateLock) {
+            updateKnownSnapshot(file, normalize(rawContent));
+        }
     }
 
     public boolean processFileChange(File file,
@@ -180,6 +142,101 @@ public class ConfigHotloadEngine {
         return applied;
     }
 
+    boolean isDirectoryEventWatchActive() {
+        synchronized (watcherStateLock) {
+            return directoryWatchService != null && !directoryWatchKeys.isEmpty();
+        }
+    }
+
+    private void configureWatcherState(long pollIntervalMs,
+                                       Collection<File> watchedFiles,
+                                       Collection<File> watchedDirectories) {
+        closeDirectoryWatchService();
+        fileWatchers.clear();
+        directoryWatchers.clear();
+        knownSignatures.clear();
+        knownContents.clear();
+
+        long effectivePollInterval = Math.max(100L, pollIntervalMs);
+        fullWatchScanEveryPolls = cycleCountForWindow(effectivePollInterval, fullWatchScanWindowMs);
+        signatureScanEveryPolls = cycleCountForWindow(effectivePollInterval, signatureScanWindowMs);
+        fullWatchScanCountdown = 0;
+        signatureScanCountdown = 0;
+
+        if (watchedFiles != null) {
+            for (File file : watchedFiles) {
+                if (file == null) {
+                    continue;
+                }
+                fileWatchers.add(new WatchedFile(file, new FileWatcher(file)));
+            }
+        }
+
+        if (watchedDirectories != null) {
+            for (File directory : watchedDirectories) {
+                if (directory == null) {
+                    continue;
+                }
+                directoryWatchers.add(new WatchedDirectory(directory, new FolderWatcher(directory)));
+            }
+        }
+
+        initializeDirectoryWatchService();
+        primeKnownSnapshots();
+    }
+
+    private void clearWatcherState() {
+        closeDirectoryWatchService();
+        fileWatchers.clear();
+        directoryWatchers.clear();
+        knownSignatures.clear();
+        knownContents.clear();
+        fullWatchScanCountdown = 0;
+        signatureScanCountdown = 0;
+    }
+
+    private Set<File> pollTouchedFilesLocked() {
+        Set<File> touched = new HashSet<>();
+        for (WatchedFile watchedFile : fileWatchers) {
+            if (watchedFile.watcher().checkModified()) {
+                touched.add(watchedFile.file());
+            }
+        }
+
+        boolean reconciliationRequired = drainDirectoryEvents(touched);
+        boolean fallbackRequired = hasFallbackDirectoryWatchers();
+        boolean fullWatchScan = reconciliationRequired || (fallbackRequired && shouldRunFullWatchScan());
+        if (fullWatchScan && registerFallbackDirectoryWatchers()) {
+            reconciliationRequired = true;
+        }
+
+        if (fallbackRequired || reconciliationRequired) {
+            for (WatchedDirectory watchedDirectory : directoryWatchers) {
+                if (!reconciliationRequired && isDirectoryEventWatched(watchedDirectory)) {
+                    continue;
+                }
+
+                FolderWatcher watcher = watchedDirectory.watcher();
+                boolean changed = fullWatchScan ? watcher.checkModified() : watcher.checkModifiedFast();
+                if (!changed) {
+                    continue;
+                }
+
+                touched.addAll(watcher.getCreated());
+                touched.addAll(watcher.getChanged());
+                touched.addAll(watcher.getDeleted());
+            }
+        }
+
+        boolean signatureFallbackRequired = fallbackRequired && !isDirectoryEventWatchActive();
+        if (reconciliationRequired || (signatureFallbackRequired && shouldRunSignatureScan())) {
+            touched.addAll(scanForMissedChanges());
+        }
+
+        touched.removeIf(file -> file == null || !managedConfigFilePredicate.test(file));
+        return touched;
+    }
+
     private void primeKnownSnapshots() {
         for (File file : safeKnownFiles()) {
             if (file == null || !managedConfigFilePredicate.test(file)) {
@@ -202,7 +259,7 @@ public class ConfigHotloadEngine {
             seenPaths.add(path);
             String now = signature(file);
             String previous = knownSignatures.put(path, now);
-            if (previous != null && !previous.equals(now)) {
+            if (previous == null || !previous.equals(now)) {
                 changed.add(file);
             }
         }
@@ -219,6 +276,126 @@ public class ConfigHotloadEngine {
         }
 
         return changed;
+    }
+
+    private void initializeDirectoryWatchService() {
+        if (directoryWatchers.isEmpty()) {
+            return;
+        }
+
+        try {
+            directoryWatchService = FileSystems.getDefault().newWatchService();
+        } catch (IOException | UnsupportedOperationException e) {
+            directoryWatchService = null;
+            return;
+        }
+
+        registerFallbackDirectoryWatchers();
+    }
+
+    private boolean registerFallbackDirectoryWatchers() {
+        if (directoryWatchService == null) {
+            return false;
+        }
+
+        boolean registered = false;
+        for (WatchedDirectory watchedDirectory : directoryWatchers) {
+            if (isDirectoryEventWatched(watchedDirectory) || !watchedDirectory.directory().isDirectory()) {
+                continue;
+            }
+
+            try {
+                WatchKey key = watchedDirectory.directory().toPath().register(
+                        directoryWatchService,
+                        StandardWatchEventKinds.ENTRY_CREATE,
+                        StandardWatchEventKinds.ENTRY_MODIFY,
+                        StandardWatchEventKinds.ENTRY_DELETE
+                );
+                directoryWatchKeys.put(key, watchedDirectory);
+                directoryWatchKeysByPath.put(watchPath(watchedDirectory.directory()), key);
+                registered = true;
+            } catch (IOException | UnsupportedOperationException e) {
+                directoryWatchKeysByPath.remove(watchPath(watchedDirectory.directory()));
+            }
+        }
+        return registered;
+    }
+
+    private boolean drainDirectoryEvents(Set<File> touched) {
+        if (directoryWatchService == null) {
+            return false;
+        }
+
+        boolean reconciliationRequired = false;
+        try {
+            WatchKey key;
+            while ((key = directoryWatchService.poll()) != null) {
+                WatchedDirectory watchedDirectory = directoryWatchKeys.get(key);
+                if (watchedDirectory == null) {
+                    reconciliationRequired = true;
+                } else {
+                    for (WatchEvent<?> event : key.pollEvents()) {
+                        if (event.kind() == StandardWatchEventKinds.OVERFLOW) {
+                            reconciliationRequired = true;
+                            continue;
+                        }
+
+                        Object context = event.context();
+                        if (context instanceof Path relativePath) {
+                            touched.add(watchedDirectory.directory().toPath().resolve(relativePath).toFile());
+                        } else {
+                            reconciliationRequired = true;
+                        }
+                    }
+                }
+
+                if (!key.reset()) {
+                    WatchedDirectory removed = directoryWatchKeys.remove(key);
+                    if (removed != null) {
+                        directoryWatchKeysByPath.remove(watchPath(removed.directory()));
+                    }
+                    reconciliationRequired = true;
+                }
+            }
+        } catch (ClosedWatchServiceException e) {
+            closeDirectoryWatchService();
+            reconciliationRequired = true;
+        }
+
+        return reconciliationRequired;
+    }
+
+    private boolean hasFallbackDirectoryWatchers() {
+        for (WatchedDirectory watchedDirectory : directoryWatchers) {
+            if (!isDirectoryEventWatched(watchedDirectory)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean isDirectoryEventWatched(WatchedDirectory watchedDirectory) {
+        return directoryWatchKeysByPath.containsKey(watchPath(watchedDirectory.directory()));
+    }
+
+    private String watchPath(File directory) {
+        return directory.getAbsoluteFile().toPath().normalize().toString();
+    }
+
+    private void closeDirectoryWatchService() {
+        WatchService service = directoryWatchService;
+        directoryWatchService = null;
+        directoryWatchKeys.clear();
+        directoryWatchKeysByPath.clear();
+        if (service == null) {
+            return;
+        }
+
+        try {
+            service.close();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
     }
 
     private Collection<File> safeKnownFiles() {
@@ -380,6 +557,9 @@ public class ConfigHotloadEngine {
     }
 
     private record WatchedFile(File file, FileWatcher watcher) {
+    }
+
+    private record WatchedDirectory(File directory, FolderWatcher watcher) {
     }
 
     public record ContentDelta(File file, String before, String after) {

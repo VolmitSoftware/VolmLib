@@ -17,6 +17,8 @@ public @interface Param {
 
     String description() default DEFAULT_DESCRIPTION;
 
+    String descriptionKey() default "";
+
     String defaultValue() default "";
 
     String[] aliases() default "";

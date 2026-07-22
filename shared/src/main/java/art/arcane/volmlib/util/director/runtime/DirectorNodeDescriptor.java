@@ -6,6 +6,7 @@ import java.util.List;
 
 public final class DirectorNodeDescriptor {
     private final String name;
+    private final String descriptionKey;
     private final String description;
     private final List<String> aliases;
     private final DirectorOrigin origin;
@@ -15,6 +16,7 @@ public final class DirectorNodeDescriptor {
 
     public DirectorNodeDescriptor(
             String name,
+            String descriptionKey,
             String description,
             List<String> aliases,
             DirectorOrigin origin,
@@ -23,6 +25,7 @@ public final class DirectorNodeDescriptor {
             List<DirectorParameterDescriptor> parameters
     ) {
         this.name = name;
+        this.descriptionKey = descriptionKey == null ? "" : descriptionKey.trim();
         this.description = description;
         this.aliases = aliases == null ? List.of() : List.copyOf(aliases);
         this.origin = origin;
@@ -37,6 +40,10 @@ public final class DirectorNodeDescriptor {
 
     public String getDescription() {
         return description;
+    }
+
+    public String getDescriptionKey() {
+        return descriptionKey;
     }
 
     public List<String> getAliases() {

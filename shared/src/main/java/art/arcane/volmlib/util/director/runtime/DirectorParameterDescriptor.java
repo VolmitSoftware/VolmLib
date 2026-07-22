@@ -4,6 +4,7 @@ import java.util.List;
 
 public final class DirectorParameterDescriptor {
     private final String name;
+    private final String descriptionKey;
     private final String description;
     private final Class<?> type;
     private final boolean required;
@@ -13,6 +14,7 @@ public final class DirectorParameterDescriptor {
 
     public DirectorParameterDescriptor(
             String name,
+            String descriptionKey,
             String description,
             Class<?> type,
             boolean required,
@@ -21,6 +23,7 @@ public final class DirectorParameterDescriptor {
             List<String> aliases
     ) {
         this.name = name;
+        this.descriptionKey = descriptionKey == null ? "" : descriptionKey.trim();
         this.description = description;
         this.type = type;
         this.required = required;
@@ -35,6 +38,10 @@ public final class DirectorParameterDescriptor {
 
     public String getDescription() {
         return description;
+    }
+
+    public String getDescriptionKey() {
+        return descriptionKey;
     }
 
     public Class<?> getType() {

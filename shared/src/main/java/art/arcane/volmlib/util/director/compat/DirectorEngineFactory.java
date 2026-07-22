@@ -1,13 +1,10 @@
 package art.arcane.volmlib.util.director.compat;
 
+import art.arcane.volmlib.util.director.DirectorEngineOptions;
 import art.arcane.volmlib.util.director.annotations.Director;
-import art.arcane.volmlib.util.director.DirectorParameterHandler;
 import art.arcane.volmlib.util.director.annotations.Param;
-import art.arcane.volmlib.util.director.context.DirectorContextRegistry;
 import art.arcane.volmlib.util.director.parse.DirectorParserRegistry;
 import art.arcane.volmlib.util.director.parse.DirectorStandardParsers;
-import art.arcane.volmlib.util.director.runtime.DirectorExecutionDispatcher;
-import art.arcane.volmlib.util.director.runtime.DirectorInvocationHook;
 import art.arcane.volmlib.util.director.runtime.DirectorNodeDescriptor;
 import art.arcane.volmlib.util.director.runtime.DirectorParameterDescriptor;
 import art.arcane.volmlib.util.director.runtime.DirectorRuntimeEngine;
@@ -26,37 +23,22 @@ public final class DirectorEngineFactory {
     }
 
     public static DirectorRuntimeEngine create(Object root) {
-        return create(root, null, null, null, null, null);
+        return create(root, DirectorEngineOptions.builder().build());
     }
 
-    public static DirectorRuntimeEngine create(
-            Object root,
-            DirectorParserRegistry parsers,
-            DirectorContextRegistry contexts,
-            DirectorExecutionDispatcher dispatcher
-    ) {
-        return create(root, parsers, contexts, dispatcher, null, null);
-    }
-
-    public static DirectorRuntimeEngine create(
-            Object root,
-            DirectorParserRegistry parsers,
-            DirectorContextRegistry contexts,
-            DirectorExecutionDispatcher dispatcher,
-            DirectorInvocationHook invocationHook,
-            List<? extends DirectorParameterHandler<?>> legacyHandlers
-    ) {
+    public static DirectorRuntimeEngine create(Object root, DirectorEngineOptions options) {
         if (root == null) {
             throw new IllegalArgumentException("Root command object cannot be null");
         }
+        if (options == null) {
+            throw new IllegalArgumentException("Director engine options cannot be null");
+        }
 
-        DirectorParserRegistry parserRegistry = parsers == null ? new DirectorParserRegistry() : parsers;
+        DirectorParserRegistry parserRegistry = options.getParsers();
         DirectorStandardParsers.registerDefaults(parserRegistry);
-        DirectorContextRegistry contextRegistry = contexts == null ? new DirectorContextRegistry() : contexts;
-        DirectorExecutionDispatcher executionDispatcher = dispatcher == null ? DirectorExecutionDispatcher.IMMEDIATE : dispatcher;
 
         DirectorRuntimeNode rootNode = buildTree(root, null);
-        return new DirectorRuntimeEngine(rootNode, parserRegistry, contextRegistry, executionDispatcher, legacyHandlers, invocationHook);
+        return new DirectorRuntimeEngine(rootNode, options);
     }
 
     private static DirectorRuntimeNode buildTree(Object instance, DirectorRuntimeNode parent) {

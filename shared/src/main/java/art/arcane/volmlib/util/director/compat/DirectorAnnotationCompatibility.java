@@ -26,6 +26,7 @@ public final class DirectorAnnotationCompatibility {
         String name = director.name().isEmpty() ? type.getSimpleName() : director.name();
         return Optional.of(new DirectorNodeDescriptor(
                 name,
+                resolveDescriptionKey(director.descriptionKey()),
                 resolveDescription(director.description()),
                 readAliases(director.aliases()),
                 director.origin(),
@@ -54,6 +55,7 @@ public final class DirectorAnnotationCompatibility {
             String defaultValue = param.defaultValue().trim();
             parameters.add(new DirectorParameterDescriptor(
                     paramName,
+                    resolveDescriptionKey(param.descriptionKey()),
                     resolveDescription(param.description()),
                     parameter.getType(),
                     defaultValue.isEmpty(),
@@ -68,6 +70,7 @@ public final class DirectorAnnotationCompatibility {
 
         return Optional.of(new DirectorNodeDescriptor(
                 name,
+                resolveDescriptionKey(director.descriptionKey()),
                 resolveDescription(director.description()),
                 readAliases(director.aliases()),
                 origin,
@@ -93,10 +96,20 @@ public final class DirectorAnnotationCompatibility {
     }
 
     private static String resolveDescription(String description) {
-        if (description == null || description.trim().isEmpty()) {
-            return Director.DEFAULT_DESCRIPTION;
+        if (description == null
+                || description.trim().isEmpty()
+                || Director.DEFAULT_DESCRIPTION.equals(description)) {
+            return "";
         }
 
         return description;
+    }
+
+    private static String resolveDescriptionKey(String descriptionKey) {
+        if (descriptionKey == null) {
+            return "";
+        }
+
+        return descriptionKey.trim();
     }
 }

@@ -1,6 +1,8 @@
 package art.arcane.volmlib.util.director.runtime;
 
+import art.arcane.volmlib.util.director.DirectorEngineOptions;
 import art.arcane.volmlib.util.director.DirectorParameterHandler;
+import art.arcane.volmlib.util.director.DirectorTextResolver;
 import art.arcane.volmlib.util.director.context.DirectorContextMap;
 import art.arcane.volmlib.util.director.context.DirectorContextRegistry;
 import art.arcane.volmlib.util.director.parse.DirectorConfidence;
@@ -8,6 +10,8 @@ import art.arcane.volmlib.util.director.parse.DirectorParser;
 import art.arcane.volmlib.util.director.parse.DirectorParserRegistry;
 import art.arcane.volmlib.util.director.parse.DirectorTokenizationSupport;
 import art.arcane.volmlib.util.director.parse.DirectorValue;
+import art.arcane.volmlib.util.localization.MessageArgument;
+import art.arcane.volmlib.util.localization.TextKey;
 
 import java.lang.reflect.InvocationTargetException;
 import java.util.ArrayList;
@@ -15,6 +19,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -26,30 +31,16 @@ public final class DirectorRuntimeEngine implements DirectorCommandEngine {
     private final DirectorExecutionDispatcher dispatcher;
     private final List<DirectorParameterHandler<?>> legacyHandlers;
     private final DirectorInvocationHook invocationHook;
+    private final DirectorTextResolver textResolver;
 
-    public DirectorRuntimeEngine(
-            DirectorRuntimeNode root,
-            DirectorParserRegistry parsers,
-            DirectorContextRegistry contexts,
-            DirectorExecutionDispatcher dispatcher
-    ) {
-        this(root, parsers, contexts, dispatcher, List.of(), DirectorInvocationHook.NOOP);
-    }
-
-    public DirectorRuntimeEngine(
-            DirectorRuntimeNode root,
-            DirectorParserRegistry parsers,
-            DirectorContextRegistry contexts,
-            DirectorExecutionDispatcher dispatcher,
-            List<? extends DirectorParameterHandler<?>> legacyHandlers,
-            DirectorInvocationHook invocationHook
-    ) {
+    public DirectorRuntimeEngine(DirectorRuntimeNode root, DirectorEngineOptions options) {
         this.root = root;
-        this.parsers = parsers;
-        this.contexts = contexts;
-        this.dispatcher = dispatcher == null ? DirectorExecutionDispatcher.IMMEDIATE : dispatcher;
-        this.legacyHandlers = legacyHandlers == null ? List.of() : List.copyOf(legacyHandlers);
-        this.invocationHook = invocationHook == null ? DirectorInvocationHook.NOOP : invocationHook;
+        this.parsers = options.getParsers();
+        this.contexts = options.getContexts();
+        this.dispatcher = options.getDispatcher();
+        this.legacyHandlers = options.getLegacyHandlers();
+        this.invocationHook = options.getInvocationHook();
+        this.textResolver = options.getTextResolver();
     }
 
     public DirectorRuntimeNode getRoot() {
@@ -74,6 +65,10 @@ public final class DirectorRuntimeEngine implements DirectorCommandEngine {
 
     public DirectorInvocationHook getInvocationHook() {
         return invocationHook;
+    }
+
+    public DirectorTextResolver getTextResolver() {
+        return textResolver;
     }
 
     @Override
@@ -136,8 +131,9 @@ public final class DirectorRuntimeEngine implements DirectorCommandEngine {
     private DirectorExecutionResult invokeNode(DirectorInvocation invocation, DirectorRuntimeNode node, List<String> rawArgs) {
         DirectorSender sender = invocation.getSender();
         if (!node.getDescriptor().getOrigin().validFor(sender.isPlayer())) {
-            sender.sendMessage("This command cannot be run from this origin.");
-            return DirectorExecutionResult.failure("Invalid origin");
+            String message = resolveText(DirectorRuntimeMessages.INVALID_ORIGIN);
+            sender.sendMessage(message);
+            return DirectorExecutionResult.failure(message);
         }
 
         DirectorContextMap contextMap = new DirectorContextMap();
@@ -163,7 +159,12 @@ public final class DirectorRuntimeEngine implements DirectorCommandEngine {
             if (raw != null) {
                 ValueResult result = parseValue(parameter, raw);
                 if (!result.valid) {
-                    String message = "Cannot convert \"" + raw + "\" into " + descriptor.getType().getSimpleName() + " for " + descriptor.getName();
+                    String message = resolveText(
+                            DirectorRuntimeMessages.CONVERSION_FAILED,
+                            MessageArgument.untrusted("value", raw),
+                            MessageArgument.untrusted("type", descriptor.getType().getSimpleName()),
+                            MessageArgument.untrusted("parameter", descriptor.getName())
+                    );
                     sender.sendMessage(message);
                     return DirectorExecutionResult.failure(message);
                 }
@@ -177,7 +178,10 @@ public final class DirectorRuntimeEngine implements DirectorCommandEngine {
             if (value == null && descriptor.getDefaultValue() != null && !descriptor.getDefaultValue().trim().isEmpty()) {
                 ValueResult defaultResult = parseValue(parameter, descriptor.getDefaultValue());
                 if (!defaultResult.valid) {
-                    String message = "Cannot parse default value for parameter " + descriptor.getName();
+                    String message = resolveText(
+                            DirectorRuntimeMessages.DEFAULT_PARSE_FAILED,
+                            MessageArgument.untrusted("parameter", descriptor.getName())
+                    );
                     sender.sendMessage(message);
                     return DirectorExecutionResult.failure(message);
                 }
@@ -185,7 +189,11 @@ public final class DirectorRuntimeEngine implements DirectorCommandEngine {
             }
 
             if (descriptor.isRequired() && value == null) {
-                String message = "Missing argument \"" + descriptor.getName() + "\" (" + descriptor.getType().getSimpleName() + ")";
+                String message = resolveText(
+                        DirectorRuntimeMessages.MISSING_ARGUMENT,
+                        MessageArgument.untrusted("parameter", descriptor.getName()),
+                        MessageArgument.untrusted("type", descriptor.getType().getSimpleName())
+                );
                 sender.sendMessage(message);
                 return DirectorExecutionResult.failure(message);
             }
@@ -205,7 +213,11 @@ public final class DirectorRuntimeEngine implements DirectorCommandEngine {
         try {
             dispatcher.dispatch(node.getDescriptor().getExecutionMode(), invokeTask);
         } catch (Throwable e) {
-            String message = "Failed to execute command " + node.path() + ": " + safeMessage(e);
+            String message = resolveText(
+                    DirectorRuntimeMessages.EXECUTION_FAILED,
+                    MessageArgument.untrusted("command", node.path()),
+                    MessageArgument.untrusted("reason", safeMessage(e))
+            );
             sender.sendMessage(message);
             return DirectorExecutionResult.failure(message);
         }
@@ -244,7 +256,10 @@ public final class DirectorRuntimeEngine implements DirectorCommandEngine {
                 if (parameter != null) {
                     mapped.putIfAbsent(parameter, value);
                 } else {
-                    errors.add("Unknown parameter key: " + key);
+                    errors.add(resolveText(
+                            DirectorRuntimeMessages.UNKNOWN_PARAMETER,
+                            MessageArgument.untrusted("key", key)
+                    ));
                 }
             } else {
                 positional.add(token);
@@ -268,14 +283,17 @@ public final class DirectorRuntimeEngine implements DirectorCommandEngine {
         }
 
         for (int i = position; i < positional.size(); i++) {
-            errors.add("Unexpected argument \"" + positional.get(i) + "\". Optional parameters must be keyed, e.g. seed=123");
+            errors.add(resolveText(
+                    DirectorRuntimeMessages.UNEXPECTED_ARGUMENT,
+                    MessageArgument.untrusted("argument", positional.get(i))
+            ));
         }
 
         return new MappingResult(mapped, errors);
     }
 
     private String usage(DirectorRuntimeNode node) {
-        StringBuilder out = new StringBuilder("Usage: ").append(node.path());
+        StringBuilder out = new StringBuilder(node.path());
         for (DirectorRuntimeParameter parameter : node.getParameters()) {
             DirectorParameterDescriptor descriptor = parameter.getDescriptor();
             if (descriptor.isContextual()) {
@@ -289,7 +307,10 @@ public final class DirectorRuntimeEngine implements DirectorCommandEngine {
             }
         }
 
-        return out.toString();
+        return resolveText(
+                DirectorRuntimeMessages.USAGE,
+                MessageArgument.untrusted("usage", out.toString())
+        );
     }
 
     private ValueResult parseValue(DirectorRuntimeParameter parameter, String raw) {
@@ -348,8 +369,8 @@ public final class DirectorRuntimeEngine implements DirectorCommandEngine {
 
         for (Object constant : constants) {
             String name = ((Enum<?>) constant).name();
-            String loweredName = name.toLowerCase();
-            String loweredInput = in.toLowerCase();
+            String loweredName = name.toLowerCase(Locale.ROOT);
+            String loweredInput = in.toLowerCase(Locale.ROOT);
             if (loweredName.contains(loweredInput) || loweredInput.contains(loweredName)) {
                 return constant;
             }
@@ -359,7 +380,7 @@ public final class DirectorRuntimeEngine implements DirectorCommandEngine {
         Object best = null;
         for (Object constant : constants) {
             String name = ((Enum<?>) constant).name();
-            int distance = levenshtein(name.toLowerCase(), in.toLowerCase());
+            int distance = levenshtein(name.toLowerCase(Locale.ROOT), in.toLowerCase(Locale.ROOT));
             if (distance < bestDistance) {
                 bestDistance = distance;
                 best = constant;
@@ -394,7 +415,7 @@ public final class DirectorRuntimeEngine implements DirectorCommandEngine {
 
     private List<String> childNameSuggestions(DirectorRuntimeNode node, String partial) {
         Set<String> suggestions = new LinkedHashSet<>();
-        String normalized = partial == null ? "" : partial.trim().toLowerCase();
+        String normalized = partial == null ? "" : partial.trim().toLowerCase(Locale.ROOT);
 
         for (DirectorRuntimeNode child : node.getChildren()) {
             for (String name : child.allNames()) {
@@ -403,7 +424,7 @@ public final class DirectorRuntimeEngine implements DirectorCommandEngine {
                     continue;
                 }
 
-                String lowered = name.toLowerCase();
+                String lowered = name.toLowerCase(Locale.ROOT);
                 if (lowered.startsWith(normalized) || lowered.contains(normalized) || normalized.contains(lowered)) {
                     suggestions.add(name);
                 }
@@ -483,8 +504,8 @@ public final class DirectorRuntimeEngine implements DirectorCommandEngine {
                 continue;
             }
 
-            String lowered = suggestion.toLowerCase();
-            String loweredLast = last.toLowerCase();
+            String lowered = suggestion.toLowerCase(Locale.ROOT);
+            String loweredLast = last.toLowerCase(Locale.ROOT);
             if (lowered.startsWith(loweredLast) || lowered.contains(loweredLast) || loweredLast.contains(lowered)) {
                 suggestions.add(suggestion);
             }
@@ -510,7 +531,7 @@ public final class DirectorRuntimeEngine implements DirectorCommandEngine {
 
     private List<String> parameterValueSuggestions(DirectorRuntimeParameter parameter, String input) {
         DirectorParameterDescriptor descriptor = parameter.getDescriptor();
-        String normalized = input == null ? "" : input.trim().toLowerCase();
+        String normalized = input == null ? "" : input.trim().toLowerCase(Locale.ROOT);
         Set<String> suggestions = new LinkedHashSet<>();
 
         DirectorParameterHandler<?> customHandler = parameter.getCustomHandlerOrNull();
@@ -546,7 +567,7 @@ public final class DirectorRuntimeEngine implements DirectorCommandEngine {
             Object[] constants = type.getEnumConstants();
             if (constants != null) {
                 for (Object constant : constants) {
-                    suggestions.add(((Enum<?>) constant).name().toLowerCase());
+                    suggestions.add(((Enum<?>) constant).name().toLowerCase(Locale.ROOT));
                 }
             }
         } else if (type == Boolean.class || type == boolean.class) {
@@ -560,7 +581,7 @@ public final class DirectorRuntimeEngine implements DirectorCommandEngine {
 
         return suggestions.stream()
                 .filter(s -> {
-                    String lowered = s.toLowerCase();
+                    String lowered = s.toLowerCase(Locale.ROOT);
                     return lowered.startsWith(normalized) || lowered.contains(normalized) || normalized.contains(lowered);
                 })
                 .sorted(String::compareToIgnoreCase)
@@ -661,11 +682,11 @@ public final class DirectorRuntimeEngine implements DirectorCommandEngine {
 
     private int bestScore(List<String> names, String input) {
         int best = Integer.MAX_VALUE;
-        String loweredInput = input.toLowerCase();
+        String loweredInput = input.toLowerCase(Locale.ROOT);
         int threshold = Math.max(1, loweredInput.length() / 3);
 
         for (String candidate : names) {
-            String loweredCandidate = candidate.toLowerCase();
+            String loweredCandidate = candidate.toLowerCase(Locale.ROOT);
             if (loweredCandidate.equals(loweredInput)) {
                 return 0;
             }
@@ -720,11 +741,12 @@ public final class DirectorRuntimeEngine implements DirectorCommandEngine {
         return DirectorTokenizationSupport.tokenize(args.toArray(String[]::new), trim);
     }
 
-    private String safeMessage(Throwable throwable) {
-        if (throwable == null) {
-            return "Unknown error";
-        }
+    private String resolveText(TextKey key, MessageArgument... arguments) {
+        String resolved = textResolver.resolve(key, arguments);
+        return resolved == null ? DirectorTextResolver.ENGLISH.resolve(key, arguments) : resolved;
+    }
 
+    private String safeMessage(Throwable throwable) {
         String message = throwable.getMessage();
         return message == null || message.trim().isEmpty() ? throwable.getClass().getSimpleName() : message;
     }

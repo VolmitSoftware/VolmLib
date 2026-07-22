@@ -5,6 +5,5 @@ public interface DirectorSender {
 
     boolean isPlayer();
 
-    default void sendMessage(String message) {
-    }
+    void sendMessage(String message);
 }

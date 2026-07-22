@@ -1,18 +1,108 @@
 package art.arcane.volmlib.util.director.help;
 
+import art.arcane.volmlib.util.director.DirectorTextResolver;
 import art.arcane.volmlib.util.director.theme.DirectorProduct;
 import art.arcane.volmlib.util.director.theme.DirectorTheme;
 import art.arcane.volmlib.util.director.runtime.DirectorParameterDescriptor;
 import art.arcane.volmlib.util.director.runtime.DirectorRuntimeEngine;
 import art.arcane.volmlib.util.director.runtime.DirectorRuntimeNode;
+import art.arcane.volmlib.util.localization.MessageArgs;
+import art.arcane.volmlib.util.localization.TextKey;
 
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 
 public final class DirectorMiniMenu {
     private DirectorMiniMenu() {
+    }
+
+    public static void deliver(Object sender, List<String> lines) {
+        if (sender == null || lines == null) {
+            return;
+        }
+
+        for (String line : lines) {
+            deliverLine(sender, line);
+        }
+    }
+
+    private static void deliverLine(Object sender, String line) {
+        if (line == null || line.trim().isEmpty()) {
+            return;
+        }
+
+        try {
+            sender.getClass().getMethod("sendRichMessage", String.class).invoke(sender, line);
+            return;
+        } catch (Throwable ignored) {
+        }
+
+        try {
+            sender.getClass().getMethod("sendMessage", String.class)
+                    .invoke(sender, stripMiniMessage(line));
+        } catch (Throwable ignored) {
+        }
+    }
+
+    static String stripMiniMessage(String input) {
+        if (input == null || input.isEmpty()) {
+            return "";
+        }
+
+        StringBuilder out = new StringBuilder(input.length());
+        int index = 0;
+        int length = input.length();
+        while (index < length) {
+            char current = input.charAt(index);
+
+            if (current == '\\' && index + 1 < length) {
+                char escaped = input.charAt(index + 1);
+                if (escaped == '<' || escaped == '>') {
+                    out.append(escaped);
+                    index += 2;
+                    continue;
+                }
+                out.append(current);
+                index++;
+                continue;
+            }
+
+            if (current == '<') {
+                int scan = index + 1;
+                boolean quoted = false;
+                while (scan < length) {
+                    char inside = input.charAt(scan);
+                    if (inside == '\\' && scan + 1 < length) {
+                        scan += 2;
+                        continue;
+                    }
+                    if (inside == '\'') {
+                        quoted = !quoted;
+                        scan++;
+                        continue;
+                    }
+                    if (inside == '>' && !quoted) {
+                        break;
+                    }
+                    scan++;
+                }
+                if (scan < length) {
+                    index = scan + 1;
+                    continue;
+                }
+                out.append(current);
+                index++;
+                continue;
+            }
+
+            out.append(current);
+            index++;
+        }
+
+        return out.toString();
     }
 
     public static Optional<DirectorHelpPage> resolveHelp(DirectorRuntimeEngine engine, List<String> rawArgs, int pageSize) {
@@ -56,37 +146,40 @@ public final class DirectorMiniMenu {
         return Optional.of(new DirectorHelpPage(target, List.copyOf(slice), page, totalPages));
     }
 
-    public static List<String> render(DirectorHelpPage page, Theme theme) {
+    public static List<String> render(DirectorHelpPage page, Theme theme, DirectorTextResolver resolver) {
         if (page == null || theme == null) {
             return List.of();
         }
 
+        DirectorTextResolver activeResolver = resolver == null ? DirectorTextResolver.ENGLISH : resolver;
         List<String> lines = new ArrayList<>();
         lines.add("");
-        lines.add("<font:minecraft:uniform><strikethrough><gradient:" + theme.borderLeft() + ":" + theme.borderRight() + ">[" + spaces(54) + "]</gradient></font>");
+        lines.add("<font:minecraft:uniform><strikethrough><gradient:" + theme.borderLeft() + ":" + theme.borderRight() + ">[" + spaces(54) + "]</gradient></strikethrough></font>");
         lines.add("<font:minecraft:uniform><gradient:" + theme.primaryLeft() + ":" + theme.primaryRight() + ">" + escapeText(page.title()) + "</gradient></font>");
 
         if (page.node().getParent() != null) {
-            lines.add("<hover:show_text:'Return to parent command group'><click:run_command:" + page.parentCommand() + "><font:minecraft:uniform><" + theme.primaryRight() + ">〈 Back</" + theme.primaryRight() + "></font></click></hover>");
+            lines.add("<hover:show_text:'" + escapeAttr(escapeText(resolve(activeResolver, DirectorHelpMessages.PARENT_HOVER)))
+                    + "'><click:run_command:" + page.parentCommand() + "><font:minecraft:uniform><" + theme.primaryRight() + ">〈 "
+                    + escapeText(resolve(activeResolver, DirectorHelpMessages.BACK)) + "</" + theme.primaryRight() + "></font></click></hover>");
         }
 
         if (page.entries().isEmpty()) {
-            lines.add("<" + theme.muted() + ">No subcommands on this page.</" + theme.muted() + ">");
+            lines.add("<" + theme.muted() + ">" + escapeText(resolve(activeResolver, DirectorHelpMessages.NO_SUBCOMMANDS)) + "</" + theme.muted() + ">");
         } else {
             for (DirectorRuntimeNode node : page.entries()) {
-                lines.add(renderNodeLine(node, theme));
+                lines.add(renderNodeLine(node, theme, activeResolver));
             }
         }
 
-        lines.add(renderFooter(page, theme));
-        lines.add("<font:minecraft:uniform><strikethrough><gradient:" + theme.borderLeft() + ":" + theme.borderRight() + ">[" + spaces(54) + "]</gradient></font>");
+        lines.add(renderFooter(page, theme, activeResolver));
+        lines.add("<font:minecraft:uniform><strikethrough><gradient:" + theme.borderLeft() + ":" + theme.borderRight() + ">[" + spaces(54) + "]</gradient></strikethrough></font>");
         return lines;
     }
 
-    private static String renderNodeLine(DirectorRuntimeNode node, Theme theme) {
+    private static String renderNodeLine(DirectorRuntimeNode node, Theme theme, DirectorTextResolver resolver) {
         String clickType = node.isInvocable() ? "suggest_command" : "run_command";
         String clickTarget = node.isInvocable() ? node.path() + " " : node.path() + " help=1";
-        String hover = renderNodeHover(node, theme);
+        String hover = renderNodeHover(node, theme, resolver);
         String aliases = renderAliases(node, theme);
 
         return "<hover:show_text:'" + hover + "'>"
@@ -97,7 +190,7 @@ public final class DirectorMiniMenu {
                 + renderParameterSummary(node, theme);
     }
 
-    private static String renderNodeHover(DirectorRuntimeNode node, Theme theme) {
+    private static String renderNodeHover(DirectorRuntimeNode node, Theme theme, DirectorTextResolver resolver) {
         String nl = "<reset>\n";
         StringBuilder hover = new StringBuilder();
         hover.append("<").append(theme.primaryRight()).append(">")
@@ -107,7 +200,9 @@ public final class DirectorMiniMenu {
 
         String description = node.getDescriptor().getDescription();
         if (description == null || description.trim().isEmpty()) {
-            description = "No description provided";
+            description = resolve(resolver, DirectorHelpMessages.NO_DESCRIPTION);
+        } else {
+            description = resolveDescription(resolver, node.getDescriptor().getDescriptionKey(), description);
         }
 
         hover.append("<").append(theme.description()).append(">")
@@ -116,60 +211,67 @@ public final class DirectorMiniMenu {
 
         if (!node.getDescriptor().getAliases().isEmpty()) {
             hover.append(nl)
-                    .append("<").append(theme.muted()).append(">Aliases: ")
+                    .append("<").append(theme.muted()).append(">")
+                    .append(escapeText(resolve(resolver, DirectorHelpMessages.ALIASES))).append(": ")
                     .append(escapeText(String.join(", ", node.getDescriptor().getAliases())))
                     .append("</").append(theme.muted()).append(">");
         }
 
         if (!node.isInvocable()) {
             hover.append(nl)
-                    .append("<").append(theme.optional()).append(">Command group. Click to open.</").append(theme.optional()).append(">");
+                    .append("<").append(theme.optional()).append(">")
+                    .append(escapeText(resolve(resolver, DirectorHelpMessages.COMMAND_GROUP)))
+                    .append("</").append(theme.optional()).append(">");
             return escapeAttr(hover.toString());
         }
 
         List<DirectorParameterDescriptor> visibleParameters = visibleParameters(node);
         if (visibleParameters.isEmpty()) {
             hover.append(nl)
-                    .append("<").append(theme.optional()).append(">No parameters. Click to prefill command.</").append(theme.optional()).append(">");
+                    .append("<").append(theme.optional()).append(">")
+                    .append(escapeText(resolve(resolver, DirectorHelpMessages.NO_PARAMETERS)))
+                    .append("</").append(theme.optional()).append(">");
             return escapeAttr(hover.toString());
         }
 
         hover.append(nl)
-                .append("<").append(theme.optional()).append(">Parameters:</").append(theme.optional()).append(">");
+                .append("<").append(theme.optional()).append(">")
+                .append(escapeText(resolve(resolver, DirectorHelpMessages.PARAMETERS))).append(":</")
+                .append(theme.optional()).append(">");
         for (DirectorParameterDescriptor parameter : visibleParameters) {
-            hover.append(nl).append(renderParameterHover(parameter, theme));
+            hover.append(nl).append(renderParameterHover(parameter, theme, resolver));
         }
 
         return escapeAttr(hover.toString());
     }
 
-    private static String renderParameterHover(DirectorParameterDescriptor parameter, Theme theme) {
+    private static String renderParameterHover(DirectorParameterDescriptor parameter, Theme theme, DirectorTextResolver resolver) {
         String name = escapeText(parameter.getName());
-        String color = parameter.isContextual()
-                ? theme.contextual()
-                : (parameter.isRequired() ? theme.required() : theme.optional());
+        String color = parameter.isRequired() ? theme.required() : theme.optional();
 
         StringBuilder out = new StringBuilder();
         out.append("<").append(color).append(">• ").append(name).append("</").append(color).append(">");
 
         String description = parameter.getDescription();
-        if (description != null && !description.trim().isEmpty()) {
-            out.append(" <").append(theme.description()).append(">")
-                    .append(escapeText(description))
-                    .append("</").append(theme.description()).append(">");
+        if (description == null || description.trim().isEmpty()) {
+            description = resolve(resolver, DirectorHelpMessages.NO_DESCRIPTION);
+        } else {
+            description = resolveDescription(resolver, parameter.getDescriptionKey(), description);
         }
+        out.append(" <").append(theme.description()).append(">")
+                .append(escapeText(description))
+                .append("</").append(theme.description()).append(">");
 
         out.append(" <").append(theme.muted()).append(">(")
                 .append(escapeText(parameter.getType().getSimpleName()));
-        if (parameter.isContextual()) {
-            out.append(", contextual");
-        } else if (parameter.isRequired()) {
-            out.append(", required");
+        if (parameter.isRequired()) {
+            out.append(", ").append(escapeText(resolve(resolver, DirectorHelpMessages.REQUIRED)));
         } else {
-            out.append(", optional");
+            out.append(", ").append(escapeText(resolve(resolver, DirectorHelpMessages.OPTIONAL)));
         }
         if (parameter.getDefaultValue() != null && !parameter.getDefaultValue().isBlank()) {
-            out.append(", default=").append(escapeText(parameter.getDefaultValue()));
+            out.append(", ").append(escapeText(resolve(resolver, DirectorHelpMessages.DEFAULT))).append("=")
+                    .append(escapeText(parameter.getDefaultValue()));
         }
         out.append(")</").append(theme.muted()).append(">");
 
@@ -222,15 +324,18 @@ public final class DirectorMiniMenu {
         return visible;
     }
 
-    private static String renderFooter(DirectorHelpPage page, Theme theme) {
+    private static String renderFooter(DirectorHelpPage page, Theme theme, DirectorTextResolver resolver) {
         StringBuilder line = new StringBuilder();
         if (page.hasPrevious()) {
-            line.append("<hover:show_text:'Previous page'>")
+            line.append("<hover:show_text:'")
+                    .append(escapeAttr(escapeText(resolve(resolver, DirectorHelpMessages.PREVIOUS_PAGE))))
+                    .append("'>")
                     .append("<click:run_command:")
                     .append(page.previousCommand())
                     .append("><")
                     .append(theme.primaryLeft())
-                    .append(">〈 Page ")
+                    .append(">〈 ")
+                    .append(escapeText(resolve(resolver, DirectorHelpMessages.PAGE))).append(" ")
                     .append(page.page() - 1)
                     .append("</")
                     .append(theme.primaryLeft())
@@ -238,16 +343,19 @@ public final class DirectorMiniMenu {
         }
 
         line.append("<").append(theme.muted()).append(">")
-                .append("Page ").append(page.page()).append(" / ").append(page.totalPages())
+                .append(escapeText(resolve(resolver, DirectorHelpMessages.PAGE))).append(" ")
+                .append(page.page()).append(" / ").append(page.totalPages())
                 .append("</").append(theme.muted()).append(">");
 
         if (page.hasNext()) {
-            line.append(" <hover:show_text:'Next page'>")
+            line.append(" <hover:show_text:'")
+                    .append(escapeAttr(escapeText(resolve(resolver, DirectorHelpMessages.NEXT_PAGE))))
+                    .append("'>")
                     .append("<click:run_command:")
                     .append(page.nextCommand())
                     .append("><")
                     .append(theme.primaryRight())
-                    .append(">Page ")
+                    .append(">").append(escapeText(resolve(resolver, DirectorHelpMessages.PAGE))).append(" ")
                     .append(page.page() + 1)
                     .append(" ❭</")
                     .append(theme.primaryRight())
@@ -255,6 +363,22 @@ public final class DirectorMiniMenu {
         }
 
         return line.toString();
+    }
+
+    private static String resolve(DirectorTextResolver resolver, TextKey key) {
+        String resolved = resolver.resolve(key, MessageArgs.empty());
+        return resolved == null ? DirectorTextResolver.ENGLISH.resolve(key) : resolved;
+    }
+
+    private static String resolveDescription(
+            DirectorTextResolver resolver,
+            String key,
+            String englishDefault
+    ) {
+        if (key == null || key.isBlank()) {
+            return englishDefault;
+        }
+        return resolve(resolver, TextKey.of(key, englishDefault));
     }
 
     private static String spaces(int length) {
@@ -282,6 +406,10 @@ public final class DirectorMiniMenu {
                 continue;
             }
 
+            if (!arg.trim().toLowerCase(Locale.ROOT).startsWith("help=")) {
+                return Optional.of(0);
+            }
+
             String raw = arg.substring("help=".length()).trim();
             try {
                 int page = Integer.parseInt(raw);
@@ -299,7 +427,8 @@ public final class DirectorMiniMenu {
             return false;
         }
 
-        return value.trim().toLowerCase().startsWith("help=");
+        String token = value.trim().toLowerCase(Locale.ROOT);
+        return token.equals("help") || token.equals("?") || token.startsWith("help=");
     }
 
     private static DirectorRuntimeNode findBestChild(DirectorRuntimeNode node, String token) {
@@ -307,7 +436,7 @@ public final class DirectorMiniMenu {
             return null;
         }
 
-        String needle = token.trim().toLowerCase();
+        String needle = token.trim().toLowerCase(Locale.ROOT);
         DirectorRuntimeNode contains = null;
         for (DirectorRuntimeNode child : node.getChildren()) {
             if (child.getDescriptor().getName().equalsIgnoreCase(needle)) {
@@ -324,13 +453,14 @@ public final class DirectorMiniMenu {
                 continue;
             }
 
-            if (child.getDescriptor().getName().toLowerCase().contains(needle) || needle.contains(child.getDescriptor().getName().toLowerCase())) {
+            if (child.getDescriptor().getName().toLowerCase(Locale.ROOT).contains(needle)
+                    || needle.contains(child.getDescriptor().getName().toLowerCase(Locale.ROOT))) {
                 contains = child;
                 continue;
             }
 
             for (String alias : child.getDescriptor().getAliases()) {
-                String loweredAlias = alias.toLowerCase();
+                String loweredAlias = alias.toLowerCase(Locale.ROOT);
                 if (loweredAlias.contains(needle) || needle.contains(loweredAlias)) {
                     contains = child;
                     break;
@@ -365,23 +495,22 @@ public final class DirectorMiniMenu {
             String description,
             String required,
             String optional,
-            String contextual,
             String muted
     ) {
         public static Theme reactBlue() {
-            return new Theme("#003366", "#00BFFF", "#001933", "#1f4f80", "#99c2ff", "#ff6666", "#a0b7d8", "#8fe68f", "#7d93b2");
+            return new Theme("#003366", "#00BFFF", "#001933", "#1f4f80", "#99c2ff", "#ff6666", "#a0b7d8", "#7d93b2");
         }
 
         public static Theme adaptRed() {
-            return new Theme("#8b0000", "#ff4d4d", "#4d0000", "#8b1a1a", "#ffc7c7", "#ff3333", "#ff9e9e", "#ffd966", "#d8a0a0");
+            return new Theme("#8b0000", "#ff4d4d", "#4d0000", "#8b1a1a", "#ffc7c7", "#ff3333", "#ff9e9e", "#d8a0a0");
         }
 
         public static Theme irisGreen() {
-            return new Theme("#0b7d32", "#3ddc84", "#074d1d", "#0f7f3a", "#b9f6ca", "#ff6666", "#9ad8a8", "#f9e07f", "#8ebf9a");
+            return new Theme("#0b7d32", "#3ddc84", "#074d1d", "#0f7f3a", "#b9f6ca", "#ff6666", "#9ad8a8", "#8ebf9a");
         }
 
         public static Theme bileGreen() {
-            return new Theme("#0a8f3e", "#3bd16f", "#075e29", "#0d7a35", "#c2f7d2", "#ff6666", "#9edfb3", "#ffd966", "#8abf9b");
+            return new Theme("#0a8f3e", "#3bd16f", "#075e29", "#0d7a35", "#c2f7d2", "#ff6666", "#9edfb3", "#8abf9b");
         }
 
         public static Theme fromDirectorTheme(DirectorTheme theme) {
@@ -398,7 +527,6 @@ public final class DirectorMiniMenu {
                         "#f2f2f2",
                         "#f2c94c",
                         "#d0d0d0",
-                        "#ffe082",
                         "#a6a6a6"
                 );
             }
@@ -412,7 +540,6 @@ public final class DirectorMiniMenu {
                         "#fef3ff",
                         "#ffd6a5",
                         "#bde0fe",
-                        "#caffbf",
                         "#d9c7ef"
                 );
             }
@@ -429,7 +556,6 @@ public final class DirectorMiniMenu {
                     primaryRight,
                     accent,
                     primaryRight,
-                    accent,
                     primaryRight
             );
         }

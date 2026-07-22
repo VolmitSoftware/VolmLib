@@ -20,6 +20,8 @@ public @interface Director {
 
     String description() default DEFAULT_DESCRIPTION;
 
+    String descriptionKey() default "";
+
     DirectorOrigin origin() default DirectorOrigin.BOTH;
 
     String[] aliases() default "";
