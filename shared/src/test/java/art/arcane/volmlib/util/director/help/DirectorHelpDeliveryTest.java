@@ -31,6 +31,18 @@ public class DirectorHelpDeliveryTest {
         }
     }
 
+    public static final class FakePlayer implements org.bukkit.entity.Player {
+        final List<String> rich = new ArrayList<>();
+
+        public void sendRichMessage(String message) {
+            rich.add(message);
+        }
+
+        public void sendMessage(String message) {
+            rich.add(message);
+        }
+    }
+
     @Test
     public void deliversRawMiniMessageToNativeRichSink() {
         RichSender sender = new RichSender();
@@ -87,8 +99,44 @@ public class DirectorHelpDeliveryTest {
     }
 
     @Test
+    public void fallbackUnescapesEscapedBackslashesFromParameterText() {
+        assertEquals("path C:\\test", DirectorMiniMenu.stripMiniMessage("path C:\\\\test"));
+        assertEquals("a \\ b", DirectorMiniMenu.stripMiniMessage("a \\\\ b"));
+    }
+
+    @Test
     public void toleratesNullSenderAndNullLines() {
         DirectorMiniMenu.deliver(null, List.of("a"));
         DirectorMiniMenu.deliver(new RichSender(), null);
+    }
+
+    @Test
+    public void pushesChatClearBeforeHelpLinesForPlayerSenders() {
+        FakePlayer sender = new FakePlayer();
+
+        DirectorMiniMenu.deliver(sender, List.of("<#003366>one</#003366>", "<#00BFFF>two</#00BFFF>"));
+
+        assertEquals(3, sender.rich.size());
+        assertEquals("\n".repeat(19), sender.rich.get(0));
+        assertEquals("<#003366>one</#003366>", sender.rich.get(1));
+        assertEquals("<#00BFFF>two</#00BFFF>", sender.rich.get(2));
+    }
+
+    @Test
+    public void doesNotPushChatClearForNonPlayerSenders() {
+        RichSender sender = new RichSender();
+
+        DirectorMiniMenu.deliver(sender, List.of("<#003366>one</#003366>"));
+
+        assertEquals(List.of("<#003366>one</#003366>"), sender.rich);
+    }
+
+    @Test
+    public void doesNotPushChatClearWhenThereAreNoRenderableLines() {
+        FakePlayer sender = new FakePlayer();
+
+        DirectorMiniMenu.deliver(sender, List.of("", "   "));
+
+        assertTrue(sender.rich.isEmpty());
     }
 }

@@ -7,6 +7,7 @@ import art.arcane.volmlib.util.director.runtime.DirectorParameterDescriptor;
 import art.arcane.volmlib.util.director.runtime.DirectorRuntimeEngine;
 import art.arcane.volmlib.util.director.runtime.DirectorRuntimeNode;
 import art.arcane.volmlib.util.localization.MessageArgs;
+import art.arcane.volmlib.util.localization.MessageArgument;
 import art.arcane.volmlib.util.localization.TextKey;
 
 import java.util.ArrayList;
@@ -16,6 +17,11 @@ import java.util.Locale;
 import java.util.Optional;
 
 public final class DirectorMiniMenu {
+    private static final int HEADER_WIDTH = 44;
+    private static final int FOOTER_WIDTH = 75;
+    private static final int FOOTER_BUTTON_WIDTH = 10;
+    private static final int CLEAR_LINES = 19;
+
     private DirectorMiniMenu() {
     }
 
@@ -24,8 +30,53 @@ public final class DirectorMiniMenu {
             return;
         }
 
+        boolean renderable = false;
+        for (String line : lines) {
+            if (line != null && !line.trim().isEmpty()) {
+                renderable = true;
+                break;
+            }
+        }
+
+        if (renderable && isPlayer(sender)) {
+            deliverRaw(sender, "\n".repeat(CLEAR_LINES));
+        }
+
         for (String line : lines) {
             deliverLine(sender, line);
+        }
+    }
+
+    private static boolean isPlayer(Object sender) {
+        for (Class<?> type = sender.getClass(); type != null; type = type.getSuperclass()) {
+            if (implementsPlayer(type)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static boolean implementsPlayer(Class<?> type) {
+        for (Class<?> parent : type.getInterfaces()) {
+            if (parent.getName().equals("org.bukkit.entity.Player") || implementsPlayer(parent)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static void deliverRaw(Object sender, String message) {
+        try {
+            sender.getClass().getMethod("sendRichMessage", String.class).invoke(sender, message);
+            return;
+        } catch (Throwable ignored) {
+        }
+
+        try {
+            sender.getClass().getMethod("sendMessage", String.class).invoke(sender, message);
+        } catch (Throwable ignored) {
         }
     }
 
@@ -60,7 +111,7 @@ public final class DirectorMiniMenu {
 
             if (current == '\\' && index + 1 < length) {
                 char escaped = input.charAt(index + 1);
-                if (escaped == '<' || escaped == '>') {
+                if (escaped == '<' || escaped == '>' || escaped == '\\') {
                     out.append(escaped);
                     index += 2;
                     continue;
@@ -153,14 +204,10 @@ public final class DirectorMiniMenu {
 
         DirectorTextResolver activeResolver = resolver == null ? DirectorTextResolver.ENGLISH : resolver;
         List<String> lines = new ArrayList<>();
-        lines.add("");
-        lines.add("<font:minecraft:uniform><strikethrough><gradient:" + theme.borderLeft() + ":" + theme.borderRight() + ">[" + spaces(54) + "]</gradient></strikethrough></font>");
-        lines.add("<font:minecraft:uniform><gradient:" + theme.primaryLeft() + ":" + theme.primaryRight() + ">" + escapeText(page.title()) + "</gradient></font>");
+        lines.add(renderHeader(page, theme));
 
         if (page.node().getParent() != null) {
-            lines.add("<hover:show_text:'" + escapeAttr(escapeText(resolve(activeResolver, DirectorHelpMessages.PARENT_HOVER)))
-                    + "'><click:run_command:" + page.parentCommand() + "><font:minecraft:uniform><" + theme.primaryRight() + ">〈 "
-                    + escapeText(resolve(activeResolver, DirectorHelpMessages.BACK)) + "</" + theme.primaryRight() + "></font></click></hover>");
+            lines.add(renderBackLink(page, theme, activeResolver));
         }
 
         if (page.entries().isEmpty()) {
@@ -172,145 +219,169 @@ public final class DirectorMiniMenu {
         }
 
         lines.add(renderFooter(page, theme, activeResolver));
-        lines.add("<font:minecraft:uniform><strikethrough><gradient:" + theme.borderLeft() + ":" + theme.borderRight() + ">[" + spaces(54) + "]</gradient></strikethrough></font>");
         return lines;
+    }
+
+    private static String renderHeader(DirectorHelpPage page, Theme theme) {
+        return banner(page.title(), theme);
+    }
+
+    public static String banner(String title, Theme theme) {
+        int pad = Math.max(1, HEADER_WIDTH - (title.length() + 2) - 4);
+        return "<font:minecraft:uniform><strikethrough><gradient:" + theme.borderLeft() + ":" + theme.borderRight() + ">["
+                + spaces(pad) + "(((</gradient></strikethrough></font>"
+                + " <gradient:" + theme.primaryLeft() + ":" + theme.primaryRight() + ">" + escapeText(title) + "</gradient> "
+                + "<font:minecraft:uniform><strikethrough><gradient:" + theme.borderRight() + ":" + theme.borderLeft() + ">)))"
+                + spaces(pad) + "]</gradient></strikethrough></font>";
+    }
+
+    public static String bar(Theme theme) {
+        return "<font:minecraft:uniform><strikethrough><gradient:" + theme.borderRight() + ":" + theme.borderLeft() + ">"
+                + spaces(FOOTER_WIDTH) + "</gradient></strikethrough></font>";
+    }
+
+    private static String renderBackLink(DirectorHelpPage page, Theme theme, DirectorTextResolver resolver) {
+        return "<hover:show_text:'" + escapeAttr(escapeText(resolve(resolver, DirectorHelpMessages.PARENT_HOVER)))
+                + "'><click:run_command:" + page.parentCommand() + "><font:minecraft:uniform><" + theme.primaryRight() + ">〈 "
+                + escapeText(resolve(resolver, DirectorHelpMessages.BACK)) + "</" + theme.primaryRight() + "></font></click></hover>";
     }
 
     private static String renderNodeLine(DirectorRuntimeNode node, Theme theme, DirectorTextResolver resolver) {
         String clickType = node.isInvocable() ? "suggest_command" : "run_command";
         String clickTarget = node.isInvocable() ? node.path() + " " : node.path() + " help=1";
-        String hover = renderNodeHover(node, theme, resolver);
-        String aliases = renderAliases(node, theme);
 
-        return "<hover:show_text:'" + hover + "'>"
-                + "<click:" + clickType + ":" + clickTarget + ">"
-                + "<gradient:" + theme.primaryLeft() + ":" + theme.primaryRight() + ">✦ " + escapeText(node.path()) + "</gradient>"
-                + "</click></hover>"
-                + aliases
-                + renderParameterSummary(node, theme);
+        StringBuilder line = new StringBuilder();
+        line.append("<hover:show_text:'").append(renderNodeHover(node, theme, resolver)).append("'>")
+                .append("<click:").append(clickType).append(":").append(clickTarget).append(">")
+                .append("<").append(theme.muted()).append(">⇀</").append(theme.muted()).append("> ")
+                .append("<gradient:").append(theme.primaryLeft()).append(":").append(theme.primaryRight()).append(">")
+                .append(escapeText(node.getDescriptor().getName())).append("</gradient>")
+                .append("</click></hover>");
+
+        if (node.isInvocable()) {
+            for (DirectorParameterDescriptor parameter : visibleParameters(node)) {
+                line.append(" ").append(renderParameterChip(parameter, theme, resolver));
+            }
+        } else {
+            line.append(" <").append(theme.description()).append(">- ")
+                    .append(escapeText(resolve(resolver, DirectorHelpMessages.CATEGORY)))
+                    .append("</").append(theme.description()).append(">");
+        }
+
+        return line.toString();
     }
 
     private static String renderNodeHover(DirectorRuntimeNode node, Theme theme, DirectorTextResolver resolver) {
         String nl = "<reset>\n";
+        List<DirectorParameterDescriptor> visibleParameters = visibleParameters(node);
         StringBuilder hover = new StringBuilder();
         hover.append("<").append(theme.primaryRight()).append(">")
-                .append(escapeText(node.path()))
+                .append(escapeText(String.join(", ", node.allNames())))
                 .append("</").append(theme.primaryRight()).append(">")
                 .append(nl);
 
-        String description = node.getDescriptor().getDescription();
-        if (description == null || description.trim().isEmpty()) {
-            description = resolve(resolver, DirectorHelpMessages.NO_DESCRIPTION);
-        } else {
-            description = resolveDescription(resolver, node.getDescriptor().getDescriptionKey(), description);
-        }
+        hover.append(renderDescriptionLine(node.getDescriptor().getDescription(), node.getDescriptor().getDescriptionKey(), theme, resolver));
 
-        hover.append("<").append(theme.description()).append(">")
-                .append(escapeText(description))
-                .append("</").append(theme.description()).append(">");
-
-        if (!node.getDescriptor().getAliases().isEmpty()) {
-            hover.append(nl)
-                    .append("<").append(theme.muted()).append(">")
-                    .append(escapeText(resolve(resolver, DirectorHelpMessages.ALIASES))).append(": ")
-                    .append(escapeText(String.join(", ", node.getDescriptor().getAliases())))
-                    .append("</").append(theme.muted()).append(">");
-        }
-
+        String usage;
         if (!node.isInvocable()) {
-            hover.append(nl)
-                    .append("<").append(theme.optional()).append(">")
-                    .append(escapeText(resolve(resolver, DirectorHelpMessages.COMMAND_GROUP)))
-                    .append("</").append(theme.optional()).append(">");
-            return escapeAttr(hover.toString());
-        }
-
-        List<DirectorParameterDescriptor> visibleParameters = visibleParameters(node);
-        if (visibleParameters.isEmpty()) {
-            hover.append(nl)
-                    .append("<").append(theme.optional()).append(">")
-                    .append(escapeText(resolve(resolver, DirectorHelpMessages.NO_PARAMETERS)))
-                    .append("</").append(theme.optional()).append(">");
-            return escapeAttr(hover.toString());
+            usage = resolve(resolver, DirectorHelpMessages.COMMAND_GROUP);
+        } else if (visibleParameters.isEmpty()) {
+            usage = resolve(resolver, DirectorHelpMessages.NO_PARAMETERS);
+        } else {
+            usage = resolve(resolver, DirectorHelpMessages.PARAMETERS_HOVER);
         }
 
         hover.append(nl)
-                .append("<").append(theme.optional()).append(">")
-                .append(escapeText(resolve(resolver, DirectorHelpMessages.PARAMETERS))).append(":</")
-                .append(theme.optional()).append(">");
-        for (DirectorParameterDescriptor parameter : visibleParameters) {
-            hover.append(nl).append(renderParameterHover(parameter, theme, resolver));
+                .append("<").append(theme.optional()).append(">✒ <font:minecraft:uniform>")
+                .append(escapeText(usage))
+                .append("</font></").append(theme.optional()).append(">");
+
+        if (node.isInvocable() && !visibleParameters.isEmpty()) {
+            hover.append(nl)
+                    .append("<").append(theme.primaryLeft()).append(">✦ <font:minecraft:uniform>")
+                    .append(escapeText(renderExample(node, visibleParameters)))
+                    .append("</font></").append(theme.primaryLeft()).append(">");
         }
 
         return escapeAttr(hover.toString());
     }
 
-    private static String renderParameterHover(DirectorParameterDescriptor parameter, Theme theme, DirectorTextResolver resolver) {
-        String name = escapeText(parameter.getName());
-        String color = parameter.isRequired() ? theme.required() : theme.optional();
-
-        StringBuilder out = new StringBuilder();
-        out.append("<").append(color).append(">• ").append(name).append("</").append(color).append(">");
-
-        String description = parameter.getDescription();
+    private static String renderDescriptionLine(String description, String descriptionKey, Theme theme, DirectorTextResolver resolver) {
+        String resolved;
         if (description == null || description.trim().isEmpty()) {
-            description = resolve(resolver, DirectorHelpMessages.NO_DESCRIPTION);
+            resolved = resolve(resolver, DirectorHelpMessages.NO_DESCRIPTION);
         } else {
-            description = resolveDescription(resolver, parameter.getDescriptionKey(), description);
+            resolved = resolveDescription(resolver, descriptionKey, description);
         }
-        out.append(" <").append(theme.description()).append(">")
-                .append(escapeText(description))
-                .append("</").append(theme.description()).append(">");
 
-        out.append(" <").append(theme.muted()).append(">(")
-                .append(escapeText(parameter.getType().getSimpleName()));
-        if (parameter.isRequired()) {
-            out.append(", ").append(escapeText(resolve(resolver, DirectorHelpMessages.REQUIRED)));
-        } else {
-            out.append(", ").append(escapeText(resolve(resolver, DirectorHelpMessages.OPTIONAL)));
-        }
-        if (parameter.getDefaultValue() != null && !parameter.getDefaultValue().isBlank()) {
-            out.append(", ").append(escapeText(resolve(resolver, DirectorHelpMessages.DEFAULT))).append("=")
-                    .append(escapeText(parameter.getDefaultValue()));
-        }
-        out.append(")</").append(theme.muted()).append(">");
-
-        return out.toString();
+        return "<" + theme.description() + ">✎ <font:minecraft:uniform>" + escapeText(resolved) + "</font></" + theme.description() + ">";
     }
 
-    private static String renderAliases(DirectorRuntimeNode node, Theme theme) {
-        if (node.getDescriptor().getAliases().isEmpty()) {
-            return "";
-        }
-
-        return " <" + theme.muted() + ">("
-                + escapeText(String.join(", ", node.getDescriptor().getAliases()))
-                + ")</" + theme.muted() + ">";
-    }
-
-    private static String renderParameterSummary(DirectorRuntimeNode node, Theme theme) {
-        if (!node.isInvocable()) {
-            return "";
-        }
-
-        List<DirectorParameterDescriptor> visibleParameters = visibleParameters(node);
-        if (visibleParameters.isEmpty()) {
-            return "";
-        }
-
-        StringBuilder out = new StringBuilder();
-        for (DirectorParameterDescriptor parameter : visibleParameters) {
-            out.append(" ");
-            String parameterName = escapeText(parameter.getName());
-            if (parameter.isRequired()) {
-                out.append("<").append(theme.required()).append(">[")
-                        .append(parameterName).append("]</").append(theme.required()).append(">");
+    private static String renderExample(DirectorRuntimeNode node, List<DirectorParameterDescriptor> parameters) {
+        StringBuilder example = new StringBuilder(node.path());
+        for (DirectorParameterDescriptor parameter : parameters) {
+            example.append(" ").append(parameter.getName()).append("=");
+            if (parameter.getDefaultValue() != null && !parameter.getDefaultValue().isBlank()) {
+                example.append(parameter.getDefaultValue());
             } else {
-                out.append("<").append(theme.optional()).append(">[").append(parameterName).append("]</").append(theme.optional()).append(">");
+                example.append("<").append(parameter.getType().getSimpleName()).append(">");
             }
         }
 
-        return out.toString();
+        return example.toString();
+    }
+
+    private static String renderParameterChip(DirectorParameterDescriptor parameter, Theme theme, DirectorTextResolver resolver) {
+        String bracketColor = parameter.isRequired() ? theme.required() : theme.muted();
+        String open = parameter.isRequired() ? "[" : "⊰";
+        String close = parameter.isRequired() ? "]" : "⊱";
+
+        return "<hover:show_text:'" + renderParameterHover(parameter, theme, resolver) + "'>"
+                + "<" + bracketColor + ">" + open + "</" + bracketColor + ">"
+                + "<gradient:" + theme.primaryLeft() + ":" + theme.primaryRight() + ">" + escapeText(parameter.getName()) + "</gradient>"
+                + "<" + bracketColor + ">" + close + "</" + bracketColor + ">"
+                + "</hover>";
+    }
+
+    private static String renderParameterHover(DirectorParameterDescriptor parameter, Theme theme, DirectorTextResolver resolver) {
+        String nl = "<reset>\n";
+        List<String> names = new ArrayList<>();
+        names.add(parameter.getName());
+        for (String alias : parameter.getAliases()) {
+            if (alias != null && !alias.trim().isEmpty()) {
+                names.add(alias);
+            }
+        }
+
+        StringBuilder hover = new StringBuilder();
+        hover.append("<").append(theme.primaryRight()).append(">")
+                .append(escapeText(String.join(", ", names)))
+                .append("</").append(theme.primaryRight()).append(">")
+                .append(nl);
+
+        hover.append(renderDescriptionLine(parameter.getDescription(), parameter.getDescriptionKey(), theme, resolver));
+
+        hover.append(nl);
+        if (parameter.isRequired()) {
+            hover.append("<").append(theme.required()).append(">⚠ <font:minecraft:uniform>")
+                    .append(escapeText(resolve(resolver, DirectorHelpMessages.REQUIRED)))
+                    .append("</font></").append(theme.required()).append(">");
+        } else if (parameter.getDefaultValue() != null && !parameter.getDefaultValue().isBlank()) {
+            hover.append("<").append(theme.optional()).append(">✔ <font:minecraft:uniform>")
+                    .append(escapeText(resolve(resolver, DirectorHelpMessages.DEFAULT, MessageArgument.untrusted("value", parameter.getDefaultValue()))))
+                    .append("</font></").append(theme.optional()).append(">");
+        } else {
+            hover.append("<").append(theme.optional()).append(">✔ <font:minecraft:uniform>")
+                    .append(escapeText(resolve(resolver, DirectorHelpMessages.OPTIONAL)))
+                    .append("</font></").append(theme.optional()).append(">");
+        }
+
+        hover.append(nl)
+                .append("<").append(theme.muted()).append(">✢ <font:minecraft:uniform>")
+                .append(escapeText(resolve(resolver, DirectorHelpMessages.PARAMETER_TYPE, MessageArgument.untrusted("type", parameter.getType().getSimpleName()))))
+                .append("</font></").append(theme.muted()).append(">");
+
+        return escapeAttr(hover.toString());
     }
 
     private static List<DirectorParameterDescriptor> visibleParameters(DirectorRuntimeNode node) {
@@ -326,48 +397,52 @@ public final class DirectorMiniMenu {
 
     private static String renderFooter(DirectorHelpPage page, Theme theme, DirectorTextResolver resolver) {
         StringBuilder line = new StringBuilder();
+        int fill = FOOTER_WIDTH;
+
         if (page.hasPrevious()) {
+            fill -= FOOTER_BUTTON_WIDTH;
             line.append("<hover:show_text:'")
                     .append(escapeAttr(escapeText(resolve(resolver, DirectorHelpMessages.PREVIOUS_PAGE))))
-                    .append("'>")
-                    .append("<click:run_command:")
+                    .append("'><click:run_command:")
                     .append(page.previousCommand())
-                    .append("><")
-                    .append(theme.primaryLeft())
-                    .append(">〈 ")
+                    .append("><").append(theme.primaryLeft()).append(">〈 ")
                     .append(escapeText(resolve(resolver, DirectorHelpMessages.PAGE))).append(" ")
                     .append(page.page() - 1)
-                    .append("</")
-                    .append(theme.primaryLeft())
-                    .append("></click></hover> ");
+                    .append("</").append(theme.primaryLeft()).append("></click></hover> ");
         }
 
-        line.append("<").append(theme.muted()).append(">")
-                .append(escapeText(resolve(resolver, DirectorHelpMessages.PAGE))).append(" ")
-                .append(page.page()).append(" / ").append(page.totalPages())
-                .append("</").append(theme.muted()).append(">");
+        if (page.hasNext()) {
+            fill -= FOOTER_BUTTON_WIDTH;
+        }
+
+        line.append("<font:minecraft:uniform><strikethrough><gradient:")
+                .append(theme.borderRight()).append(":").append(theme.borderLeft()).append(">")
+                .append(spaces(fill))
+                .append("</gradient></strikethrough></font>");
 
         if (page.hasNext()) {
             line.append(" <hover:show_text:'")
                     .append(escapeAttr(escapeText(resolve(resolver, DirectorHelpMessages.NEXT_PAGE))))
-                    .append("'>")
-                    .append("<click:run_command:")
+                    .append("'><click:run_command:")
                     .append(page.nextCommand())
-                    .append("><")
-                    .append(theme.primaryRight())
-                    .append(">").append(escapeText(resolve(resolver, DirectorHelpMessages.PAGE))).append(" ")
+                    .append("><").append(theme.primaryRight()).append(">")
+                    .append(escapeText(resolve(resolver, DirectorHelpMessages.PAGE))).append(" ")
                     .append(page.page() + 1)
-                    .append(" ❭</")
-                    .append(theme.primaryRight())
-                    .append("></click></hover>");
+                    .append(" ❭</").append(theme.primaryRight()).append("></click></hover>");
         }
 
         return line.toString();
     }
 
-    private static String resolve(DirectorTextResolver resolver, TextKey key) {
-        String resolved = resolver.resolve(key, MessageArgs.empty());
-        return resolved == null ? DirectorTextResolver.ENGLISH.resolve(key) : resolved;
+    private static String resolve(DirectorTextResolver resolver, TextKey key, MessageArgument... arguments) {
+        MessageArgs.Builder builder = MessageArgs.builder();
+        for (MessageArgument argument : arguments) {
+            builder.add(argument);
+        }
+        MessageArgs args = builder.build();
+
+        String resolved = resolver.resolve(key, args);
+        return resolved == null ? DirectorTextResolver.ENGLISH.resolve(key, args) : resolved;
     }
 
     private static String resolveDescription(
@@ -479,12 +554,12 @@ public final class DirectorMiniMenu {
         return value.replace("\\", "\\\\").replace("'", "\\'");
     }
 
-    private static String escapeText(String value) {
+    public static String escapeText(String value) {
         if (value == null) {
             return "";
         }
 
-        return value.replace("<", "\\<").replace(">", "\\>");
+        return value.replace("\\", "\\\\").replace("<", "\\<");
     }
 
     public record Theme(
@@ -506,7 +581,7 @@ public final class DirectorMiniMenu {
         }
 
         public static Theme irisGreen() {
-            return new Theme("#0b7d32", "#3ddc84", "#074d1d", "#0f7f3a", "#b9f6ca", "#ff6666", "#9ad8a8", "#8ebf9a");
+            return new Theme("#5ef288", "#32bfad", "#34eb6b", "#32bfad", "#6ad97d", "#ff5555", "#9de5b6", "#46826a");
         }
 
         public static Theme bileGreen() {
@@ -576,6 +651,10 @@ public final class DirectorMiniMenu {
 
     public record DirectorHelpPage(DirectorRuntimeNode node, List<DirectorRuntimeNode> entries, int pageIndex, int totalPages) {
         public String title() {
+            if (totalPages <= 1) {
+                return node.path();
+            }
+
             return node.path() + " {" + page() + "/" + totalPages + "}";
         }
 

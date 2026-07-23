@@ -5,6 +5,7 @@ import art.arcane.volmlib.util.director.annotations.Director;
 import art.arcane.volmlib.util.director.annotations.Param;
 import art.arcane.volmlib.util.director.compat.DirectorEngineFactory;
 import art.arcane.volmlib.util.director.runtime.DirectorRuntimeEngine;
+import art.arcane.volmlib.util.localization.TextKey;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -31,7 +32,11 @@ public class DirectorMiniMenuLocalizationTest {
         requests = new ArrayList<>();
         resolver = (key, arguments) -> {
             requests.add(new TextRequest(key.id(), key.english()));
-            return translations.getOrDefault(key.id(), DirectorTextResolver.ENGLISH.resolve(key, arguments));
+            String translation = translations.get(key.id());
+            if (translation == null) {
+                return DirectorTextResolver.ENGLISH.resolve(key, arguments);
+            }
+            return DirectorTextResolver.ENGLISH.resolve(TextKey.of(key.id(), translation), arguments);
         };
     }
 
@@ -40,14 +45,13 @@ public class DirectorMiniMenuLocalizationTest {
         translations.put("test.create.description", "Welt erstellen");
         translations.put("test.create.name.description", "Weltname");
         translations.put("test.create.type.description", "Pakettyp");
-        translations.put("director.help.aliases", "Aliase");
         translations.put("director.help.command_group", "Befehlsgruppe öffnen.");
+        translations.put("director.help.category", "Kategorie von Befehlen");
         translations.put("director.help.no_parameters", "Keine Parameter; Befehl vorfüllen.");
-        translations.put("director.help.parameters", "Parameter");
-        translations.put("director.help.parameter.required", "erforderlich");
-        translations.put("director.help.parameter.optional", "optional");
-        translations.put("director.help.parameter.default", "standard");
-        translations.put("director.help.navigation.page", "Seite");
+        translations.put("director.help.parameters_hover", "Bewege den Mauszeiger über die Parameter.");
+        translations.put("director.help.parameter.required", "Dieser Parameter ist erforderlich.");
+        translations.put("director.help.parameter.default", "Standardwert ist \"{value}\", wenn nicht gesetzt.");
+        translations.put("director.help.parameter.type", "Dieser Parameter ist vom Typ {type}.");
 
         DirectorMiniMenu.DirectorHelpPage page = DirectorMiniMenu.resolveHelp(engine, List.of(), 10).orElseThrow();
         String rendered = String.join("\n", DirectorMiniMenu.render(page, DirectorMiniMenu.Theme.reactBlue(), resolver));
@@ -55,17 +59,19 @@ public class DirectorMiniMenuLocalizationTest {
         assertTrue(rendered.contains("Welt erstellen"));
         assertTrue(rendered.contains("Weltname"));
         assertTrue(rendered.contains("Pakettyp"));
-        assertTrue(rendered.contains("Aliase: make"));
+        assertTrue(rendered.contains("create, make"));
         assertTrue(rendered.contains("Befehlsgruppe öffnen."));
+        assertTrue(rendered.contains("- Kategorie von Befehlen"));
         assertTrue(rendered.contains("Keine Parameter; Befehl vorfüllen."));
-        assertTrue(rendered.contains("Parameter:"));
-        assertTrue(rendered.contains("String, erforderlich"));
-        assertTrue(rendered.contains("String, optional, standard=overworld"));
-        assertTrue(rendered.contains("Seite 1 / 1"));
+        assertTrue(rendered.contains("Bewege den Mauszeiger über die Parameter."));
+        assertTrue(rendered.contains("Dieser Parameter ist erforderlich."));
+        assertTrue(rendered.contains("Standardwert ist \"overworld\", wenn nicht gesetzt."));
+        assertTrue(rendered.contains("Dieser Parameter ist vom Typ String."));
         assertTrue(requests.contains(new TextRequest("test.create.description", "Create a world")));
         assertTrue(requests.contains(new TextRequest("test.create.name.description", "World name")));
         assertTrue(requests.contains(new TextRequest("test.create.type.description", "Pack type")));
         assertTrue(requests.contains(new TextRequest("director.help.command_group", "Command group. Click to open.")));
+        assertTrue(requests.contains(new TextRequest("director.help.category", "Category of Commands")));
         assertTrue(requests.contains(new TextRequest("director.help.no_parameters", "No parameters. Click to prefill command.")));
     }
 
@@ -74,7 +80,6 @@ public class DirectorMiniMenuLocalizationTest {
         translations.put("director.help.navigation.parent.hover", "Zur übergeordneten Gruppe");
         translations.put("director.help.navigation.back", "Zurück");
         translations.put("director.help.no_subcommands", "Keine Unterbefehle auf dieser Seite.");
-        translations.put("director.help.navigation.page", "Seite");
 
         DirectorMiniMenu.DirectorHelpPage page = DirectorMiniMenu.resolveHelp(engine, List.of("empty", "help=1"), 10).orElseThrow();
         List<String> lines = DirectorMiniMenu.render(page, DirectorMiniMenu.Theme.reactBlue(), resolver);
@@ -83,23 +88,24 @@ public class DirectorMiniMenuLocalizationTest {
         assertTrue(rendered.contains("Zur übergeordneten Gruppe"));
         assertTrue(rendered.contains("〈 Zurück"));
         assertTrue(rendered.contains("Keine Unterbefehle auf dieser Seite."));
-        assertTrue(rendered.contains("Seite 1 / 1"));
     }
 
     @Test
-    public void englishResolverPreservesExistingEnglishOutput() {
+    public void englishResolverPreservesEnglishOutput() {
         DirectorMiniMenu.DirectorHelpPage page = DirectorMiniMenu.resolveHelp(engine, List.of(), 10).orElseThrow();
         String rendered = String.join("\n", DirectorMiniMenu.render(page, DirectorMiniMenu.Theme.reactBlue(), DirectorTextResolver.ENGLISH));
 
         assertTrue(rendered.contains("Create a world"));
         assertTrue(rendered.contains("World name"));
-        assertTrue(rendered.contains("Aliases: make"));
+        assertTrue(rendered.contains("create, make"));
         assertTrue(rendered.contains("Command group. Click to open."));
+        assertTrue(rendered.contains("- Category of Commands"));
         assertTrue(rendered.contains("No parameters. Click to prefill command."));
-        assertTrue(rendered.contains("Parameters:"));
-        assertTrue(rendered.contains("String, required"));
-        assertTrue(rendered.contains("String, optional, default=overworld"));
-        assertTrue(rendered.contains("Page 1 / 1"));
+        assertTrue(rendered.contains("Hover over the parameters to learn more."));
+        assertTrue(rendered.contains("This parameter is required."));
+        assertTrue(rendered.contains("Defaults to \"overworld\" if undefined."));
+        assertTrue(rendered.contains("This parameter is of type String."));
+        assertFalse(rendered.contains("{1/1}"));
     }
 
     @Test
@@ -114,7 +120,7 @@ public class DirectorMiniMenuLocalizationTest {
         assertTrue(rendered.contains("Vorherige Seite"));
         assertTrue(rendered.contains("Nächste Seite"));
         assertTrue(rendered.contains("〈 Seite 1"));
-        assertTrue(rendered.contains("Seite 2 / 4"));
+        assertTrue(rendered.contains("{2/4}"));
         assertTrue(rendered.contains("Seite 3 ❭"));
     }
 
@@ -164,20 +170,21 @@ public class DirectorMiniMenuLocalizationTest {
     }
 
     @Test
-    public void helpCatalogExactlyMatchesRenderedGenericSurface() {
+    public void helpCatalogExactlyMatchesDirectorHelpSurface() {
         assertEquals(
                 List.of(
                         "director.help.navigation.parent.hover",
                         "director.help.navigation.back",
                         "director.help.no_subcommands",
                         "director.help.no_description",
-                        "director.help.aliases",
                         "director.help.command_group",
+                        "director.help.category",
                         "director.help.no_parameters",
-                        "director.help.parameters",
+                        "director.help.parameters_hover",
                         "director.help.parameter.required",
                         "director.help.parameter.optional",
                         "director.help.parameter.default",
+                        "director.help.parameter.type",
                         "director.help.navigation.previous.hover",
                         "director.help.navigation.next.hover",
                         "director.help.navigation.page"
@@ -217,7 +224,7 @@ public class DirectorMiniMenuLocalizationTest {
 
         String rendered = String.join("\n", DirectorMiniMenu.render(page, DirectorMiniMenu.Theme.reactBlue(), resolver));
 
-        assertTrue(rendered.contains("\\\\<click:run_command:\\'/op @s\\'\\\\>Unsafe\\\\</click\\\\>"));
+        assertTrue(rendered.contains("\\\\<click:run_command:\\'/op @s\\'>Unsafe\\\\</click>"));
         assertFalse(rendered.contains("show_text:'<click:run_command:'/op @s'>"));
     }
 
@@ -226,7 +233,7 @@ public class DirectorMiniMenuLocalizationTest {
         DirectorMiniMenu.DirectorHelpPage page = DirectorMiniMenu.resolveHelp(engine, List.of(), 10).orElseThrow();
         List<String> lines = DirectorMiniMenu.render(page, DirectorMiniMenu.Theme.reactBlue(), DirectorTextResolver.ENGLISH);
 
-        assertTrue(lines.get(1).endsWith("</gradient></strikethrough></font>"));
+        assertTrue(lines.get(0).endsWith("]</gradient></strikethrough></font>"));
         assertTrue(lines.get(lines.size() - 1).endsWith("</gradient></strikethrough></font>"));
     }
 

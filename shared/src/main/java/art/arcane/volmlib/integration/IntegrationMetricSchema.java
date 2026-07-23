@@ -86,6 +86,21 @@ public final class IntegrationMetricSchema {
     public static final String ADAPT_ABILITY_DETAIL_EXECUTION_TIMING_MS = "execution-timing-ms";
     public static final String ADAPT_ABILITY_DETAIL_GUARD_CHECKS = "guard-checks";
     public static final String ADAPT_ABILITY_DETAIL_GUARD_TIMING_MS = "guard-timing-ms";
+    public static final String ADAPT_ABILITY_CACHE_HIT_RATIO = "adapt.ability-cache-hit-ratio";
+    public static final String ADAPT_ABILITY_CHECK_LATENCY_US = "adapt.ability-check-latency-us";
+    public static final String ADAPT_ABILITY_TIMING_BUDGET = "adapt.ability-timing-budget";
+    public static final String ADAPT_PLAYER_SESSIONS = "adapt.player-sessions";
+    public static final String ADAPT_LEARNED_ADAPTATIONS_ONLINE = "adapt.learned-adaptations-online";
+    public static final String ADAPT_SPATIAL_XP_TICKETS = "adapt.spatial-xp-tickets";
+    public static final String ADAPT_FX_TIMELINES_ACTIVE = "adapt.fx-timelines-active";
+    public static final String ADAPT_FX_PACKETS_USED = "adapt.fx-packets-used";
+    public static final String ADAPT_FX_SHED_BAND = "adapt.fx-shed-band";
+    public static final String ADAPT_MINIONS_ACTIVE = "adapt.minions-active";
+    public static final String ADAPT_PERSISTENCE_QUEUE_DEPTH = "adapt.persistence-queue-depth";
+    public static final String ADAPT_XP_PER_MINUTE = "adapt.xp-per-minute";
+    public static final String ADAPT_XP_PAYOUT_OPS = "adapt.xp-payout-ops";
+    public static final String ADAPT_PROVENANCE_OPS = "adapt.provenance-ops";
+    public static final String ADAPT_EVENT_HANDLER_OPS = "adapt.event-handler-ops";
 
     public static final String WORMHOLES_PORTALS = "wormholes.portals";
     public static final String WORMHOLES_PROJECTIONS_ACTIVE = "wormholes.projections-active";
@@ -95,6 +110,51 @@ public final class IntegrationMetricSchema {
     public static final String WORMHOLES_PACKETS_PER_SECOND = "wormholes.packets-per-second";
     public static final String WORMHOLES_SPOOFED_ENTITIES = "wormholes.spoofed-entities";
     public static final String WORMHOLES_TRAVERSALS_PER_MINUTE = "wormholes.traversals-per-minute";
+    public static final String WORMHOLES_PEERS_CONNECTED = "wormholes.peers-connected";
+    public static final String WORMHOLES_REMOTE_PORTALS = "wormholes.remote-portals";
+    public static final String WORMHOLES_PEER_RTT_MAX_MS = "wormholes.peer-rtt-max-ms";
+    public static final String WORMHOLES_WIRE_BYTES_OUT_PER_SECOND = "wormholes.wire-bytes-out-per-second";
+    public static final String WORMHOLES_WIRE_BYTES_IN_PER_SECOND = "wormholes.wire-bytes-in-per-second";
+    public static final String WORMHOLES_COMPRESSION_RATIO_OUT = "wormholes.compression-ratio-out";
+    public static final String WORMHOLES_SIDEBAND_QUEUED_BYTES = "wormholes.sideband-queued-bytes";
+    public static final String WORMHOLES_SIDEBAND_DROPS_PER_SECOND = "wormholes.sideband-drops-per-second";
+    public static final String WORMHOLES_VIEW_SUBSCRIPTIONS = "wormholes.view-subscriptions";
+    public static final String WORMHOLES_VIEW_TRACKED_ENTITIES = "wormholes.view-tracked-entities";
+    public static final String WORMHOLES_REPLICATED_BLOCKS_PER_SECOND = "wormholes.replicated-blocks-per-second";
+    public static final String WORMHOLES_RESYNC_REQUESTS_TOTAL = "wormholes.resync-requests-total";
+    public static final String WORMHOLES_TRANSFERS_IN_FLIGHT = "wormholes.transfers-in-flight";
+    public static final String WORMHOLES_TRANSFERS_FAILED_TOTAL = "wormholes.transfers-failed-total";
+
+    public static final String HOLOUI_SESSION_HOLDERS = "holoui.session-holders";
+    public static final String HOLOUI_MENUS_OPEN = "holoui.menus-open";
+    public static final String HOLOUI_PREVIEWS_OPEN = "holoui.previews-open";
+    public static final String HOLOUI_DISPLAY_ENTITIES = "holoui.display-entities";
+    public static final String HOLOUI_DISPLAY_ENTITIES_VISIBLE = "holoui.display-entities-visible";
+    public static final String HOLOUI_MENU_DEFINITIONS = "holoui.menu-definitions";
+    public static final String HOLOUI_PACKETS_PER_SECOND = "holoui.packets-per-second";
+    public static final String HOLOUI_SPAWNS_PER_SECOND = "holoui.spawns-per-second";
+    public static final String HOLOUI_TICK_MS = "holoui.tick-ms";
+    public static final String HOLOUI_PREVIEW_REFRESH_PER_SECOND = "holoui.preview-refresh-per-second";
+    public static final String HOLOUI_BUILDER_SERVER_RUNNING = "holoui.builder-server-running";
+
+    public static final String HIDDENORE_BLOCKS_BROKEN_PER_SECOND = "hiddenore.blocks-broken-per-second";
+    public static final String HIDDENORE_DROPS_INJECTED_PER_SECOND = "hiddenore.drops-injected-per-second";
+    public static final String HIDDENORE_VEINS_DISCOVERED_PER_SECOND = "hiddenore.veins-discovered-per-second";
+    public static final String HIDDENORE_VEIN_CHUNKS_COMPUTED_PER_SECOND = "hiddenore.vein-chunks-computed-per-second";
+    public static final String HIDDENORE_VEIN_CACHE_CHUNKS = "hiddenore.vein-cache-chunks";
+    public static final String HIDDENORE_PDC_READS_PER_SECOND = "hiddenore.pdc-reads-per-second";
+    public static final String HIDDENORE_PDC_WRITES_PER_SECOND = "hiddenore.pdc-writes-per-second";
+    public static final String HIDDENORE_ORE_REMOVAL_ENABLED = "hiddenore.ore-removal-enabled";
+    public static final String HIDDENORE_ORE_REMOVAL_BLOCKS_PER_SECOND = "hiddenore.ore-removal-blocks-per-second";
+    public static final String HIDDENORE_SEEDED_MODE = "hiddenore.seeded-mode";
+    public static final String HIDDENORE_DROP_RULES = "hiddenore.drop-rules";
+    public static final String HIDDENORE_CONFIG_RELOADS_TOTAL = "hiddenore.config-reloads-total";
+
+    public static final String BILETOOLS_WATCHED_JARS = "biletools.watched-jars";
+    public static final String BILETOOLS_DIRTY_PLUGINS = "biletools.dirty-plugins";
+    public static final String BILETOOLS_RELOADS_TOTAL = "biletools.reloads-total";
+    public static final String BILETOOLS_LAST_RELOAD_MS = "biletools.last-reload-ms";
+    public static final String BILETOOLS_REMOTE_SLAVE_ONLINE = "biletools.remote-slave-online";
 
     private static final Map<String, IntegrationMetricDescriptor> DESCRIPTORS = buildDescriptors();
     private static final Set<String> IRIS_KEYS = buildIrisKeys();
@@ -143,7 +203,28 @@ public final class IntegrationMetricSchema {
     }
 
     public static Set<String> adaptKeys() {
-        return Set.of(ADAPT_SESSION_LOAD, ADAPT_ABILITY_OPS, ADAPT_ABILITY_CHECK_OPS, ADAPT_ABILITY_CHECK_OPS_TICK, ADAPT_WORLD_POLICY_LATENCY);
+        return Set.of(
+                ADAPT_SESSION_LOAD,
+                ADAPT_ABILITY_OPS,
+                ADAPT_ABILITY_CHECK_OPS,
+                ADAPT_ABILITY_CHECK_OPS_TICK,
+                ADAPT_WORLD_POLICY_LATENCY,
+                ADAPT_ABILITY_CACHE_HIT_RATIO,
+                ADAPT_ABILITY_CHECK_LATENCY_US,
+                ADAPT_ABILITY_TIMING_BUDGET,
+                ADAPT_PLAYER_SESSIONS,
+                ADAPT_LEARNED_ADAPTATIONS_ONLINE,
+                ADAPT_SPATIAL_XP_TICKETS,
+                ADAPT_FX_TIMELINES_ACTIVE,
+                ADAPT_FX_PACKETS_USED,
+                ADAPT_FX_SHED_BAND,
+                ADAPT_MINIONS_ACTIVE,
+                ADAPT_PERSISTENCE_QUEUE_DEPTH,
+                ADAPT_XP_PER_MINUTE,
+                ADAPT_XP_PAYOUT_OPS,
+                ADAPT_PROVENANCE_OPS,
+                ADAPT_EVENT_HANDLER_OPS
+        );
     }
 
     public static Set<String> adaptAbilityDetailKeys(String abilityId) {
@@ -179,7 +260,64 @@ public final class IntegrationMetricSchema {
                 WORMHOLES_BLOCK_CHANGES_PER_SECOND,
                 WORMHOLES_PACKETS_PER_SECOND,
                 WORMHOLES_SPOOFED_ENTITIES,
-                WORMHOLES_TRAVERSALS_PER_MINUTE
+                WORMHOLES_TRAVERSALS_PER_MINUTE,
+                WORMHOLES_PEERS_CONNECTED,
+                WORMHOLES_REMOTE_PORTALS,
+                WORMHOLES_PEER_RTT_MAX_MS,
+                WORMHOLES_WIRE_BYTES_OUT_PER_SECOND,
+                WORMHOLES_WIRE_BYTES_IN_PER_SECOND,
+                WORMHOLES_COMPRESSION_RATIO_OUT,
+                WORMHOLES_SIDEBAND_QUEUED_BYTES,
+                WORMHOLES_SIDEBAND_DROPS_PER_SECOND,
+                WORMHOLES_VIEW_SUBSCRIPTIONS,
+                WORMHOLES_VIEW_TRACKED_ENTITIES,
+                WORMHOLES_REPLICATED_BLOCKS_PER_SECOND,
+                WORMHOLES_RESYNC_REQUESTS_TOTAL,
+                WORMHOLES_TRANSFERS_IN_FLIGHT,
+                WORMHOLES_TRANSFERS_FAILED_TOTAL
+        );
+    }
+
+    public static Set<String> holouiKeys() {
+        return Set.of(
+                HOLOUI_SESSION_HOLDERS,
+                HOLOUI_MENUS_OPEN,
+                HOLOUI_PREVIEWS_OPEN,
+                HOLOUI_DISPLAY_ENTITIES,
+                HOLOUI_DISPLAY_ENTITIES_VISIBLE,
+                HOLOUI_MENU_DEFINITIONS,
+                HOLOUI_PACKETS_PER_SECOND,
+                HOLOUI_SPAWNS_PER_SECOND,
+                HOLOUI_TICK_MS,
+                HOLOUI_PREVIEW_REFRESH_PER_SECOND,
+                HOLOUI_BUILDER_SERVER_RUNNING
+        );
+    }
+
+    public static Set<String> hiddenoreKeys() {
+        return Set.of(
+                HIDDENORE_BLOCKS_BROKEN_PER_SECOND,
+                HIDDENORE_DROPS_INJECTED_PER_SECOND,
+                HIDDENORE_VEINS_DISCOVERED_PER_SECOND,
+                HIDDENORE_VEIN_CHUNKS_COMPUTED_PER_SECOND,
+                HIDDENORE_VEIN_CACHE_CHUNKS,
+                HIDDENORE_PDC_READS_PER_SECOND,
+                HIDDENORE_PDC_WRITES_PER_SECOND,
+                HIDDENORE_ORE_REMOVAL_ENABLED,
+                HIDDENORE_ORE_REMOVAL_BLOCKS_PER_SECOND,
+                HIDDENORE_SEEDED_MODE,
+                HIDDENORE_DROP_RULES,
+                HIDDENORE_CONFIG_RELOADS_TOTAL
+        );
+    }
+
+    public static Set<String> biletoolsKeys() {
+        return Set.of(
+                BILETOOLS_WATCHED_JARS,
+                BILETOOLS_DIRTY_PLUGINS,
+                BILETOOLS_RELOADS_TOTAL,
+                BILETOOLS_LAST_RELOAD_MS,
+                BILETOOLS_REMOTE_SLAVE_ONLINE
         );
     }
 
@@ -268,7 +406,85 @@ public final class IntegrationMetricSchema {
                 Map.of("plugin", "wormholes", "domain", "travel")
         ));
 
+        putMetric(descriptors, ADAPT_ABILITY_CACHE_HIT_RATIO, IntegrationMetricType.DOUBLE, "ratio", "adapt", "ability");
+        putMetric(descriptors, ADAPT_ABILITY_CHECK_LATENCY_US, IntegrationMetricType.DOUBLE, "us", "adapt", "ability");
+        putMetric(descriptors, ADAPT_ABILITY_TIMING_BUDGET, IntegrationMetricType.DOUBLE, "percent", "adapt", "ability");
+        putMetric(descriptors, ADAPT_PLAYER_SESSIONS, IntegrationMetricType.INTEGER, "players", "adapt", "runtime");
+        putMetric(descriptors, ADAPT_LEARNED_ADAPTATIONS_ONLINE, IntegrationMetricType.INTEGER, "adaptations", "adapt", "runtime");
+        putMetric(descriptors, ADAPT_SPATIAL_XP_TICKETS, IntegrationMetricType.INTEGER, "tickets", "adapt", "xp");
+        putMetric(descriptors, ADAPT_FX_TIMELINES_ACTIVE, IntegrationMetricType.INTEGER, "timelines", "adapt", "fx");
+        putMetric(descriptors, ADAPT_FX_PACKETS_USED, IntegrationMetricType.INTEGER, "packets-per-tick", "adapt", "fx");
+        putMetric(descriptors, ADAPT_FX_SHED_BAND, IntegrationMetricType.INTEGER, "band", "adapt", "fx");
+        putMetric(descriptors, ADAPT_MINIONS_ACTIVE, IntegrationMetricType.INTEGER, "minions", "adapt", "runtime");
+        putMetric(descriptors, ADAPT_PERSISTENCE_QUEUE_DEPTH, IntegrationMetricType.INTEGER, "players", "adapt", "persistence");
+        putMetric(descriptors, ADAPT_XP_PER_MINUTE, IntegrationMetricType.DOUBLE, "xp-per-minute", "adapt", "xp");
+        putMetric(descriptors, ADAPT_XP_PAYOUT_OPS, IntegrationMetricType.LONG, "ops-per-minute", "adapt", "xp");
+        putMetric(descriptors, ADAPT_PROVENANCE_OPS, IntegrationMetricType.LONG, "ops-per-minute", "adapt", "xp");
+        putMetric(descriptors, ADAPT_EVENT_HANDLER_OPS, IntegrationMetricType.LONG, "ops-per-minute", "adapt", "runtime");
+
+        putMetric(descriptors, WORMHOLES_PEERS_CONNECTED, IntegrationMetricType.INTEGER, "servers", "wormholes", "network");
+        putMetric(descriptors, WORMHOLES_REMOTE_PORTALS, IntegrationMetricType.LONG, "portals", "wormholes", "portals");
+        putMetric(descriptors, WORMHOLES_PEER_RTT_MAX_MS, IntegrationMetricType.LONG, "ms", "wormholes", "network");
+        putMetric(descriptors, WORMHOLES_WIRE_BYTES_OUT_PER_SECOND, IntegrationMetricType.DOUBLE, "bytes-per-second", "wormholes", "network");
+        putMetric(descriptors, WORMHOLES_WIRE_BYTES_IN_PER_SECOND, IntegrationMetricType.DOUBLE, "bytes-per-second", "wormholes", "network");
+        putMetric(descriptors, WORMHOLES_COMPRESSION_RATIO_OUT, IntegrationMetricType.DOUBLE, "ratio", "wormholes", "network");
+        putMetric(descriptors, WORMHOLES_SIDEBAND_QUEUED_BYTES, IntegrationMetricType.LONG, "bytes", "wormholes", "network");
+        putMetric(descriptors, WORMHOLES_SIDEBAND_DROPS_PER_SECOND, IntegrationMetricType.DOUBLE, "drops-per-second", "wormholes", "network");
+        putMetric(descriptors, WORMHOLES_VIEW_SUBSCRIPTIONS, IntegrationMetricType.INTEGER, "subscriptions", "wormholes", "projection");
+        putMetric(descriptors, WORMHOLES_VIEW_TRACKED_ENTITIES, IntegrationMetricType.INTEGER, "entities", "wormholes", "projection");
+        putMetric(descriptors, WORMHOLES_REPLICATED_BLOCKS_PER_SECOND, IntegrationMetricType.DOUBLE, "blocks-per-second", "wormholes", "network");
+        putMetric(descriptors, WORMHOLES_RESYNC_REQUESTS_TOTAL, IntegrationMetricType.LONG, "requests", "wormholes", "network");
+        putMetric(descriptors, WORMHOLES_TRANSFERS_IN_FLIGHT, IntegrationMetricType.INTEGER, "players", "wormholes", "travel");
+        putMetric(descriptors, WORMHOLES_TRANSFERS_FAILED_TOTAL, IntegrationMetricType.LONG, "transfers", "wormholes", "travel");
+
+        putMetric(descriptors, HOLOUI_SESSION_HOLDERS, IntegrationMetricType.INTEGER, "players", "holoui", "sessions");
+        putMetric(descriptors, HOLOUI_MENUS_OPEN, IntegrationMetricType.INTEGER, "menus", "holoui", "sessions");
+        putMetric(descriptors, HOLOUI_PREVIEWS_OPEN, IntegrationMetricType.INTEGER, "previews", "holoui", "sessions");
+        putMetric(descriptors, HOLOUI_DISPLAY_ENTITIES, IntegrationMetricType.INTEGER, "entities", "holoui", "rendering");
+        putMetric(descriptors, HOLOUI_DISPLAY_ENTITIES_VISIBLE, IntegrationMetricType.INTEGER, "entities", "holoui", "rendering");
+        putMetric(descriptors, HOLOUI_MENU_DEFINITIONS, IntegrationMetricType.INTEGER, "menus", "holoui", "config");
+        putMetric(descriptors, HOLOUI_PACKETS_PER_SECOND, IntegrationMetricType.DOUBLE, "packets-per-second", "holoui", "rendering");
+        putMetric(descriptors, HOLOUI_SPAWNS_PER_SECOND, IntegrationMetricType.DOUBLE, "entities-per-second", "holoui", "rendering");
+        putMetric(descriptors, HOLOUI_TICK_MS, IntegrationMetricType.DOUBLE, "ms-per-second", "holoui", "sessions");
+        putMetric(descriptors, HOLOUI_PREVIEW_REFRESH_PER_SECOND, IntegrationMetricType.DOUBLE, "ops-per-second", "holoui", "sessions");
+        putMetric(descriptors, HOLOUI_BUILDER_SERVER_RUNNING, IntegrationMetricType.INTEGER, "boolean", "holoui", "config");
+
+        putMetric(descriptors, HIDDENORE_BLOCKS_BROKEN_PER_SECOND, IntegrationMetricType.DOUBLE, "blocks-per-second", "hiddenore", "mining");
+        putMetric(descriptors, HIDDENORE_DROPS_INJECTED_PER_SECOND, IntegrationMetricType.DOUBLE, "drops-per-second", "hiddenore", "mining");
+        putMetric(descriptors, HIDDENORE_VEINS_DISCOVERED_PER_SECOND, IntegrationMetricType.DOUBLE, "veins-per-second", "hiddenore", "veins");
+        putMetric(descriptors, HIDDENORE_VEIN_CHUNKS_COMPUTED_PER_SECOND, IntegrationMetricType.DOUBLE, "chunks-per-second", "hiddenore", "veins");
+        putMetric(descriptors, HIDDENORE_VEIN_CACHE_CHUNKS, IntegrationMetricType.INTEGER, "chunks", "hiddenore", "veins");
+        putMetric(descriptors, HIDDENORE_PDC_READS_PER_SECOND, IntegrationMetricType.DOUBLE, "ops-per-second", "hiddenore", "provenance");
+        putMetric(descriptors, HIDDENORE_PDC_WRITES_PER_SECOND, IntegrationMetricType.DOUBLE, "ops-per-second", "hiddenore", "provenance");
+        putMetric(descriptors, HIDDENORE_ORE_REMOVAL_ENABLED, IntegrationMetricType.INTEGER, "boolean", "hiddenore", "generation");
+        putMetric(descriptors, HIDDENORE_ORE_REMOVAL_BLOCKS_PER_SECOND, IntegrationMetricType.DOUBLE, "blocks-per-second", "hiddenore", "generation");
+        putMetric(descriptors, HIDDENORE_SEEDED_MODE, IntegrationMetricType.INTEGER, "boolean", "hiddenore", "veins");
+        putMetric(descriptors, HIDDENORE_DROP_RULES, IntegrationMetricType.INTEGER, "rules", "hiddenore", "config");
+        putMetric(descriptors, HIDDENORE_CONFIG_RELOADS_TOTAL, IntegrationMetricType.LONG, "reloads", "hiddenore", "config");
+
+        putMetric(descriptors, BILETOOLS_WATCHED_JARS, IntegrationMetricType.INTEGER, "jars", "biletools", "watcher");
+        putMetric(descriptors, BILETOOLS_DIRTY_PLUGINS, IntegrationMetricType.INTEGER, "plugins", "biletools", "watcher");
+        putMetric(descriptors, BILETOOLS_RELOADS_TOTAL, IntegrationMetricType.LONG, "reloads", "biletools", "reload");
+        putMetric(descriptors, BILETOOLS_LAST_RELOAD_MS, IntegrationMetricType.LONG, "ms", "biletools", "reload");
+        putMetric(descriptors, BILETOOLS_REMOTE_SLAVE_ONLINE, IntegrationMetricType.INTEGER, "boolean", "biletools", "remote");
+
         return Map.copyOf(descriptors);
+    }
+
+    private static void putMetric(
+            Map<String, IntegrationMetricDescriptor> descriptors,
+            String key,
+            IntegrationMetricType type,
+            String unit,
+            String plugin,
+            String domain
+    ) {
+        descriptors.put(key, new IntegrationMetricDescriptor(
+                key,
+                type,
+                unit,
+                Map.of("plugin", plugin, "domain", domain)
+        ));
     }
 
     private static void addIrisDescriptors(Map<String, IntegrationMetricDescriptor> descriptors) {
