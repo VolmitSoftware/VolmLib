@@ -44,6 +44,8 @@ dependencies {
     compileOnly('io.papermc.paper:paper-api:26.2.build.60-beta')
     spigotCompatibility('org.spigotmc:spigot-api:26.2-R0.1-SNAPSHOT')
 
+    compileOnly('me.clip:placeholderapi:2.11.6') { transitive = false }
+
     compileOnly('org.projectlombok:lombok:1.18.44')
     annotationProcessor('org.projectlombok:lombok:1.18.44')
 
@@ -57,6 +59,7 @@ dependencies {
 
     testImplementation('junit:junit:4.13.2')
     testImplementation('io.papermc.paper:paper-api:26.2.build.60-beta')
+    testImplementation('me.clip:placeholderapi:2.11.6') { transitive = false }
 }
 
 publishing {

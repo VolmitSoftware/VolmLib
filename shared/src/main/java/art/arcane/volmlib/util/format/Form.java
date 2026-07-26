@@ -34,8 +34,7 @@ public class Form {
     private static final String[] NAMES = new String[]{"Thousand", "Million", "Billion", "Trillion", "Quadrillion", "Quintillion", "Sextillion", "Septillion", "Octillion", "Nonillion", "Decillion", "Undecillion", "Duodecillion", "Tredecillion", "Quattuordecillion", "Quindecillion", "Sexdecillion", "Septendecillion", "Octodecillion", "Novemdecillion", "Vigintillion",};
     private static final BigInteger THOUSAND = BigInteger.valueOf(1000);
     private static final NavigableMap<BigInteger, String> MAP;
-    private static NumberFormat NF;
-    private static DecimalFormat DF;
+    private static final ThreadLocal<NumberFormat> NF = ThreadLocal.withInitial(() -> NumberFormat.getInstance(Locale.US));
 
     static {
         MAP = new TreeMap<>();
@@ -82,12 +81,6 @@ public class Form {
             case 3 -> Form.f(day) + "rd";
             default -> Form.f(day) + "th";
         };
-    }
-
-    private static void instantiate() {
-        if (NF == null) {
-            NF = NumberFormat.getInstance(Locale.US);
-        }
     }
 
     /**
@@ -979,8 +972,7 @@ public class Form {
      * @return the string representation of the number
      */
     public static String f(long i) {
-        instantiate();
-        return NF.format(i);
+        return NF.get().format(i);
     }
 
     /**
@@ -990,8 +982,7 @@ public class Form {
      * @return the string representation of the number
      */
     public static String f(int i) {
-        instantiate();
-        return NF.format(i);
+        return NF.get().format(i);
     }
 
     /**
@@ -1008,9 +999,7 @@ public class Form {
             form = form + "." + repeat("#", p);
         }
 
-        DF = new DecimalFormat(form);
-
-        return DF.format(i).replaceAll("\\Q,\\E", ".");
+        return new DecimalFormat(form).format(i).replace(',', '.');
     }
 
     /**
@@ -1029,9 +1018,7 @@ public class Form {
             form = form + "." + repeat("0", p);
         }
 
-        DF = new DecimalFormat(form);
-
-        return DF.format(i);
+        return new DecimalFormat(form).format(i);
     }
 
     /**
@@ -1048,9 +1035,7 @@ public class Form {
             form = form + "." + repeat("#", p);
         }
 
-        DF = new DecimalFormat(form);
-
-        return DF.format(i);
+        return new DecimalFormat(form).format(i);
     }
 
     /**
