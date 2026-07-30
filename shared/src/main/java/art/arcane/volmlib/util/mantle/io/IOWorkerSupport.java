@@ -34,11 +34,13 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.Semaphore;
 
 public class IOWorkerSupport implements Closeable {
+    // No SYNC: it fsyncs every individual write (8KB buffers -> hundreds of fsyncs per plate).
+    // Durability is provided by DelegateStream.Output.close(), which force(true)s the channel
+    // once the whole plate has been written.
     private static final Set<OpenOption> OPTIONS = Set.of(
             StandardOpenOption.READ,
             StandardOpenOption.WRITE,
-            StandardOpenOption.CREATE,
-            StandardOpenOption.SYNC
+            StandardOpenOption.CREATE
     );
     private static final ConcurrentMap<String, Semaphore> GLOBAL_CHANNEL_GATES = new ConcurrentHashMap<>();
 

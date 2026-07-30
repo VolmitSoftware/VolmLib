@@ -1,5 +1,7 @@
 package art.arcane.volmlib.util.cache;
 
+import art.arcane.volmlib.util.function.IntIntFunction;
+
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.VarHandle;
 import java.util.function.BiFunction;
@@ -27,8 +29,16 @@ public class ChunkCache2DAtomic<T> {
         this.states = new byte[256];
     }
 
-    @SuppressWarnings("unchecked")
     protected T getComputed(int x, int z, BiFunction<Integer, Integer, T> resolver) {
+        return getComputedInts(x, z, resolver::apply);
+    }
+
+    protected void fillComputed(int worldX, int worldZ, Object[] target, BiFunction<Integer, Integer, T> resolver) {
+        fillComputedInts(worldX, worldZ, target, resolver::apply);
+    }
+
+    @SuppressWarnings("unchecked")
+    protected T getComputedInts(int x, int z, IntIntFunction<T> resolver) {
         int key = ((z & 15) << 4) | (x & 15);
         Object cached = VALUE_HANDLE.getAcquire(values, key);
         if (cached != null) {
@@ -38,7 +48,7 @@ public class ChunkCache2DAtomic<T> {
         return compute(key, x, z, resolver);
     }
 
-    protected void fillComputed(int worldX, int worldZ, Object[] target, BiFunction<Integer, Integer, T> resolver) {
+    protected void fillComputedInts(int worldX, int worldZ, Object[] target, IntIntFunction<T> resolver) {
         for (int row = 0; row < 16; row++) {
             int rowOffset = row << 4;
             int sampleZ = worldZ + row;
@@ -56,7 +66,7 @@ public class ChunkCache2DAtomic<T> {
     }
 
     @SuppressWarnings("unchecked")
-    private T compute(int key, int x, int z, BiFunction<Integer, Integer, T> resolver) {
+    private T compute(int key, int x, int z, IntIntFunction<T> resolver) {
         if (fast) {
             T resolvedFast = resolver.apply(x, z);
             if (resolvedFast != null) {

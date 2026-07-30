@@ -4,12 +4,16 @@ import art.arcane.volmlib.util.collection.KMap;
 import art.arcane.volmlib.util.matter.slices.*;
 import org.bukkit.block.data.BlockData;
 
+import java.lang.reflect.Constructor;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
 public class IrisMatter implements Matter {
     private static final boolean BUKKIT_PRESENT = detectBukkit();
     private static final KMap<Class<?>, Class<? extends MatterSlice<?>>> SLICERS = buildSlicers();
+    private static final ConcurrentMap<Class<?>, Constructor<?>> SLICE_CONSTRUCTORS = new ConcurrentHashMap<>();
 
     private static boolean detectBukkit() {
         try {
@@ -120,10 +124,28 @@ public class IrisMatter implements Matter {
         }
 
         try {
-            return (MatterSlice<T>) slicer.getConstructor(int.class, int.class, int.class)
-                    .newInstance(getWidth(), getHeight(), getDepth());
+            return (MatterSlice<T>) constructorFor(slicer).newInstance(getWidth(), getHeight(), getDepth());
         } catch (Throwable e) {
             throw new IllegalStateException("Failed to construct matter slice " + Objects.toString(slicer), e);
+        }
+    }
+
+    /**
+     * Slice creation happens per matter object per slice type, so the reflective lookup is resolved
+     * once per slicer class instead of on every call.
+     */
+    private static Constructor<?> constructorFor(Class<? extends MatterSlice<?>> slicer) {
+        Constructor<?> cached = SLICE_CONSTRUCTORS.get(slicer);
+        if (cached != null) {
+            return cached;
+        }
+
+        try {
+            Constructor<?> resolved = slicer.getConstructor(int.class, int.class, int.class);
+            SLICE_CONSTRUCTORS.putIfAbsent(slicer, resolved);
+            return resolved;
+        } catch (NoSuchMethodException e) {
+            throw new IllegalStateException("Matter slice " + slicer.getCanonicalName() + " has no (int, int, int) constructor", e);
         }
     }
 }

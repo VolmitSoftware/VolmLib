@@ -11,15 +11,15 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 public class HyperLockSupport {
-    private final ConcurrentMap<Long, ReentrantLock> locks;
-    private final ConcurrentMap<Long, LockOwner> owners;
+    private final ConcurrentMap<Long, OwnedLock> locks;
+    private final Function<Long, OwnedLock> lockFactory;
     private final Consumer<String> warningHandler;
     private final Consumer<Throwable> errorHandler;
     private volatile boolean enabled = true;
-    private final boolean fair;
 
     public HyperLockSupport() {
         this(1024, false, null, null);
@@ -34,11 +34,10 @@ public class HyperLockSupport {
     }
 
     public HyperLockSupport(int capacity, boolean fair, Consumer<String> warningHandler, Consumer<Throwable> errorHandler) {
-        this.fair = fair;
         this.warningHandler = warningHandler;
         this.errorHandler = errorHandler;
+        this.lockFactory = key -> new OwnedLock(fair);
         locks = new ConcurrentHashMap<>(Math.max(capacity, 64));
-        owners = new ConcurrentHashMap<>(Math.max(capacity, 64));
     }
 
     public void with(int x, int z, Runnable r) {
@@ -127,8 +126,20 @@ public class HyperLockSupport {
         return false;
     }
 
-    private ReentrantLock getLock(int x, int z) {
-        return locks.computeIfAbsent(CacheKey.key(x, z), k -> new ReentrantLock(fair));
+    private OwnedLock getLock(int x, int z) {
+        Long key = CacheKey.key(x, z);
+        OwnedLock lock = locks.get(key);
+        return lock != null ? lock : locks.computeIfAbsent(key, lockFactory);
+    }
+
+    /**
+     * Records the acquisition time for the wait diagnostics. Skipped entirely when no warning
+     * handler is installed, so the uncontended path stays free of clock reads.
+     */
+    private void stamp(OwnedLock lock) {
+        if (warningHandler != null) {
+            lock.acquiredAtMs = System.currentTimeMillis();
+        }
     }
 
     public void lock(int x, int z) {
@@ -136,10 +147,9 @@ public class HyperLockSupport {
             return;
         }
 
-        long key = CacheKey.key(x, z);
-        ReentrantLock lock = getLock(x, z);
+        OwnedLock lock = getLock(x, z);
         if (lock.tryLock()) {
-            owners.put(key, new LockOwner(Thread.currentThread(), System.currentTimeMillis()));
+            stamp(lock);
             return;
         }
 
@@ -147,7 +157,7 @@ public class HyperLockSupport {
         while (enabled) {
             try {
                 if (lock.tryLock(5, TimeUnit.SECONDS)) {
-                    owners.put(key, new LockOwner(Thread.currentThread(), System.currentTimeMillis()));
+                    stamp(lock);
                     long waited = System.currentTimeMillis() - started;
                     if (warningHandler != null && waited >= 1000L) {
                         warningHandler.accept("HyperLock acquired after wait: key=" + x + "," + z
@@ -166,18 +176,18 @@ public class HyperLockSupport {
 
             if (warningHandler != null) {
                 long waited = System.currentTimeMillis() - started;
-                LockOwner owner = owners.get(key);
+                Thread owner = lock.owner();
                 String ownerSummary = owner == null
                         ? "none"
-                        : owner.thread().getName() + " alive=" + owner.thread().isAlive() + " heldMs=" + (System.currentTimeMillis() - owner.acquiredAtMs());
+                        : owner.getName() + " alive=" + owner.isAlive() + " heldMs=" + (System.currentTimeMillis() - lock.acquiredAtMs);
                 warningHandler.accept("HyperLock waiting: key=" + x + "," + z
                         + " waitedMs=" + waited
                         + " thread=" + Thread.currentThread().getName()
                         + " holdCount=" + lock.getHoldCount()
                         + " isLocked=" + lock.isLocked()
                         + " owner=" + ownerSummary);
-                if (owner != null && owner.thread().isAlive()) {
-                    StackTraceElement[] trace = owner.thread().getStackTrace();
+                if (owner != null && owner.isAlive()) {
+                    StackTraceElement[] trace = owner.getStackTrace();
                     int limit = Math.min(trace.length, 12);
                     for (int i = 0; i < limit; i++) {
                         warningHandler.accept("  owner-at " + trace[i]);
@@ -192,13 +202,7 @@ public class HyperLockSupport {
             return;
         }
 
-        long key = CacheKey.key(x, z);
-        ReentrantLock lock = getLock(x, z);
-        int holdCount = lock.getHoldCount();
-        lock.unlock();
-        if (holdCount <= 1) {
-            owners.remove(key);
-        }
+        getLock(x, z).unlock();
     }
 
     public void disable() {
@@ -206,6 +210,22 @@ public class HyperLockSupport {
         locks.values().forEach(ReentrantLock::lock);
     }
 
-    private record LockOwner(Thread thread, long acquiredAtMs) {
+    /**
+     * Per-key lock that carries its own owner diagnostics. Keeping the acquisition stamp on the
+     * lock removes the second concurrent map plus an owner allocation from every acquisition;
+     * the holder thread comes straight from the AQS state.
+     */
+    private static final class OwnedLock extends ReentrantLock {
+        private static final long serialVersionUID = 1L;
+
+        private volatile long acquiredAtMs;
+
+        private OwnedLock(boolean fair) {
+            super(fair);
+        }
+
+        private Thread owner() {
+            return getOwner();
+        }
     }
 }

@@ -292,3 +292,35 @@ task. Do the cleanup in the callback, not in the `false` branch.
 Everything else in VolmLib states its own threading contract, or has none and must be treated as
 single-threaded. The one surface documented in this directory that is explicitly safe from any thread is the
 placeholder snapshot machinery, and [placeholders.md](placeholders.md) explains exactly why it has to be.
+
+---
+
+## HUD slot arbitration
+
+`art.arcane.volmlib.util.hud` coordinates the two exclusive player display surfaces — the action bar and the
+title (title + subtitle + times, treated as one atomic surface) — across every plugin that ships this package,
+including copies relocated into different namespaces. Boss bars are never arbitrated: the client stacks them
+natively, so `BOSS_BAR` is the terminal fallback every preference chain can end on.
+
+Coordination never crosses a plugin boundary through a VolmLib type. Each copy posts a String bid into Bukkit
+player metadata and every copy runs the same deterministic winner function over all posted bids:
+
+| Piece            | Value                                                                          |
+|------------------|--------------------------------------------------------------------------------|
+| Metadata keys    | `volmit.hud.actionbar`, `volmit.hud.title`                                     |
+| Bid encoding     | `1\|priority\|sinceMillis\|assertedMillis\|ttlMillis\|purpose` (version first)  |
+| Winner order     | highest priority, then smallest `sinceMillis`, then plugin name, then purpose  |
+| Expiry           | a bid is dead when `now - assertedMillis > ttlMillis`                          |
+| Priorities       | `HudPriority`: AMBIENT 10, NOTICE 30, PROGRESS 60, INTERACTIVE 80, MODAL 100   |
+
+A consumer opens a `HudSlotClaim` from its plugin's `HudSlotService` with a `HudSlotRequest` (purpose,
+priority, TTL, ordered surface preferences) and calls `resolve()` from its existing update loop. The result is
+the one surface it may render to on that frame; rendering stays entirely on the claiming plugin's side, in its
+own text pipeline. Re-asserting keeps `sinceMillis` stable, which is what lets a holder keep an equal-priority
+slot. `release()` withdraws the bid; one-shot notices skip it and let the TTL hold the surface for their
+display window. `HudBossBarLane` renders fallback content as per-player boss bars keyed by lane id, with a
+per-lane staleness timeout so abandoned bars remove themselves.
+
+Everything here is safe from any thread: the metadata store is synchronized and the local session ledger is
+lock-free. Bids from a crashed or disabled plugin expire on their own; no service registration, election, or
+reflection is involved, so the package survives `minimize()` as long as call sites reference it directly.

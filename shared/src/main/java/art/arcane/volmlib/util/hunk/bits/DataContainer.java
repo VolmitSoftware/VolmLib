@@ -19,18 +19,19 @@
 package art.arcane.volmlib.util.hunk.bits;
 
 import art.arcane.volmlib.util.data.Varint;
-import it.unimi.dsi.fastutil.ints.Int2IntRBTreeMap;
 
 import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.util.Arrays;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 public class DataContainer<T> {
     private static final boolean TRIM = Boolean.getBoolean("iris.trim-palette");
+    private static final int PRESENT = -1;
     protected static final int INITIAL_BITS = 3;
     protected static final int LINEAR_BITS_LIMIT = 4;
     protected static final int LINEAR_INITIAL_LENGTH = (int) Math.pow(2, LINEAR_BITS_LIMIT) + 2;
@@ -62,7 +63,12 @@ public class DataContainer<T> {
         this.length = Varint.readUnsignedVarInt(din);
         this.palette = newPalette(din);
         this.data = new DataBits(palette.bits(), length, din);
-        trim();
+
+        // writeDos() always trims before serializing, so anything we read back is already minimal.
+        // Re-scanning every entry on load is pure overhead; -Diris.trim-palette=true restores it.
+        if (TRIM) {
+            trim();
+        }
     }
 
     private static int[] computeBitLimits() {
@@ -215,22 +221,49 @@ public class DataContainer<T> {
         return data.getSize();
     }
 
+    /**
+     * Renumbers the palette down to the ids actually referenced by the data.
+     * <p>
+     * Byte-identical to the previous Int2IntRBTreeMap implementation: old ids are visited in
+     * ascending order (the tree map iterated its keys sorted), so {@link Palette#add(Object)}
+     * hands out exactly the same new ids, and absent/zero ids still map to 0.
+     */
     private void trim() {
-        Int2IntRBTreeMap ints = new Int2IntRBTreeMap();
+        DataBits localData = data;
+        int[] remap = new int[Math.max(palette.size() + 1, 16)];
+        int distinct = 0;
+        int maxId = 0;
+
         for (int i = 0; i < length; i++) {
-            int x = data.get(i);
+            int x = localData.getUnchecked(i);
             if (x <= 0) continue;
-            ints.put(x, x);
+            if (x >= remap.length) {
+                remap = Arrays.copyOf(remap, Math.max(x + 1, remap.length << 1));
+            }
+            if (remap[x] == 0) {
+                remap[x] = PRESENT;
+                distinct++;
+                if (x > maxId) {
+                    maxId = x;
+                }
+            }
         }
-        if (ints.size() == palette.size())
+
+        if (distinct == palette.size())
             return;
 
-        int bits = bits(ints.size() + 1);
+        int bits = bits(distinct + 1);
         Palette<T> trimmed = newPalette(bits);
-        ints.replaceAll((k, v) -> trimmed.add(palette.get(k)));
+        for (int id = 1; id <= maxId; id++) {
+            if (remap[id] != 0) {
+                remap[id] = trimmed.add(palette.get(id));
+            }
+        }
+
         DataBits tBits = new DataBits(bits, length);
         for (int i = 0; i < length; i++) {
-            tBits.set(i, ints.get(data.get(i)));
+            int x = localData.getUnchecked(i);
+            tBits.set(i, x <= 0 ? 0 : remap[x]);
         }
 
         data = tBits;

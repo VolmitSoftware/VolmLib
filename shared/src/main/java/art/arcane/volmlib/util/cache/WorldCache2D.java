@@ -1,6 +1,7 @@
 package art.arcane.volmlib.util.cache;
 
 import art.arcane.volmlib.util.function.Function2;
+import art.arcane.volmlib.util.function.IntIntFunction;
 import com.googlecode.concurrentlinkedhashmap.ConcurrentLinkedHashMap;
 
 import java.util.Arrays;
@@ -13,7 +14,7 @@ public class WorldCache2D<T> {
     private static final int LOCAL_CHUNK_SLOTS = 1024;
 
     private final ConcurrentLinkedHashMap<Long, ChunkCache2D<T>> chunks;
-    private final Function2<Integer, Integer, T> resolver;
+    private final IntIntFunction<T> resolver;
     private final Supplier<? extends ChunkCache2D<T>> chunkSupplier;
     private final ThreadLocal<LocalChunks<T>> localChunks = ThreadLocal.withInitial(LocalChunks::new);
 
@@ -22,6 +23,10 @@ public class WorldCache2D<T> {
     }
 
     public WorldCache2D(Function2<Integer, Integer, T> resolver, int size, Supplier<? extends ChunkCache2D<T>> chunkSupplier) {
+        this(size, chunkSupplier, resolver::apply);
+    }
+
+    private WorldCache2D(int size, Supplier<? extends ChunkCache2D<T>> chunkSupplier, IntIntFunction<T> resolver) {
         this.resolver = resolver;
         this.chunkSupplier = chunkSupplier;
         chunks = new ConcurrentLinkedHashMap.Builder<Long, ChunkCache2D<T>>()
@@ -31,10 +36,22 @@ public class WorldCache2D<T> {
                 .build();
     }
 
+    /**
+     * Boxing-free resolver variant. A static factory rather than an overloaded constructor so that
+     * existing lambda call sites of the boxed constructors keep compiling unambiguously.
+     */
+    public static <T> WorldCache2D<T> ofInts(IntIntFunction<T> resolver, Supplier<? extends ChunkCache2D<T>> chunkSupplier) {
+        return ofInts(resolver, 1024, chunkSupplier);
+    }
+
+    public static <T> WorldCache2D<T> ofInts(IntIntFunction<T> resolver, int size, Supplier<? extends ChunkCache2D<T>> chunkSupplier) {
+        return new WorldCache2D<>(size, chunkSupplier, resolver);
+    }
+
     public T get(int x, int z) {
         long key = CacheKey.key(x >> 4, z >> 4);
         ChunkCache2D<T> chunk = chunkFor(key);
-        return chunk.get(x, z, resolver);
+        return chunk.getInts(x, z, resolver);
     }
 
     public void fillChunk(int chunkX, int chunkZ, Object[] target) {
@@ -46,7 +63,7 @@ public class WorldCache2D<T> {
         ChunkCache2D<T> chunk = chunkFor(key);
         int worldX = chunkX << 4;
         int worldZ = chunkZ << 4;
-        chunk.fill(worldX, worldZ, target, resolver);
+        chunk.fillInts(worldX, worldZ, target, resolver);
     }
 
     public long getSize() {

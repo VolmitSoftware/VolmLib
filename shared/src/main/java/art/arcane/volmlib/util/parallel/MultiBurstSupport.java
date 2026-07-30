@@ -4,6 +4,7 @@ import art.arcane.volmlib.util.collection.KList;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.concurrent.AbstractExecutorService;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
@@ -13,6 +14,7 @@ import java.util.concurrent.ForkJoinWorkerThread;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import java.util.function.IntSupplier;
@@ -20,6 +22,8 @@ import java.util.function.IntUnaryOperator;
 import java.util.function.LongSupplier;
 
 public class MultiBurstSupport implements ExecutorService {
+    private static final ExecutorService SAME_THREAD = new SameThreadExecutorService();
+
     private final AtomicLong last;
     private final String name;
     private final int priority;
@@ -31,7 +35,9 @@ public class MultiBurstSupport implements ExecutorService {
     private final Consumer<String> warnHandler;
     private final long shutdownTimeoutMillis;
     private final Object lock = new Object();
+    private final AtomicBoolean fallbackWarned = new AtomicBoolean();
     private volatile ExecutorService service;
+    private volatile boolean closed;
 
     public MultiBurstSupport(String name,
                              int priority,
@@ -64,11 +70,19 @@ public class MultiBurstSupport implements ExecutorService {
 
     private ExecutorService getService() {
         last.set(millis.getAsLong());
+        if (closed) {
+            return fallback();
+        }
+
         if (service != null && !service.isShutdown()) {
             return service;
         }
 
         synchronized (lock) {
+            if (closed) {
+                return fallback();
+            }
+
             if (service != null && !service.isShutdown()) {
                 return service;
             }
@@ -192,7 +206,7 @@ public class MultiBurstSupport implements ExecutorService {
 
     @Override
     public boolean isShutdown() {
-        return service == null || service.isShutdown();
+        return closed || service == null || service.isShutdown();
     }
 
     @Override
@@ -246,8 +260,79 @@ public class MultiBurstSupport implements ExecutorService {
     }
 
     public void close() {
-        if (service != null) {
-            close(service, millis, infoHandler, warnHandler, errorHandler, shutdownTimeoutMillis);
+        ExecutorService current;
+        synchronized (lock) {
+            closed = true;
+            current = service;
+        }
+
+        if (current != null) {
+            close(current, millis, infoHandler, warnHandler, errorHandler, shutdownTimeoutMillis);
+        }
+    }
+
+    /**
+     * Re-arms a closed burster so the next task rebuilds the pool. Call this from the owning
+     * plugin's enable path when a closed burster is reused (hotload / re-enable); without it a
+     * closed burster runs everything inline on the caller's thread.
+     */
+    public void reopen() {
+        synchronized (lock) {
+            if (!closed) {
+                return;
+            }
+
+            service = null;
+            closed = false;
+            fallbackWarned.set(false);
+        }
+    }
+
+    public boolean isClosed() {
+        return closed;
+    }
+
+    /**
+     * Post-close executor. Stragglers that submit work after {@link #close()} used to silently
+     * build a brand new full-size ForkJoinPool that nothing would ever shut down; run them inline
+     * instead so no threads leak past shutdown.
+     */
+    private ExecutorService fallback() {
+        if (warnHandler != null && fallbackWarned.compareAndSet(false, true)) {
+            warnHandler.accept("Burster " + name + " is closed; running submitted work inline on the calling thread.");
+        }
+
+        return SAME_THREAD;
+    }
+
+    private static final class SameThreadExecutorService extends AbstractExecutorService {
+        @Override
+        public void shutdown() {
+        }
+
+        @Override
+        public List<Runnable> shutdownNow() {
+            return List.of();
+        }
+
+        @Override
+        public boolean isShutdown() {
+            return true;
+        }
+
+        @Override
+        public boolean isTerminated() {
+            return true;
+        }
+
+        @Override
+        public boolean awaitTermination(long timeout, TimeUnit unit) {
+            return true;
+        }
+
+        @Override
+        public void execute(Runnable command) {
+            command.run();
         }
     }
 
