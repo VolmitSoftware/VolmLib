@@ -25,6 +25,21 @@ public final class DirectorMiniMenu {
     private DirectorMiniMenu() {
     }
 
+    public static void deliver(Object sender, DirectorHelpPage page, Theme theme, DirectorTextResolver resolver) {
+        if (sender == null || page == null) {
+            return;
+        }
+
+        if (isPlayer(sender)) {
+            deliver(sender, render(page, theme, resolver));
+            return;
+        }
+
+        for (String line : renderConsole(page, resolver)) {
+            deliverPlainLine(sender, line);
+        }
+    }
+
     public static void deliver(Object sender, List<String> lines) {
         if (sender == null || lines == null) {
             return;
@@ -98,6 +113,17 @@ public final class DirectorMiniMenu {
         }
     }
 
+    private static void deliverPlainLine(Object sender, String line) {
+        if (line == null || line.trim().isEmpty()) {
+            return;
+        }
+
+        try {
+            sender.getClass().getMethod("sendMessage", String.class).invoke(sender, line);
+        } catch (Throwable ignored) {
+        }
+    }
+
     static String stripMiniMessage(String input) {
         if (input == null || input.isEmpty()) {
             return "";
@@ -164,7 +190,7 @@ public final class DirectorMiniMenu {
         List<String> args = rawArgs == null ? List.of() : rawArgs;
         boolean explicitHelp = args.stream().anyMatch(DirectorMiniMenu::isHelpToken);
         if (!explicitHelp && !args.isEmpty()) {
-            return Optional.empty();
+            return resolveImplicitHelp(engine.getRoot(), args, pageSize);
         }
 
         int requestedPage = readPage(args).orElse(0);
@@ -184,8 +210,34 @@ public final class DirectorMiniMenu {
         }
 
         DirectorRuntimeNode target = cursor.isInvocable() && cursor.getParent() != null ? cursor.getParent() : cursor;
-        List<DirectorRuntimeNode> entries = new ArrayList<>(target.getChildren());
-        entries.sort(Comparator.comparing(node -> node.getDescriptor().getName(), String.CASE_INSENSITIVE_ORDER));
+        return Optional.of(buildPage(target, requestedPage, pageSize));
+    }
+
+    private static Optional<DirectorHelpPage> resolveImplicitHelp(DirectorRuntimeNode root, List<String> args, int pageSize) {
+        DirectorRuntimeNode cursor = root;
+
+        for (String token : args) {
+            if (token == null || token.trim().isEmpty()) {
+                continue;
+            }
+
+            DirectorRuntimeNode child = findBestChild(cursor, token);
+            if (child == null) {
+                return Optional.empty();
+            }
+
+            cursor = child;
+        }
+
+        if (cursor.isInvocable()) {
+            return Optional.empty();
+        }
+
+        return Optional.of(buildPage(cursor, 0, pageSize));
+    }
+
+    private static DirectorHelpPage buildPage(DirectorRuntimeNode target, int requestedPage, int pageSize) {
+        List<DirectorRuntimeNode> entries = sortedChildren(target);
 
         int safePageSize = Math.max(1, pageSize);
         int totalPages = Math.max(1, (int) Math.ceil(entries.size() / (double) safePageSize));
@@ -194,7 +246,13 @@ public final class DirectorMiniMenu {
         int to = Math.min(entries.size(), from + safePageSize);
         List<DirectorRuntimeNode> slice = from >= to ? List.of() : entries.subList(from, to);
 
-        return Optional.of(new DirectorHelpPage(target, List.copyOf(slice), page, totalPages));
+        return new DirectorHelpPage(target, List.copyOf(slice), page, totalPages);
+    }
+
+    private static List<DirectorRuntimeNode> sortedChildren(DirectorRuntimeNode node) {
+        List<DirectorRuntimeNode> children = new ArrayList<>(node.getChildren());
+        children.sort(Comparator.comparing(child -> child.getDescriptor().getName(), String.CASE_INSENSITIVE_ORDER));
+        return children;
     }
 
     public static List<String> render(DirectorHelpPage page, Theme theme, DirectorTextResolver resolver) {
@@ -220,6 +278,64 @@ public final class DirectorMiniMenu {
 
         lines.add(renderFooter(page, theme, activeResolver));
         return lines;
+    }
+
+    public static List<String> renderConsole(DirectorHelpPage page, DirectorTextResolver resolver) {
+        if (page == null) {
+            return List.of();
+        }
+
+        DirectorTextResolver activeResolver = resolver == null ? DirectorTextResolver.ENGLISH : resolver;
+        List<DirectorRuntimeNode> entries = sortedChildren(page.node());
+        List<String> lines = new ArrayList<>();
+        lines.add("--- " + page.node().path() + " ---");
+
+        if (entries.isEmpty()) {
+            lines.add(resolve(activeResolver, DirectorHelpMessages.NO_SUBCOMMANDS));
+            return lines;
+        }
+
+        for (DirectorRuntimeNode node : entries) {
+            lines.add(renderConsoleNodeLine(node, activeResolver));
+        }
+
+        return lines;
+    }
+
+    private static String renderConsoleNodeLine(DirectorRuntimeNode node, DirectorTextResolver resolver) {
+        StringBuilder line = new StringBuilder(node.getDescriptor().getName());
+
+        if (!node.isInvocable()) {
+            return line.append(" - ").append(resolve(resolver, DirectorHelpMessages.CATEGORY)).toString();
+        }
+
+        for (DirectorParameterDescriptor parameter : visibleParameters(node)) {
+            line.append(' ').append(renderConsoleParameter(parameter));
+        }
+
+        return line.append(" - ")
+                .append(renderConsoleDescription(node.getDescriptor().getDescription(), node.getDescriptor().getDescriptionKey(), resolver))
+                .toString();
+    }
+
+    private static String renderConsoleParameter(DirectorParameterDescriptor parameter) {
+        if (parameter.isRequired()) {
+            return "<" + parameter.getName() + ">";
+        }
+
+        if (parameter.getDefaultValue() != null && !parameter.getDefaultValue().isBlank()) {
+            return "[" + parameter.getName() + "=" + parameter.getDefaultValue() + "]";
+        }
+
+        return "[" + parameter.getName() + "]";
+    }
+
+    private static String renderConsoleDescription(String description, String descriptionKey, DirectorTextResolver resolver) {
+        if (description == null || description.trim().isEmpty()) {
+            return resolve(resolver, DirectorHelpMessages.NO_DESCRIPTION);
+        }
+
+        return resolveDescription(resolver, descriptionKey, description);
     }
 
     private static String renderHeader(DirectorHelpPage page, Theme theme) {

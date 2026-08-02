@@ -493,22 +493,28 @@ public abstract class BSupport<P> {
         return getOrNull(bdxf, false);
     }
 
+    /**
+     * Resolves a block key with the historical air fallback: a key that is well formed but not registered comes back
+     * as air, not null, so this method cannot tell an unknown block from a deliberate air block. Null still comes back
+     * when resolution throws.
+     * <p>
+     * The air fallback is load bearing for world generation. {@link #get(String)} routes through
+     * {@link #resolveCompatBlock(String)}, and on Iris that hook starts by calling this method and only falls through
+     * to its legacy key rewrite table - hundreds of entries mapping keys that Minecraft renamed - when this method
+     * answers null. Returning null for an unregistered key would therefore switch that table on, and since it exists
+     * on Bukkit only, the same pack and seed would generate different blocks on Bukkit than on the modded platforms.
+     * <p>
+     * Callers that must tell absence from air use {@link #resolveOrNull(String, boolean)}.
+     */
     public BlockData getOrNull(String bdxf, boolean warn) {
         try {
-            String bd = bdxf.trim();
+            BlockData direct = resolveDirectKey(bdxf.trim());
 
-            if (!custom.isEmpty() && custom.containsKey(bd)) {
-                return custom.get(bd);
+            if (direct != null) {
+                return direct;
             }
 
-            if (bd.startsWith("minecraft:cauldron[level=")) {
-                bd = bd.replaceAll("\\Q:cauldron[\\E", ":water_cauldron[");
-            }
-
-            if (bd.equals("minecraft:grass_path")) {
-                return DIRT_PATH.createBlockData();
-            }
-
+            String bd = canonicalKey(bdxf);
             BlockData bdx = parseBlockData(bd, warn);
 
             if (bdx == null) {
@@ -524,6 +530,60 @@ public abstract class BSupport<P> {
             if (warn) {
                 warnUnresolved(bdxf, "Unknown Block Data '" + bdxf + "'");
             }
+        }
+
+        return null;
+    }
+
+    /**
+     * Resolves a block key strictly: null when nothing claims the key, never an air substitute. This is the lookup
+     * behind absence-sensitive callers - schema and pack validation, NBT round trips, and any caller that has its own
+     * fallback for an unresolved key. It does not consult {@link #resolveCompatBlock(String)}, so it stays off the
+     * generation path and cannot fork block output between platforms.
+     */
+    public BlockData resolveOrNull(String bdxf, boolean warn) {
+        try {
+            BlockData direct = resolveDirectKey(bdxf.trim());
+
+            if (direct != null) {
+                return direct;
+            }
+
+            String bd = canonicalKey(bdxf);
+            BlockData bdx = parseBlockData(bd, warn);
+
+            if (bdx == null && warn) {
+                warnUnresolved(bd, "Unknown Block Data '" + bd + "'");
+            }
+
+            return bdx;
+        } catch (Throwable e) {
+            e.printStackTrace();
+            if (warn) {
+                warnUnresolved(bdxf, "Unknown Block Data '" + bdxf + "'");
+            }
+        }
+
+        return null;
+    }
+
+    private String canonicalKey(String bdxf) {
+        String bd = bdxf.trim();
+
+        if (bd.startsWith("minecraft:cauldron[level=")) {
+            bd = bd.replaceAll("\\Q:cauldron[\\E", ":water_cauldron[");
+        }
+
+        return bd;
+    }
+
+    private BlockData resolveDirectKey(String bd) {
+        if (!custom.isEmpty() && custom.containsKey(bd)) {
+            return custom.get(bd);
+        }
+
+        if (bd.equals("minecraft:grass_path")) {
+            return DIRT_PATH.createBlockData();
         }
 
         return null;
