@@ -19,6 +19,7 @@ public class UIElement implements Element {
     private boolean bg;
     private Callback<Element> eLeft;
     private Callback<Element> eRight;
+    private Callback<Element> eMiddle;
     private Callback<Element> eShiftLeft;
     private Callback<Element> eShiftRight;
     private Callback<Element> eDraggedInto;
@@ -31,6 +32,8 @@ public class UIElement implements Element {
         lore = new KList<>();
         enchanted = false;
         count = 1;
+        // full progress means undamaged; the 0 default rendered every damageable icon at 1 durability
+        progress = 1D;
         material = new MaterialBlock(Material.AIR);
         baseItemStack = null;
     }
@@ -99,6 +102,12 @@ public class UIElement implements Element {
     }
 
     @Override
+    public UIElement onMiddleClick(Callback<Element> clicked) {
+        eMiddle = clicked;
+        return this;
+    }
+
+    @Override
     public UIElement onShiftLeftClick(Callback<Element> clicked) {
         eShiftLeft = clicked;
         return this;
@@ -147,6 +156,12 @@ public class UIElement implements Element {
                 case RIGHT -> {
                     if (eRight != null) {
                         eRight.run(context);
+                    }
+                    return this;
+                }
+                case MIDDLE -> {
+                    if (eMiddle != null) {
+                        eMiddle.run(context);
                     }
                     return this;
                 }

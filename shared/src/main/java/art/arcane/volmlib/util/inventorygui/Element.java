@@ -55,6 +55,8 @@ public interface Element {
 
     Element onRightClick(Callback<Element> clicked);
 
+    Element onMiddleClick(Callback<Element> clicked);
+
     Element onShiftLeftClick(Callback<Element> clicked);
 
     Element onShiftRightClick(Callback<Element> clicked);

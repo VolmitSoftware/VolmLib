@@ -147,6 +147,11 @@ public class UIWindow implements Window, Listener {
                         scroll(-1);
                     }
                     break;
+                case MIDDLE:
+                    if (element != null) {
+                        element.call(ElementEvent.MIDDLE, element);
+                    }
+                    break;
                 case SHIFT_LEFT:
                     if (element != null) {
                         element.call(ElementEvent.SHIFT_LEFT, element);
@@ -162,7 +167,6 @@ public class UIWindow implements Window, Listener {
                 case WINDOW_BORDER_RIGHT:
                 case WINDOW_BORDER_LEFT:
                 case NUMBER_KEY:
-                case MIDDLE:
                 case DROP:
                 case CREATIVE:
                 case CONTROL_DROP:
@@ -345,7 +349,12 @@ public class UIWindow implements Window, Listener {
 
     @Override
     public int getMaxViewportPosition() {
-        return Math.max(0, highestRow - getViewportHeight());
+        return maxViewportPosition(highestRow, getViewportHeight());
+    }
+
+    /** Rows are zero-indexed, so the last content row only becomes visible at highestRow + 1 - viewportHeight. */
+    public static int maxViewportPosition(int highestRow, int viewportHeight) {
+        return Math.max(0, highestRow + 1 - viewportHeight);
     }
 
     @Override
