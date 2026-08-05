@@ -6,6 +6,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReferenceArray;
 
@@ -77,6 +78,34 @@ public abstract class MantleChunkSupport<M> extends FlaggedChunk {
         ref.release(Integer.MAX_VALUE);
     }
 
+    public boolean sealUntil(long deadlineNanos) throws InterruptedException {
+        closed.set(true);
+        long remainingNanos = Math.max(0L, deadlineNanos - System.nanoTime());
+        boolean sealed;
+        try {
+            sealed = ref.tryAcquire(Integer.MAX_VALUE, remainingNanos, TimeUnit.NANOSECONDS);
+        } catch (InterruptedException error) {
+            closed.set(false);
+            throw error;
+        }
+        if (!sealed) {
+            closed.set(false);
+            return false;
+        }
+        ref.release(Integer.MAX_VALUE);
+        return true;
+    }
+
+    public void reopen() {
+        if (!closed.get()) {
+            return;
+        }
+        if (ref.availablePermits() != Integer.MAX_VALUE) {
+            throw new IllegalStateException("Cannot reopen a chunk while it is in use");
+        }
+        closed.set(false);
+    }
+
     public boolean inUse() {
         return ref.availablePermits() < Integer.MAX_VALUE;
     }
@@ -121,16 +150,19 @@ public abstract class MantleChunkSupport<M> extends FlaggedChunk {
     }
 
     public void clear() {
+        requireOpen();
         for (int i = 0; i < sections.length(); i++) {
             delete(i);
         }
     }
 
     public void delete(int section) {
+        requireOpen();
         sections.set(section, null);
     }
 
     public M getOrCreate(int section) {
+        requireOpen();
         M sectionData = get(section);
         if (sectionData != null) {
             return sectionData;
@@ -220,4 +252,10 @@ public abstract class MantleChunkSupport<M> extends FlaggedChunk {
     protected abstract void trimSection(M section);
 
     protected abstract boolean isSectionEmpty(M section);
+
+    private void requireOpen() {
+        if (closed.get()) {
+            throw new IllegalStateException("Chunk is closed!");
+        }
+    }
 }

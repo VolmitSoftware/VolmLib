@@ -77,6 +77,16 @@ public class TectonicPlate<M> extends art.arcane.volmlib.util.mantle.TectonicPla
     }
 
     @Override
+    protected boolean sealChunkUntil(MantleChunk<M> chunk, long deadlineNanos) throws InterruptedException {
+        return chunk.sealUntil(deadlineNanos);
+    }
+
+    @Override
+    protected void reopenChunk(MantleChunk<M> chunk) {
+        chunk.reopen();
+    }
+
+    @Override
     protected void writeChunk(MantleChunk<M> chunk, DataOutputStream dos) throws IOException {
         chunk.write(dos);
     }

@@ -30,6 +30,7 @@ import java.nio.channels.FileLock;
 import java.nio.channels.OverlappingFileLockException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
@@ -38,6 +39,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.*;
 import java.util.function.Consumer;
+import java.util.stream.Stream;
 import java.util.zip.CRC32;
 import java.util.zip.CheckedInputStream;
 import java.util.zip.GZIPInputStream;
@@ -398,13 +400,16 @@ public class IO {
      * @param f the file to delete (and subfiles if folder)
      */
     public static void delete(File f) {
-        if (f == null || !f.exists()) {
+        if (f == null || (!f.exists() && !Files.isSymbolicLink(f.toPath()))) {
             return;
         }
 
-        if (f.isDirectory()) {
-            for (File i : f.listFiles()) {
-                delete(i);
+        if (f.isDirectory() && !Files.isSymbolicLink(f.toPath())) {
+            File[] children = f.listFiles();
+            if (children != null) {
+                for (File i : children) {
+                    delete(i);
+                }
             }
         }
 
@@ -626,21 +631,112 @@ public class IO {
     }
 
     public static void copyDirectory(Path source, Path target) throws IOException {
-        Files.walk(source).forEach(sourcePath -> {
-            Path targetPath = target.resolve(source.relativize(sourcePath));
+        Path normalizedSource = source.toAbsolutePath().normalize();
+        Path normalizedTarget = target.toAbsolutePath().normalize();
+        if (Files.isSymbolicLink(normalizedSource)
+                || !Files.isDirectory(normalizedSource, LinkOption.NOFOLLOW_LINKS)) {
+            throw new IOException("Copy source must be a regular directory: " + source);
+        }
+        Path resolvedSource = normalizedSource.toRealPath();
+        Path resolvedTarget = resolveEffectivePath(normalizedTarget);
+        if (resolvedSource.startsWith(resolvedTarget) || resolvedTarget.startsWith(resolvedSource)) {
+            throw new IOException("Copy source and target directories cannot overlap");
+        }
+        if (Files.exists(normalizedTarget, LinkOption.NOFOLLOW_LINKS)
+                && (Files.isSymbolicLink(normalizedTarget)
+                || !Files.isDirectory(normalizedTarget, LinkOption.NOFOLLOW_LINKS))) {
+            throw new IOException("Copy target must be a regular directory: " + target);
+        }
+        try (Stream<Path> paths = Files.walk(resolvedSource)) {
+            paths.forEach(sourcePath -> copyDirectoryEntry(
+                    resolvedSource,
+                    resolvedTarget,
+                    resolvedTarget,
+                    sourcePath
+            ));
+        } catch (UncheckedIOException e) {
+            throw e.getCause();
+        }
+    }
 
-            try {
-                if (Files.isDirectory(sourcePath)) {
-                    if (!Files.exists(targetPath)) {
-                        Files.createDirectories(targetPath);
+    private static void copyDirectoryEntry(Path source, Path target, Path resolvedTarget, Path sourcePath) {
+        Path targetPath = target.resolve(source.relativize(sourcePath));
+        try {
+            if (Files.isSymbolicLink(sourcePath)) {
+                throw new IOException("Copy source contains a symbolic link: " + sourcePath);
+            }
+            Path expectedTargetPath = resolvedTarget.resolve(source.relativize(sourcePath)).normalize();
+            if (!resolveEffectivePath(targetPath).equals(expectedTargetPath)) {
+                throw new IOException("Copy target resolves outside its original directory: " + targetPath);
+            }
+            if (Files.isDirectory(sourcePath, LinkOption.NOFOLLOW_LINKS)) {
+                if (Files.exists(targetPath, LinkOption.NOFOLLOW_LINKS)) {
+                    if (Files.isSymbolicLink(targetPath)
+                            || !Files.isDirectory(targetPath, LinkOption.NOFOLLOW_LINKS)) {
+                        throw new IOException("Copy target contains an invalid directory: " + targetPath);
                     }
                 } else {
-                    Files.copy(sourcePath, targetPath, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.COPY_ATTRIBUTES);
+                    Files.createDirectories(targetPath);
                 }
-            } catch (IOException e) {
-                throw new UncheckedIOException(e);
+                if (Files.isSymbolicLink(targetPath)
+                        || !resolveEffectivePath(targetPath).equals(expectedTargetPath)) {
+                    throw new IOException("Copy target directory changed while being copied: " + targetPath);
+                }
+                return;
             }
-        });
+            if (!Files.isRegularFile(sourcePath, LinkOption.NOFOLLOW_LINKS)) {
+                throw new IOException("Copy source contains a non-regular file: " + sourcePath);
+            }
+            if (Files.exists(targetPath, LinkOption.NOFOLLOW_LINKS)
+                    && (Files.isSymbolicLink(targetPath)
+                    || !Files.isRegularFile(targetPath, LinkOption.NOFOLLOW_LINKS))) {
+                throw new IOException("Copy target contains a non-file path: " + targetPath);
+            }
+            Path parent = Objects.requireNonNull(targetPath.getParent(), "Copy target parent must not be null");
+            Path temporary = Files.createTempFile(parent, ".volmlib-copy-", ".tmp");
+            try {
+                Files.copy(
+                        sourcePath,
+                        temporary,
+                        LinkOption.NOFOLLOW_LINKS,
+                        StandardCopyOption.REPLACE_EXISTING,
+                        StandardCopyOption.COPY_ATTRIBUTES
+                );
+                if (Files.isSymbolicLink(temporary)
+                        || !Files.isRegularFile(temporary, LinkOption.NOFOLLOW_LINKS)) {
+                    throw new IOException("Copy source changed while being copied: " + sourcePath);
+                }
+                if (!resolveEffectivePath(parent).equals(expectedTargetPath.getParent())) {
+                    throw new IOException("Copy target parent changed while being copied: " + parent);
+                }
+                Files.move(temporary, targetPath, StandardCopyOption.REPLACE_EXISTING);
+            } finally {
+                Files.deleteIfExists(temporary);
+            }
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    private static Path resolveEffectivePath(Path path) throws IOException {
+        Path normalized = path.toAbsolutePath().normalize();
+        Path existing = normalized;
+        Deque<Path> missing = new ArrayDeque<>();
+        while (existing != null && !Files.exists(existing, LinkOption.NOFOLLOW_LINKS)) {
+            Path name = existing.getFileName();
+            if (name != null) {
+                missing.addFirst(name);
+            }
+            existing = existing.getParent();
+        }
+        if (existing == null) {
+            throw new IOException("Copy path has no existing ancestor: " + path);
+        }
+        Path resolved = existing.toRealPath();
+        for (Path name : missing) {
+            resolved = resolved.resolve(name);
+        }
+        return resolved.normalize();
     }
 
     /**

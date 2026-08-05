@@ -108,6 +108,36 @@ public abstract class TectonicPlateSupport<C> {
         }
     }
 
+    public boolean sealUntil(long deadlineNanos) throws InterruptedException {
+        closed.set(true);
+        try {
+            for (int i = 0; i < chunks.length(); i++) {
+                C chunk = chunks.get(i);
+                if (chunk != null && !sealChunkUntil(chunk, deadlineNanos)) {
+                    reopen();
+                    return false;
+                }
+            }
+            return true;
+        } catch (InterruptedException error) {
+            reopen();
+            throw error;
+        }
+    }
+
+    public void reopen() {
+        if (!closed.get()) {
+            return;
+        }
+        for (int i = 0; i < chunks.length(); i++) {
+            C chunk = chunks.get(i);
+            if (chunk != null) {
+                reopenChunk(chunk);
+            }
+        }
+        closed.set(false);
+    }
+
     public boolean isClosed() {
         return closed.get();
     }
@@ -121,16 +151,19 @@ public abstract class TectonicPlateSupport<C> {
     }
 
     public void clear() {
+        requireOpen();
         for (int i = 0; i < chunks.length(); i++) {
             chunks.set(i, null);
         }
     }
 
     public void delete(int x, int z) {
+        requireOpen();
         chunks.set(index(x, z), null);
     }
 
     public C getOrCreate(int x, int z) {
+        requireOpen();
         final int index = index(x, z);
         final C chunk = chunks.get(index);
         if (chunk != null) {
@@ -186,6 +219,10 @@ public abstract class TectonicPlateSupport<C> {
 
     protected abstract void closeChunk(C chunk) throws InterruptedException;
 
+    protected abstract boolean sealChunkUntil(C chunk, long deadlineNanos) throws InterruptedException;
+
+    protected abstract void reopenChunk(C chunk);
+
     protected abstract void writeChunk(C chunk, DataOutputStream dos) throws IOException;
 
     public static void addError() {
@@ -197,6 +234,12 @@ public abstract class TectonicPlateSupport<C> {
             return ERRORS.get();
         } finally {
             ERRORS.remove();
+        }
+    }
+
+    private void requireOpen() {
+        if (closed.get()) {
+            throw new IllegalStateException("Tectonic Plate is closed!");
         }
     }
 }
