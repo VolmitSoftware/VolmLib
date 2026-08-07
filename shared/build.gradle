@@ -45,7 +45,7 @@ tasks.withType(Test).configureEach {
 }
 
 dependencies {
-    compileOnly('io.papermc.paper:paper-api:26.2.build.60-beta')
+    compileOnly('io.papermc.paper:paper-api:26.1.2.build.74-stable')
     spigotCompatibility('org.spigotmc:spigot-api:26.2-R0.1-SNAPSHOT')
 
     compileOnly('me.clip:placeholderapi:2.11.6') { transitive = false }
@@ -63,7 +63,7 @@ dependencies {
     implementation('org.lz4:lz4-java:1.8.0')
 
     testImplementation('junit:junit:4.13.2')
-    testImplementation('io.papermc.paper:paper-api:26.2.build.60-beta')
+    testImplementation('io.papermc.paper:paper-api:26.1.2.build.74-stable')
     testImplementation('me.clip:placeholderapi:2.11.6') { transitive = false }
     testImplementation('com.github.MilkBowl:VaultAPI:1.7') { transitive = false }
     testImplementation('org.mockito:mockito-core:5.14.2')
