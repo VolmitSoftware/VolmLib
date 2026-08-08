@@ -434,7 +434,7 @@ public final class IntegrationMetricSchema {
         putMetric(descriptors, WORMHOLES_VIEW_TRACKED_ENTITIES, IntegrationMetricType.INTEGER, "entities", "wormholes", "projection");
         putMetric(descriptors, WORMHOLES_REPLICATED_BLOCKS_PER_SECOND, IntegrationMetricType.DOUBLE, "blocks-per-second", "wormholes", "network");
         putMetric(descriptors, WORMHOLES_RESYNC_REQUESTS_TOTAL, IntegrationMetricType.LONG, "requests", "wormholes", "network");
-        putMetric(descriptors, WORMHOLES_TRANSFERS_IN_FLIGHT, IntegrationMetricType.INTEGER, "players", "wormholes", "travel");
+        putMetric(descriptors, WORMHOLES_TRANSFERS_IN_FLIGHT, IntegrationMetricType.INTEGER, "transfers", "wormholes", "travel");
         putMetric(descriptors, WORMHOLES_TRANSFERS_FAILED_TOTAL, IntegrationMetricType.LONG, "transfers", "wormholes", "travel");
 
         putMetric(descriptors, HOLOUI_SESSION_HOLDERS, IntegrationMetricType.INTEGER, "players", "holoui", "sessions");

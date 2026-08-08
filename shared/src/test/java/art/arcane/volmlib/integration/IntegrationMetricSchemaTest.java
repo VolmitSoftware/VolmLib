@@ -37,6 +37,16 @@ public class IntegrationMetricSchemaTest {
     }
 
     @Test
+    public void wormholesInFlightMetricCountsPlayerAndEntityTransfers() {
+        IntegrationMetricDescriptor descriptor = IntegrationMetricSchema.descriptor(
+                IntegrationMetricSchema.WORMHOLES_TRANSFERS_IN_FLIGHT
+        );
+
+        assertEquals(IntegrationMetricType.INTEGER, descriptor.type());
+        assertEquals("transfers", descriptor.unit());
+    }
+
+    @Test
     public void exposesCompleteIrisEngineAndWorldSchemaWithoutVestigialMetrics() {
         Set<String> irisKeys = IntegrationMetricSchema.irisKeys();
 
