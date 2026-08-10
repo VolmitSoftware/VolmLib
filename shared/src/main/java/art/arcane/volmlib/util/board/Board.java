@@ -18,6 +18,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.function.UnaryOperator;
@@ -37,35 +38,33 @@ public class Board {
     private final Player player;
     private final Objective objective;
     private final PacketSidebar packetSidebar;
+    private final Scoreboard previousScoreboard;
+    private final Scoreboard ownedScoreboard;
     private BoardSettings boardSettings;
     private boolean useNormalBackend;
     private boolean ready;
+    private boolean removed;
 
     public Board(@NonNull Player player, BoardSettings boardSettings) {
         this.player = player;
         this.boardSettings = boardSettings;
         this.packetSidebar = new PacketSidebar(player);
 
-        Scoreboard scoreboard = getScoreboard();
-        Objective createdObjective = null;
-        boolean initializedNormalBackend = false;
+        Scoreboard previous = currentScoreboard();
+        BoardLease lease = shouldAttemptNormalBackend()
+                ? acquireNormalBackend(previous)
+                : BoardLease.empty();
 
-        if (scoreboard != null && shouldAttemptNormalBackend()) {
-            try {
-                createdObjective = initializeNormalBackend(scoreboard);
-                initializedNormalBackend = createdObjective != null;
-            } catch (UnsupportedOperationException ignored) {
-                initializedNormalBackend = false;
-            }
-        }
-
-        this.objective = createdObjective;
-        this.useNormalBackend = initializedNormalBackend;
-        this.ready = initializedNormalBackend || packetSidebar.isSupported();
+        this.previousScoreboard = previous;
+        this.ownedScoreboard = lease.scoreboard();
+        this.objective = lease.objective();
+        this.useNormalBackend = lease.active();
+        this.ready = lease.active() || packetSidebar.isSupported();
+        this.removed = false;
     }
 
     public Scoreboard getScoreboard() {
-        return player != null ? player.getScoreboard() : null;
+        return ownedScoreboard;
     }
 
     public void setBoardSettings(BoardSettings boardSettings) {
@@ -73,12 +72,14 @@ public class Board {
     }
 
     public void remove() {
-        if (useNormalBackend) {
-            resetScoreboard();
+        if (removed) {
             return;
         }
+        removed = true;
         ready = false;
+        removeNormalObjective();
         packetSidebar.reset();
+        restorePreviousScoreboard();
     }
 
     public void update() {
@@ -118,9 +119,7 @@ public class Board {
         if (useNormalBackend) {
             if (!updateNormal(title, entries)) {
                 useNormalBackend = false;
-                if (Bukkit.getScoreboardManager() != null) {
-                    player.setScoreboard(Bukkit.getScoreboardManager().getMainScoreboard());
-                }
+                removeNormalObjective();
                 boolean switchedToPacket = packetSidebar.isSupported()
                         && packetSidebar.render(title, entries, boardSettings.getScoreDirection());
                 if (!switchedToPacket && !packetSidebar.isSupported()) {
@@ -188,20 +187,11 @@ public class Board {
     }
 
     public void resetScoreboard() {
-        ready = false;
-        if (useNormalBackend) {
-            if (objective != null) {
-                try {
-                    objective.unregister();
-                } catch (Throwable ignored) {
-                }
-            }
-            if (Bukkit.getScoreboardManager() != null) {
-                player.setScoreboard(Bukkit.getScoreboardManager().getMainScoreboard());
-            }
-            return;
-        }
-        packetSidebar.reset();
+        remove();
+    }
+
+    public boolean ownsScoreboardAssignment() {
+        return ownsScoreboardAssignment(currentScoreboard(), ownedScoreboard, previousScoreboard);
     }
 
     private Objective initializeNormalBackend(Scoreboard scoreboard) {
@@ -223,6 +213,94 @@ public class Board {
 
     private boolean shouldAttemptNormalBackend() {
         return !FoliaScheduler.isFolia(Bukkit.getServer()) && !CANVAS_RUNTIME;
+    }
+
+    private Scoreboard createOwnedScoreboard() {
+        if (Bukkit.getScoreboardManager() == null) {
+            return null;
+        }
+        try {
+            return Bukkit.getScoreboardManager().getNewScoreboard();
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
+    private void removeNormalObjective() {
+        removeObjective(objective);
+    }
+
+    private void restorePreviousScoreboard() {
+        if (ownedScoreboard == null || !player.isOnline()) {
+            return;
+        }
+        try {
+            Scoreboard active = currentScoreboard();
+            Scoreboard restore = selectScoreboardToRestore(active, ownedScoreboard, previousScoreboard);
+            if (restore != null && !Objects.equals(active, restore)) {
+                player.setScoreboard(restore);
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
+    static Scoreboard selectScoreboardToRestore(Scoreboard active, Scoreboard owned, Scoreboard previous) {
+        return Objects.equals(active, owned) ? previous : active;
+    }
+
+    static boolean ownsScoreboardAssignment(Scoreboard active, Scoreboard owned, Scoreboard previous) {
+        Scoreboard expected = owned == null ? previous : owned;
+        return active != null && Objects.equals(active, expected);
+    }
+
+    private BoardLease acquireNormalBackend(Scoreboard previous) {
+        Scoreboard candidate = createOwnedScoreboard();
+        if (candidate == null) {
+            return BoardLease.empty();
+        }
+
+        Objective candidateObjective = null;
+        try {
+            candidateObjective = initializeNormalBackend(candidate);
+            player.setScoreboard(candidate);
+            if (Objects.equals(currentScoreboard(), candidate)) {
+                return new BoardLease(candidate, candidateObjective);
+            }
+        } catch (Throwable ignored) {
+        }
+
+        removeObjective(candidateObjective);
+        restoreCandidateScoreboard(candidate, previous);
+        return BoardLease.empty();
+    }
+
+    private void restoreCandidateScoreboard(Scoreboard candidate, Scoreboard previous) {
+        try {
+            Scoreboard active = currentScoreboard();
+            Scoreboard restore = selectScoreboardToRestore(active, candidate, previous);
+            if (restore != null && !Objects.equals(active, restore)) {
+                player.setScoreboard(restore);
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private Scoreboard currentScoreboard() {
+        try {
+            return player.getScoreboard();
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
+    private static void removeObjective(Objective objective) {
+        if (objective == null) {
+            return;
+        }
+        try {
+            objective.unregister();
+        } catch (Throwable ignored) {
+        }
     }
 
     private static boolean detectCanvasRuntime() {
@@ -252,6 +330,16 @@ public class Board {
             return true;
         } catch (Throwable ignored) {
             return false;
+        }
+    }
+
+    private record BoardLease(Scoreboard scoreboard, Objective objective) {
+        private static BoardLease empty() {
+            return new BoardLease(null, null);
+        }
+
+        private boolean active() {
+            return scoreboard != null && objective != null;
         }
     }
 
