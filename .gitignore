@@ -5,3 +5,5 @@ build/
 shared/build/
 
 .codegraph/
+
+AGENTS.md
