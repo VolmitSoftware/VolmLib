@@ -131,18 +131,18 @@ public class DirectorRuntimeEngineArgumentMappingTest {
         assertNotNull(linkNode);
         assertEquals("director.test.root", engine.getRoot().getDescriptor().getDescriptionKey());
         assertEquals("director.test.create", createNode.getDescriptor().getDescriptionKey());
-        assertEquals("director.test.create.name", createNode.getDescriptor().getParameters().getFirst().getDescriptionKey());
+        assertEquals("director.test.create.name", createNode.getDescriptor().getParameters().get(0).getDescriptionKey());
         assertEquals("", linkNode.getDescriptor().getDescriptionKey());
-        assertEquals("", linkNode.getDescriptor().getParameters().getFirst().getDescriptionKey());
+        assertEquals("", linkNode.getDescriptor().getParameters().get(0).getDescriptionKey());
         assertEquals("Link two things", linkNode.getDescriptor().getDescription());
-        assertEquals("Source", linkNode.getDescriptor().getParameters().getFirst().getDescription());
+        assertEquals("Source", linkNode.getDescriptor().getParameters().get(0).getDescription());
 
         DirectorRuntimeNode undocumentedNode = engine.getRoot().getChildren().stream()
                 .filter(node -> node.getDescriptor().getName().equals("undocumented"))
                 .findFirst()
                 .orElseThrow();
         assertEquals("", undocumentedNode.getDescriptor().getDescription());
-        assertEquals("", undocumentedNode.getDescriptor().getParameters().getFirst().getDescription());
+        assertEquals("", undocumentedNode.getDescriptor().getParameters().get(0).getDescription());
     }
 
     @Director(name = "test", description = "Test root", descriptionKey = "director.test.root")

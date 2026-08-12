@@ -12,7 +12,7 @@ public class VolmitLocalesTest {
     public void exposesTheCanonicalImmutableLocaleSet() {
         assertEquals(18, VolmitLocales.all().size());
         assertEquals(17, VolmitLocales.nonEnglish().size());
-        assertEquals(VolmitLocales.ENGLISH, VolmitLocales.all().getFirst());
+        assertEquals(VolmitLocales.ENGLISH, VolmitLocales.all().get(0));
         assertTrue(VolmitLocales.isBundled("ja-JP"));
         assertTrue(VolmitLocales.isBundled(" zh_TW "));
         assertFalse(VolmitLocales.isBundled(null));

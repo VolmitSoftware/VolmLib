@@ -1,4 +1,6 @@
 import org.gradle.api.publish.maven.MavenPublication
+import org.gradle.api.attributes.Usage
+import org.gradle.api.attributes.java.TargetJvmVersion
 import org.gradle.api.tasks.compile.JavaCompile
 import org.gradle.jvm.toolchain.JavaLanguageVersion
 
@@ -17,11 +19,40 @@ java {
 tasks.named('compileJava', JavaCompile).configure {
     options.compilerArgs.add('-parameters')
     options.encoding = 'UTF-8'
-    options.release.set(25)
+    options.release.set(17)
+}
+
+tasks.named('compileTestJava', JavaCompile).configure {
+    options.compilerArgs.add('-parameters')
+    options.encoding = 'UTF-8'
+    options.release.set(17)
 }
 
 configurations {
-    spigotCompatibility
+    spigotCompatibility {
+        canBeConsumed = false
+        canBeResolved = true
+        attributes {
+            attribute(Usage.USAGE_ATTRIBUTE, objects.named(Usage, Usage.JAVA_API))
+            attribute(TargetJvmVersion.TARGET_JVM_VERSION_ATTRIBUTE, 17)
+        }
+    }
+    currentPaperCompatibility {
+        canBeConsumed = false
+        canBeResolved = true
+        attributes {
+            attribute(Usage.USAGE_ATTRIBUTE, objects.named(Usage, Usage.JAVA_API))
+            attribute(TargetJvmVersion.TARGET_JVM_VERSION_ATTRIBUTE, 25)
+        }
+    }
+    currentSpigotCompatibility {
+        canBeConsumed = false
+        canBeResolved = true
+        attributes {
+            attribute(Usage.USAGE_ATTRIBUTE, objects.named(Usage, Usage.JAVA_API))
+            attribute(TargetJvmVersion.TARGET_JVM_VERSION_ATTRIBUTE, 25)
+        }
+    }
 }
 
 tasks.register('compileSpigotCompatibility', JavaCompile) {
@@ -33,11 +64,37 @@ tasks.register('compileSpigotCompatibility', JavaCompile) {
     options.annotationProcessorPath = configurations.annotationProcessor
     options.compilerArgs.add('-parameters')
     options.encoding = 'UTF-8'
+    options.release.set(17)
+}
+
+tasks.register('compileCurrentPaperCompatibility', JavaCompile) {
+    source = sourceSets.main.java
+    classpath = configurations.currentPaperCompatibility + files(sourceSets.main.compileClasspath.filter { File dependency ->
+        !dependency.name.startsWith('paper-api-')
+    })
+    destinationDirectory.set(layout.buildDirectory.dir('classes/java/currentPaperCompatibility'))
+    options.annotationProcessorPath = configurations.annotationProcessor
+    options.compilerArgs.add('-parameters')
+    options.encoding = 'UTF-8'
+    options.release.set(25)
+}
+
+tasks.register('compileCurrentSpigotCompatibility', JavaCompile) {
+    source = sourceSets.main.java
+    classpath = configurations.currentSpigotCompatibility + files(sourceSets.main.compileClasspath.filter { File dependency ->
+        !dependency.name.startsWith('paper-api-')
+    })
+    destinationDirectory.set(layout.buildDirectory.dir('classes/java/currentSpigotCompatibility'))
+    options.annotationProcessorPath = configurations.annotationProcessor
+    options.compilerArgs.add('-parameters')
+    options.encoding = 'UTF-8'
     options.release.set(25)
 }
 
 tasks.named('check').configure {
     dependsOn(tasks.named('compileSpigotCompatibility'))
+    dependsOn(tasks.named('compileCurrentPaperCompatibility'))
+    dependsOn(tasks.named('compileCurrentSpigotCompatibility'))
 }
 
 tasks.withType(Test).configureEach {
@@ -45,8 +102,10 @@ tasks.withType(Test).configureEach {
 }
 
 dependencies {
-    compileOnly('io.papermc.paper:paper-api:26.1.2.build.74-stable')
-    spigotCompatibility('org.spigotmc:spigot-api:26.2-R0.1-SNAPSHOT')
+    compileOnly('io.papermc.paper:paper-api:1.20.1-R0.1-SNAPSHOT')
+    spigotCompatibility('org.spigotmc:spigot-api:1.20.1-R0.1-SNAPSHOT')
+    currentPaperCompatibility('io.papermc.paper:paper-api:26.1.2.build.74-stable')
+    currentSpigotCompatibility('org.spigotmc:spigot-api:26.2-R0.1-SNAPSHOT')
 
     compileOnly('me.clip:placeholderapi:2.11.6') { transitive = false }
     compileOnly('com.github.MilkBowl:VaultAPI:1.7') { transitive = false }
@@ -63,10 +122,11 @@ dependencies {
     implementation('org.lz4:lz4-java:1.8.0')
 
     testImplementation('junit:junit:4.13.2')
-    testImplementation('io.papermc.paper:paper-api:26.1.2.build.74-stable')
+    testImplementation('io.papermc.paper:paper-api:1.20.1-R0.1-SNAPSHOT')
     testImplementation('me.clip:placeholderapi:2.11.6') { transitive = false }
     testImplementation('com.github.MilkBowl:VaultAPI:1.7') { transitive = false }
     testImplementation('org.mockito:mockito-core:5.14.2')
+    testImplementation('org.ow2.asm:asm:9.9.1')
 }
 
 publishing {

@@ -43,7 +43,7 @@ public class WeightedRandom<T> {
                 return weightedObject.getK();
             }
         }
-        return weightedObjects.getLast().getK();
+        return weightedObjects.get(weightedObjects.size() - 1).getK();
     }
 
     public int getSize() {

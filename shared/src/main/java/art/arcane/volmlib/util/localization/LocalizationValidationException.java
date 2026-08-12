@@ -18,7 +18,7 @@ public final class LocalizationValidationException extends IllegalArgumentExcept
         if (result.errors().isEmpty()) {
             return "Localization validation failed";
         }
-        LocalizationIssue first = result.errors().getFirst();
+        LocalizationIssue first = result.errors().get(0);
         return "Localization validation failed with "
                 + result.errors().size()
                 + " error(s): "

@@ -21,11 +21,14 @@ public class PowerOfTwoCoordinatesTest {
 
     @Test
     public void ceilDivPow2MatchesPositiveAndNegativeBoundaries() {
-        int[] samples = new int[]{-513, -512, -33, -32, -17, -16, -1, 0, 15, 16, 31, 32, 511, 512};
+        int[] samples = new int[]{
+                Integer.MIN_VALUE, -513, -512, -33, -32, -17, -16, -1,
+                0, 15, 16, 31, 32, 511, 512, Integer.MAX_VALUE
+        };
 
         for (int value : samples) {
-            assertEquals(Math.ceilDiv(value, 16), PowerOfTwoCoordinates.ceilDivPow2(value, 4));
-            assertEquals(Math.ceilDiv(value, 512), PowerOfTwoCoordinates.ceilDivPow2(value, 9));
+            assertEquals(ceilDiv(value, 16), PowerOfTwoCoordinates.ceilDivPow2(value, 4));
+            assertEquals(ceilDiv(value, 512), PowerOfTwoCoordinates.ceilDivPow2(value, 9));
         }
     }
 
@@ -48,5 +51,9 @@ public class PowerOfTwoCoordinatesTest {
                 assertEquals(z, PowerOfTwoCoordinates.unpackLocal32Z(packed));
             }
         }
+    }
+
+    private static int ceilDiv(int value, int divisor) {
+        return (int) -Math.floorDiv(-(long) value, divisor);
     }
 }

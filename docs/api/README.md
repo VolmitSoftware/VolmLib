@@ -75,9 +75,9 @@ Three details in that block are load-bearing:
 - **`changing = true`** on a `-SNAPSHOT` coordinate, so Gradle re-resolves instead of serving a week-old jar.
   Pin a commit hash (`com.github.VolmitSoftware:VolmLib:<sha>`) for reproducible builds.
 
-VolmLib targets a **Java 25 toolchain** and compiles against `io.papermc.paper:paper-api`. It also compiles
-cleanly against `org.spigotmc:spigot-api`, so a Spigot-only plugin can use it; anything that needs Paper types
-is confined to the packages that name them.
+VolmLib builds with a **Java 25 toolchain**, emits **Java 17 bytecode**, and compiles its shipped source against
+Paper 1.20.1. The same source is gated against Spigot 1.20.1, Paper 26.1.2, and Spigot 26.2; consuming plugins
+therefore require Java 17 or newer, while packages that name Paper-only types remain Paper-specific.
 
 ### Building against a local checkout
 

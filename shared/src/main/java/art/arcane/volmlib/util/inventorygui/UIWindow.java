@@ -13,6 +13,7 @@ import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.event.inventory.InventoryType;
 import org.bukkit.inventory.Inventory;
+import org.bukkit.inventory.InventoryView;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.plugin.IllegalPluginAccessException;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -26,6 +27,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 public class UIWindow implements Window, Listener {
     private static final Method INVENTORY_CLOSE_GET_REASON = resolveInventoryCloseGetReason();
+    private static final Method INVENTORY_VIEW_GET_TITLE = resolveInventoryViewMethod("getTitle");
+    private static final Method INVENTORY_VIEW_GET_TOP_INVENTORY = resolveInventoryViewMethod("getTopInventory");
     private static final Map<UUID, UIWindow> ACTIVE_WINDOWS = new ConcurrentHashMap<>();
     private final JavaPlugin plugin;
     private final Player viewer;
@@ -72,7 +75,7 @@ public class UIWindow implements Window, Listener {
             return;
         }
 
-        if (!e.getView().getTopInventory().equals(inventory)) {
+        if (!e.getInventory().equals(inventory)) {
             return;
         }
 
@@ -80,7 +83,7 @@ public class UIWindow implements Window, Listener {
             return;
         }
 
-        if (!e.getView().getType().equals(getResolution().getType())) {
+        if (!e.getInventory().getType().equals(getResolution().getType())) {
             return;
         }
 
@@ -256,6 +259,33 @@ public class UIWindow implements Window, Listener {
         }
     }
 
+    private static Method resolveInventoryViewMethod(String name) {
+        try {
+            return InventoryView.class.getMethod(name);
+        } catch (NoSuchMethodException exception) {
+            throw new ExceptionInInitializerError(exception);
+        }
+    }
+
+    static Inventory inventoryViewTopInventory(InventoryView view) {
+        return (Inventory) invokeInventoryViewMethod(view, INVENTORY_VIEW_GET_TOP_INVENTORY);
+    }
+
+    static String inventoryViewTitle(InventoryView view) {
+        return (String) invokeInventoryViewMethod(view, INVENTORY_VIEW_GET_TITLE);
+    }
+
+    private static Object invokeInventoryViewMethod(InventoryView view, Method method) {
+        if (view == null) {
+            return null;
+        }
+        try {
+            return method.invoke(view);
+        } catch (IllegalAccessException | InvocationTargetException exception) {
+            throw new IllegalStateException("Failed to invoke InventoryView." + method.getName(), exception);
+        }
+    }
+
     private static Object inventoryCloseReason(InventoryCloseEvent event) {
         if (INVENTORY_CLOSE_GET_REASON == null) {
             return null;
@@ -309,8 +339,9 @@ public class UIWindow implements Window, Listener {
 
             Bukkit.getPluginManager().registerEvents(this, plugin);
 
-            Inventory activeTopInventory = viewer.getOpenInventory() == null ? null : viewer.getOpenInventory().getTopInventory();
-            boolean reuse = canReuseInventory(activeTopInventory);
+            InventoryView activeView = viewer.getOpenInventory();
+            Inventory activeTopInventory = inventoryViewTopInventory(activeView);
+            boolean reuse = canReuseInventory(activeTopInventory, inventoryViewTitle(activeView));
             if (reuse) {
                 inventory = activeTopInventory;
             } else if (getResolution().getType().equals(InventoryType.CHEST)) {
@@ -576,7 +607,7 @@ public class UIWindow implements Window, Listener {
         return this.close().open();
     }
 
-    private boolean canReuseInventory(Inventory activeTopInventory) {
+    private boolean canReuseInventory(Inventory activeTopInventory, String activeTitle) {
         if (activeTopInventory == null) {
             return false;
         }
@@ -598,7 +629,6 @@ public class UIWindow implements Window, Listener {
             return false;
         }
 
-        String activeTitle = viewer.getOpenInventory() == null ? null : viewer.getOpenInventory().getTitle();
         return activeTitle != null && activeTitle.equals(getTitle());
     }
 
@@ -608,7 +638,7 @@ public class UIWindow implements Window, Listener {
 
         Inventory currentInventory = inventory;
         if (closeInventory && currentInventory != null) {
-            Inventory topInventory = viewer.getOpenInventory() == null ? null : viewer.getOpenInventory().getTopInventory();
+            Inventory topInventory = inventoryViewTopInventory(viewer.getOpenInventory());
             if (topInventory != null && topInventory.equals(currentInventory)) {
                 viewer.closeInventory();
             }
