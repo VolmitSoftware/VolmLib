@@ -26,7 +26,7 @@ public class ConfigHotloadEngineTest {
     public TemporaryFolder temporaryFolder = new TemporaryFolder();
 
     @Test
-    public void idleEventWatcherDoesNotRescanKnownFiles() throws IOException {
+    public void idleEventWatcherDoesNotRescanKnownFilesEveryPoll() throws IOException {
         File directory = temporaryFolder.newFolder("idle-managed");
         File file = new File(directory, "feature.toml");
         Files.writeString(file.toPath(), "enabled = true\n", StandardCharsets.UTF_8);
@@ -41,11 +41,19 @@ public class ConfigHotloadEngineTest {
             Assume.assumeTrue(engine.isDirectoryEventWatchActive());
             assertEquals(1, supplierCalls.get());
 
-            for (int i = 0; i < 100; i++) {
+            assertTrue(engine.pollTouchedFiles().isEmpty());
+            assertEquals(1, supplierCalls.get());
+
+            int firstRescanPoll = -1;
+            for (int i = 1; i <= 20; i++) {
                 assertTrue(engine.pollTouchedFiles().isEmpty());
+                if (supplierCalls.get() > 1) {
+                    firstRescanPoll = i;
+                    break;
+                }
             }
 
-            assertEquals(1, supplierCalls.get());
+            assertTrue(firstRescanPoll >= 2);
         } finally {
             engine.clear();
         }
@@ -95,11 +103,19 @@ public class ConfigHotloadEngineTest {
             Assume.assumeTrue(engine.isDirectoryEventWatchActive());
             assertEquals(1, supplierCalls.get());
 
-            for (int i = 0; i < 100; i++) {
+            assertTrue(engine.pollTouchedFiles().isEmpty());
+            assertEquals(1, supplierCalls.get());
+
+            int firstRescanPoll = -1;
+            for (int i = 1; i <= 20; i++) {
                 assertTrue(engine.pollTouchedFiles().isEmpty());
+                if (supplierCalls.get() > 1) {
+                    firstRescanPoll = i;
+                    break;
+                }
             }
 
-            assertEquals(1, supplierCalls.get());
+            assertTrue(firstRescanPoll >= 2);
         } finally {
             engine.clear();
         }
@@ -132,7 +148,7 @@ public class ConfigHotloadEngineTest {
     }
 
     @Test
-    public void missingDirectoryFallsBackAndReconcilesOnCreation() throws IOException {
+    public void missingDirectoryFallsBackAndReconcilesOnCreation() throws Exception {
         File directory = new File(temporaryFolder.getRoot(), "created-later");
         ConfigHotloadEngine engine = createEngine(() -> knownConfigFiles(directory));
 
@@ -143,12 +159,78 @@ public class ConfigHotloadEngineTest {
             File file = new File(directory, "feature.toml");
             Files.writeString(file.toPath(), "enabled = true\n", StandardCharsets.UTF_8);
 
-            Set<File> touched = engine.pollTouchedFiles();
+            Set<File> touched = awaitTouchedFile(engine, file, 5_000L);
 
             assertTrue(touched.contains(file));
             assertTrue(engine.isDirectoryEventWatchActive());
         } finally {
             engine.clear();
+            engine.clear();
+        }
+    }
+
+    @Test(timeout = 8_000L)
+    public void silentDirectoryWatcherStillDetectsModification() throws Exception {
+        File directory = temporaryFolder.newFolder("silent-managed");
+        File file = new File(directory, "feature.toml");
+        Files.writeString(file.toPath(), "enabled = true\n", StandardCharsets.UTF_8);
+        ConfigHotloadEngine engine = new ConfigHotloadEngine(
+                watched -> watched != null && watched.getName().endsWith(".toml"),
+                () -> knownConfigFiles(directory),
+                this::readFile,
+                this::normalize,
+                200L,
+                100L
+        );
+
+        try {
+            engine.configure(100L, List.of(), List.of(directory));
+            Assume.assumeTrue(engine.isDirectoryEventWatchActive());
+            engine.suppressDirectoryEventDelivery(true);
+            Files.writeString(file.toPath(), "enabled = false\nlimit = 7\n", StandardCharsets.UTF_8);
+
+            Set<File> touched = awaitTouchedFile(engine, file, 5_000L);
+            assertTrue(touched.contains(file));
+
+            AtomicInteger applyCalls = new AtomicInteger();
+            boolean applied = engine.processFileChange(file, changedFile -> {
+                applyCalls.incrementAndGet();
+                return true;
+            }, null);
+            assertTrue(applied);
+            assertEquals(1, applyCalls.get());
+        } finally {
+            engine.clear();
+        }
+    }
+
+    @Test
+    public void failedApplyKeepsPreviousContentForLaterSave() throws IOException {
+        File directory = temporaryFolder.newFolder("failed-apply-managed");
+        File file = new File(directory, "feature.toml");
+        Files.writeString(file.toPath(), "enabled = true\n", StandardCharsets.UTF_8);
+        ConfigHotloadEngine engine = createEngine(() -> knownConfigFiles(directory));
+
+        try {
+            engine.configure(500L, List.of(), List.of(directory));
+            Files.writeString(file.toPath(), "enabled = false\n", StandardCharsets.UTF_8);
+            AtomicInteger applyCalls = new AtomicInteger();
+
+            boolean first = engine.processFileChange(file, changedFile -> {
+                applyCalls.incrementAndGet();
+                return false;
+            }, null);
+            assertFalse(first);
+            assertEquals(1, applyCalls.get());
+
+            Files.writeString(file.toPath(), "enabled = false\nlimit = 3\n", StandardCharsets.UTF_8);
+            boolean second = engine.processFileChange(file, changedFile -> {
+                applyCalls.incrementAndGet();
+                return true;
+            }, null);
+            assertTrue(second);
+            assertEquals(2, applyCalls.get());
+        } finally {
             engine.clear();
         }
     }

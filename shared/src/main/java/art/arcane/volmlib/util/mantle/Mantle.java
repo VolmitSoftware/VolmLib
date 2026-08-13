@@ -475,6 +475,29 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
         }
     }
 
+    /**
+     * Flushes and unloads every resident region, invalidates the region IO layer (dropping any
+     * cached file channels), then deletes the persisted region files. The mantle stays open and
+     * usable; subsequent reads see an empty store. Deleting files without first closing the IO
+     * layer would leave cached channels pointing at unlinked inodes, so post-reset writes would
+     * silently vanish. A file that cannot be deleted fails the reset loudly — a partial reset
+     * reported as success corrupts whatever the caller resets for.
+     */
+    public synchronized void resetStorage() throws Exception {
+        ensureOpen();
+        saveAll();
+        regionIO.close();
+        File[] files = dataFolder.listFiles();
+        if (files != null) {
+            for (File file : files) {
+                if (file.isFile() && !file.delete()) {
+                    throw new IllegalStateException("Could not delete mantle region file " + file.getAbsolutePath());
+                }
+            }
+        }
+        deleteTemporaryFiles();
+    }
+
     public synchronized void saveTectonicPlates(Iterable<Long> regionIds) {
         saveTectonicPlates(regionIds, TARGETED_SAVE_WAIT_NANOS);
     }

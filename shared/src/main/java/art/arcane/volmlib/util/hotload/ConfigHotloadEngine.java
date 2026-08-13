@@ -53,12 +53,14 @@ public class ConfigHotloadEngine {
     private final Map<String, WatchKey> directoryWatchKeysByPath = new HashMap<>();
     private final Map<String, String> knownSignatures = new ConcurrentHashMap<>();
     private final Map<String, String> knownContents = new ConcurrentHashMap<>();
+    private final Map<String, String> pendingSignatures = new HashMap<>();
 
     private WatchService directoryWatchService;
     private int fullWatchScanEveryPolls = 1;
     private int fullWatchScanCountdown = 0;
     private int signatureScanEveryPolls = 1;
     private int signatureScanCountdown = 0;
+    private boolean suppressDirectoryEventDelivery;
 
     public ConfigHotloadEngine(Predicate<File> managedConfigFilePredicate,
                                Supplier<? extends Collection<File>> knownFilesSupplier,
@@ -133,13 +135,24 @@ public class ConfigHotloadEngine {
         }
 
         boolean applied = Boolean.TRUE.equals(applyChange.apply(file));
+        if (!applied) {
+            knownSignatures.put(path, signature(file));
+            return false;
+        }
+
         String after = normalize(fileReader.apply(file));
         updateKnownSnapshot(file, after);
-        if (applied && onApplied != null) {
+        if (onApplied != null) {
             onApplied.accept(new ContentDelta(file, before, after));
         }
 
-        return applied;
+        return true;
+    }
+
+    void suppressDirectoryEventDelivery(boolean suppress) {
+        synchronized (watcherStateLock) {
+            suppressDirectoryEventDelivery = suppress;
+        }
     }
 
     boolean isDirectoryEventWatchActive() {
@@ -156,6 +169,7 @@ public class ConfigHotloadEngine {
         directoryWatchers.clear();
         knownSignatures.clear();
         knownContents.clear();
+        pendingSignatures.clear();
 
         long effectivePollInterval = Math.max(100L, pollIntervalMs);
         fullWatchScanEveryPolls = cycleCountForWindow(effectivePollInterval, fullWatchScanWindowMs);
@@ -183,6 +197,10 @@ public class ConfigHotloadEngine {
 
         initializeDirectoryWatchService();
         primeKnownSnapshots();
+        if (directoryWatchService != null && !directoryWatchKeys.isEmpty()) {
+            fullWatchScanCountdown = fullWatchScanEveryPolls;
+            signatureScanCountdown = signatureScanEveryPolls;
+        }
     }
 
     private void clearWatcherState() {
@@ -191,6 +209,7 @@ public class ConfigHotloadEngine {
         directoryWatchers.clear();
         knownSignatures.clear();
         knownContents.clear();
+        pendingSignatures.clear();
         fullWatchScanCountdown = 0;
         signatureScanCountdown = 0;
     }
@@ -228,13 +247,45 @@ public class ConfigHotloadEngine {
             }
         }
 
-        boolean signatureFallbackRequired = fallbackRequired && !isDirectoryEventWatchActive();
-        if (reconciliationRequired || (signatureFallbackRequired && shouldRunSignatureScan())) {
+        if (reconciliationRequired || shouldRunSignatureScan()) {
             touched.addAll(scanForMissedChanges());
         }
 
         touched.removeIf(file -> file == null || !managedConfigFilePredicate.test(file));
-        return touched;
+        return emitStableTouchedFiles(touched);
+    }
+
+    private Set<File> emitStableTouchedFiles(Set<File> detected) {
+        Map<String, File> candidates = new HashMap<>();
+        for (File file : detected) {
+            if (file != null) {
+                candidates.put(file.getAbsolutePath(), file);
+            }
+        }
+        for (String path : new HashSet<>(pendingSignatures.keySet())) {
+            candidates.putIfAbsent(path, new File(path));
+        }
+
+        Set<File> stable = new HashSet<>();
+        Map<String, String> stillPending = new HashMap<>();
+        for (Map.Entry<String, File> entry : candidates.entrySet()) {
+            String path = entry.getKey();
+            File file = entry.getValue();
+            if (file == null || !managedConfigFilePredicate.test(file)) {
+                continue;
+            }
+
+            String currentSignature = signature(file);
+            if (currentSignature.equals(pendingSignatures.get(path))) {
+                stable.add(file);
+            } else {
+                stillPending.put(path, currentSignature);
+            }
+        }
+
+        pendingSignatures.clear();
+        pendingSignatures.putAll(stillPending);
+        return stable;
     }
 
     private void primeKnownSnapshots() {
@@ -330,6 +381,18 @@ public class ConfigHotloadEngine {
         try {
             WatchKey key;
             while ((key = directoryWatchService.poll()) != null) {
+                if (suppressDirectoryEventDelivery) {
+                    key.pollEvents();
+                    if (!key.reset()) {
+                        WatchedDirectory removed = directoryWatchKeys.remove(key);
+                        if (removed != null) {
+                            directoryWatchKeysByPath.remove(watchPath(removed.directory()));
+                        }
+                        reconciliationRequired = true;
+                    }
+                    continue;
+                }
+
                 WatchedDirectory watchedDirectory = directoryWatchKeys.get(key);
                 if (watchedDirectory == null) {
                     reconciliationRequired = true;
