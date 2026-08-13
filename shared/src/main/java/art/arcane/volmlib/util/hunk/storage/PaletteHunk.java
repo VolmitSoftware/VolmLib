@@ -74,4 +74,8 @@ public class PaletteHunk<T> extends StorageHunk<T> {
     protected int index(int x, int y, int z) {
         return (z * getWidth() * getHeight()) + (y * getWidth()) + x;
     }
+
+    public boolean isEmptyData() {
+        return data.isEmptyData();
+    }
 }

@@ -198,16 +198,29 @@ public class HyperLockSupport {
     }
 
     public void unlock(int x, int z) {
-        if (!enabled) {
-            return;
+        // Ownership-based, never flag-based: a thread that acquired before disable() flipped
+        // `enabled` must still release, or disable() parks forever on a lock nobody will
+        // unlock. A thread that skipped acquisition (disabled) never holds it, so this can
+        // never throw IllegalMonitorStateException.
+        OwnedLock lock = getLock(x, z);
+        if (lock.isHeldByCurrentThread()) {
+            lock.unlock();
         }
-
-        getLock(x, z).unlock();
     }
 
     public void disable() {
         enabled = false;
-        locks.values().forEach(ReentrantLock::lock);
+        // Bounded: a wedged holder degrades to a loud warning instead of hanging shutdown.
+        for (OwnedLock lock : locks.values()) {
+            try {
+                if (!lock.tryLock(10_000L, java.util.concurrent.TimeUnit.MILLISECONDS) && warningHandler != null) {
+                    warningHandler.accept("HyperLock disable timed out waiting for a held lock; continuing shutdown");
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
     }
 
     /**

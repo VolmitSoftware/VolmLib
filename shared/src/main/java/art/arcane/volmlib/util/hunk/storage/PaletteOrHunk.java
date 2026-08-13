@@ -50,6 +50,13 @@ public abstract class PaletteOrHunk<T> extends StorageHunk<T> implements Writabl
             return ((MappedSyncHunk<T>) hunk).getEntryCount();
         }
 
+        // 0-or-volume for palette hunks: the volume fallthrough made every mantle slice
+        // report "full", so trimSlices() could never remove read-materialized empty slices
+        // and pure read probes permanently bloated every persisted plate.
+        if (hunk instanceof PaletteHunk<?> palette) {
+            return palette.isEmptyData() ? 0 : getWidth() * getHeight() * getDepth();
+        }
+
         return getWidth() * getHeight() * getDepth();
     }
 

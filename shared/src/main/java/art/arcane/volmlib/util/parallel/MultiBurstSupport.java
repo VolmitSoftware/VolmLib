@@ -148,7 +148,7 @@ public class MultiBurstSupport implements ExecutorService {
     }
 
     public BurstExecutorSupport burst(int estimate) {
-        return new BurstExecutorSupport(getService(), estimate, errorHandler);
+        return new BurstExecutorSupport(this::getService, estimate, errorHandler);
     }
 
     public BurstExecutorSupport burst() {

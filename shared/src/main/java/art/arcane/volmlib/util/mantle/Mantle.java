@@ -360,17 +360,22 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
             return;
         }
 
-        hyperLock.disable();
         unloadSemaphore().acquireUninterruptibly(lockSize);
         try {
+            // Per-plate locked flush evicts with identity checks; no bulk loadedRegions.clear()
+            // here — that silently threw away any plate a concurrent access resurrected
+            // mid-flush, losing everything written into it.
             flushLoadedRegions();
-            loadedRegions.clear();
             loadingRegions.clear();
             lastUse.clear();
             toUnload.clear();
         } finally {
             unloadSemaphore().release(lockSize);
         }
+
+        // Disable AFTER the flush: the flush depends on the per-region lock for its
+        // serialization, and disabling first also deadlocked against in-flight holders.
+        hyperLock.disable();
 
         try {
             regionIO.close();
@@ -454,10 +459,12 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
 
     @RegionCoordinates
     private P get(int x, int z) {
+        ensureOpen();
         return accessRegion(x, z);
     }
 
     private CompletableFuture<P> getFuture(int x, int z) {
+        ensureOpen();
         return accessRegionFuture(x, z);
     }
 
@@ -465,8 +472,9 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
         ensureOpen();
         unloadSemaphore().acquireUninterruptibly(lockSize);
         try {
+            // Eviction happens per plate inside the locked flush (identity-checked), so a
+            // plate resurrected by a concurrent access survives instead of being dropped.
             flushLoadedRegions();
-            loadedRegions.clear();
             loadingRegions.clear();
             lastUse.clear();
             toUnload.clear();
@@ -480,22 +488,35 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
      * cached file channels), then deletes the persisted region files. The mantle stays open and
      * usable; subsequent reads see an empty store. Deleting files without first closing the IO
      * layer would leave cached channels pointing at unlinked inodes, so post-reset writes would
-     * silently vanish. A file that cannot be deleted fails the reset loudly — a partial reset
-     * reported as success corrupts whatever the caller resets for.
+     * silently vanish. The unload-permit fence is held across the whole reset — flush, IO close
+     * and unlink — and any region still (or newly) resident afterwards fails the reset loudly:
+     * a partial reset reported as success corrupts whatever the caller resets for.
      */
     public synchronized void resetStorage() throws Exception {
         ensureOpen();
-        saveAll();
-        regionIO.close();
-        File[] files = dataFolder.listFiles();
-        if (files != null) {
-            for (File file : files) {
-                if (file.isFile() && !file.delete()) {
-                    throw new IllegalStateException("Could not delete mantle region file " + file.getAbsolutePath());
+        unloadSemaphore().acquireUninterruptibly(lockSize);
+        try {
+            flushLoadedRegions();
+            loadingRegions.clear();
+            lastUse.clear();
+            toUnload.clear();
+            regionIO.close();
+            File[] files = dataFolder.listFiles();
+            if (files != null) {
+                for (File file : files) {
+                    if (file.isFile() && !file.delete()) {
+                        throw new IllegalStateException("Could not delete mantle region file " + file.getAbsolutePath());
+                    }
                 }
             }
+            deleteTemporaryFiles();
+            if (!loadedRegions.isEmpty()) {
+                throw new IllegalStateException("Mantle reset raced concurrent region activity; "
+                        + loadedRegions.size() + " region(s) remained resident through the reset");
+            }
+        } finally {
+            unloadSemaphore().release(lockSize);
         }
-        deleteTemporaryFiles();
     }
 
     public synchronized void saveTectonicPlates(Iterable<Long> regionIds) {
@@ -615,6 +636,7 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
     }
 
     protected CompletableFuture<P> getSafe(int x, int z) {
+        ensureOpen();
         Long k = key(x, z);
         P loaded = loadedRegions.get(k);
         if (loaded != null && !loaded.isClosed()) {
@@ -630,6 +652,7 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
     }
 
     private P loadRegionNow(int x, int z) {
+        ensureOpen();
         return hyperLock.withResult(x, z, () -> {
             Long k = key(x, z);
             use(k);
@@ -720,7 +743,7 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
                 loadedRegions.size(),
                 consumer -> loadedRegions.forEach((id, plate) -> consumer.accept(id, plate)),
                 ioBurst::burst,
-                this::persistRegion,
+                this::persistRegionLocked,
                 (id, plate, e) -> {
                     onWarn("Failed to write Tectonic Plate " + CacheKey.keyX(id) + " " + CacheKey.keyZ(id));
                     onError(e);
@@ -731,8 +754,36 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
 
     private void persistRegion(long id, P plate) throws Exception {
         plate.close();
-        regionIO.write(fileForRegion(dataFolder, id, false).getName(), plate);
+        try {
+            regionIO.write(fileForRegion(dataFolder, id, false).getName(), plate);
+        } catch (Exception error) {
+            reopenAfterTargetedSaveFailure(plate, error);
+            throw error;
+        } catch (Error error) {
+            reopenAfterTargetedSaveFailure(plate, error);
+            throw error;
+        }
         oldFileForRegion(dataFolder, id).delete();
+    }
+
+    /**
+     * Flush-path variant: takes the same per-region lock every access/unload path uses (this
+     * was the one region-mutating path that bypassed it) and evicts with identity checks so a
+     * plate resurrected by a concurrent load is never clobbered by a bulk clear.
+     */
+    private void persistRegionLocked(long id, P plate) throws Exception {
+        try {
+            hyperLock.withNasty(CacheKey.keyX(id), CacheKey.keyZ(id), () -> {
+                persistRegion(id, plate);
+                loadedRegions.remove(id, plate);
+                lastUse.remove(id);
+                toUnload.remove(id);
+            });
+        } catch (Exception e) {
+            throw e;
+        } catch (Throwable t) {
+            throw new IllegalStateException(t);
+        }
     }
 
     private void saveTectonicPlate(long id, long waitNanos) {

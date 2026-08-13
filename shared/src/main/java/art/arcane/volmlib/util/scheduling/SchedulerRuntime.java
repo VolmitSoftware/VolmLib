@@ -172,7 +172,13 @@ public final class SchedulerRuntime {
                 return;
             }
 
-            runnable.run();
+            // A throwing body must not kill the repeating chain or leak the canceller;
+            // report it and keep the re-arm unconditional, matching runTaskTimer semantics.
+            try {
+                runnable.run();
+            } catch (Throwable ex) {
+                handleError(ex);
+            }
             if (state.cancelled || !isPluginActive()) {
                 repeatingCancellers.remove(taskId);
                 return;
@@ -222,7 +228,13 @@ public final class SchedulerRuntime {
                 return;
             }
 
-            runnable.run();
+            // A throwing body must not kill the repeating chain or leak the canceller;
+            // report it and keep the re-arm unconditional, matching runTaskTimer semantics.
+            try {
+                runnable.run();
+            } catch (Throwable ex) {
+                handleError(ex);
+            }
             if (state.cancelled || !isPluginActive()) {
                 repeatingCancellers.remove(taskId);
                 return;

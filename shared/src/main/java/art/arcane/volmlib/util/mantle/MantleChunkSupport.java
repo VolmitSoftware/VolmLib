@@ -29,7 +29,10 @@ public abstract class MantleChunkSupport<M> extends FlaggedChunk {
     protected MantleChunkSupport(int version, int sectionHeight, CountingDataInputStream din) throws IOException {
         this(sectionHeight, din.readByte(), din.readByte());
 
-        int sectionCount = din.readByte();
+        // Unsigned on purpose: worlds taller than 2048 blocks have >= 128 sections, and a
+        // signed read made the count negative — zero sections read, stream mispositioned,
+        // and every later chunk in the plate desynchronized.
+        int sectionCount = din.readUnsignedByte();
         readFlags(version, din);
 
         for (int i = 0; i < sectionCount; i++) {
@@ -177,6 +180,9 @@ public abstract class MantleChunkSupport<M> extends FlaggedChunk {
         close();
         dos.writeByte(x);
         dos.writeByte(z);
+        if (sections.length() > 255) {
+            throw new IOException("Section count " + sections.length() + " exceeds the single-byte mantle chunk header");
+        }
         dos.writeByte(sections.length());
         writeFlags(dos);
 

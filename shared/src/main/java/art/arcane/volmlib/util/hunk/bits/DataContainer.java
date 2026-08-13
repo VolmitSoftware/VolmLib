@@ -189,6 +189,25 @@ public class DataContainer<T> {
         return palette.get(id);
     }
 
+    /**
+     * True when no position holds a value. Short-circuits on the first present entry, so it
+     * costs at most one full bit-scan — the same class of work writeDos' trim already does.
+     */
+    public boolean isEmptyData() {
+        read.lock();
+        try {
+            DataBits bits = data;
+            for (int position = 0; position < length; position++) {
+                if (bits.getUnchecked(position) > 0) {
+                    return false;
+                }
+            }
+            return true;
+        } finally {
+            read.unlock();
+        }
+    }
+
     public void iteratePresent(IndexedConsumer<T> consumer) {
         read.lock();
         try {

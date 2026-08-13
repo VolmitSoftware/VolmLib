@@ -130,10 +130,14 @@ public final class DirectorRuntimeEngine implements DirectorCommandEngine {
 
     private DirectorExecutionResult invokeNode(DirectorInvocation invocation, DirectorRuntimeNode node, List<String> rawArgs) {
         DirectorSender sender = invocation.getSender();
-        if (!node.getDescriptor().getOrigin().validFor(sender.isPlayer())) {
-            String message = resolveText(DirectorRuntimeMessages.INVALID_ORIGIN);
-            sender.sendMessage(message);
-            return DirectorExecutionResult.failure(message);
+        // Origin binds the whole subtree: a class-level PLAYER restriction must gate every
+        // child method, not just leaves that repeat the annotation.
+        for (DirectorRuntimeNode gate = node; gate != null; gate = gate.getParent()) {
+            if (!gate.getDescriptor().getOrigin().validFor(sender.isPlayer())) {
+                String message = resolveText(DirectorRuntimeMessages.INVALID_ORIGIN);
+                sender.sendMessage(message);
+                return DirectorExecutionResult.failure(message);
+            }
         }
 
         DirectorContextMap contextMap = new DirectorContextMap();
