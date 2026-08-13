@@ -106,13 +106,33 @@ public class DirectorRuntimeEngineArgumentMappingTest {
     }
 
     @Test
-    public void tabCompleteOnlySuggestsBareValuesForRequiredParameters() {
+    public void tabCompleteUsesPositionalRequiredValuesAndCompleteOptionalValues() {
         List<String> suggestions = engine.tabComplete(new DirectorInvocation(sender, "test", List.of("create", "MyWorld", "")));
 
         assertFalse(suggestions.contains("true"));
         assertFalse(suggestions.contains("false"));
-        assertTrue(suggestions.contains("main="));
+        assertFalse(suggestions.contains("main="));
+        assertTrue(suggestions.contains("main=false"));
+        assertTrue(suggestions.contains("main=true"));
         assertTrue(suggestions.contains("seed="));
+    }
+
+    @Test
+    public void keyedValueCompletionDoesNotRequireEditingTheAcceptedKey() {
+        List<String> suggestions = engine.tabComplete(
+                new DirectorInvocation(sender, "test", List.of("create", "MyWorld", "main=")));
+
+        assertEquals(List.of("main=false", "main=true"), suggestions);
+    }
+
+    @Test
+    public void tabCompleteShowsCanonicalCommandsWithoutAliasClutter() {
+        List<String> suggestions = engine.tabComplete(
+                new DirectorInvocation(sender, "test", List.of("")));
+
+        assertTrue(suggestions.contains("create"));
+        assertFalse(suggestions.contains("make"));
+        assertTrue(run("make", "MyWorld").isSuccess());
     }
 
     @Test
@@ -154,7 +174,7 @@ public class DirectorRuntimeEngineArgumentMappingTest {
         String linkSource;
         String linkTarget;
 
-        @Director(description = "Create a world", descriptionKey = "director.test.create")
+        @Director(aliases = {"make"}, description = "Create a world", descriptionKey = "director.test.create")
         public void create(
                 @Param(name = "name", description = "World name", descriptionKey = "director.test.create.name")
                 String name,

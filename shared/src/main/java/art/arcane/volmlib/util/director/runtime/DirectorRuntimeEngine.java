@@ -422,16 +422,15 @@ public final class DirectorRuntimeEngine implements DirectorCommandEngine {
         String normalized = partial == null ? "" : partial.trim().toLowerCase(Locale.ROOT);
 
         for (DirectorRuntimeNode child : node.getChildren()) {
-            for (String name : child.allNames()) {
-                if (normalized.isEmpty()) {
-                    suggestions.add(name);
-                    continue;
-                }
+            String name = child.getDescriptor().getName();
+            if (normalized.isEmpty()) {
+                suggestions.add(name);
+                continue;
+            }
 
-                String lowered = name.toLowerCase(Locale.ROOT);
-                if (lowered.startsWith(normalized) || lowered.contains(normalized) || normalized.contains(lowered)) {
-                    suggestions.add(name);
-                }
+            String lowered = name.toLowerCase(Locale.ROOT);
+            if (lowered.startsWith(normalized) || lowered.contains(normalized) || normalized.contains(lowered)) {
+                suggestions.add(name);
             }
         }
 
@@ -502,16 +501,18 @@ public final class DirectorRuntimeEngine implements DirectorCommandEngine {
                 continue;
             }
 
-            String suggestion = parameter.getDescriptor().getName() + "=";
-            if (last.isEmpty()) {
-                suggestions.add(suggestion);
+            DirectorParameterDescriptor descriptor = parameter.getDescriptor();
+            if (descriptor.isRequired()) {
                 continue;
             }
 
-            String lowered = suggestion.toLowerCase(Locale.ROOT);
-            String loweredLast = last.toLowerCase(Locale.ROOT);
-            if (lowered.startsWith(loweredLast) || lowered.contains(loweredLast) || loweredLast.contains(lowered)) {
-                suggestions.add(suggestion);
+            List<String> values = parameterValueSuggestions(parameter, "");
+            if (values.isEmpty()) {
+                addMatchingSuggestion(suggestions, descriptor.getName() + "=", last);
+                continue;
+            }
+            for (String value : values) {
+                addMatchingSuggestion(suggestions, descriptor.getName() + "=" + value, last);
             }
         }
 
@@ -531,6 +532,21 @@ public final class DirectorRuntimeEngine implements DirectorCommandEngine {
         }
 
         return suggestions.stream().sorted(String::compareToIgnoreCase).toList();
+    }
+
+    private void addMatchingSuggestion(Set<String> suggestions, String suggestion, String input) {
+        if (input == null || input.isEmpty()) {
+            suggestions.add(suggestion);
+            return;
+        }
+
+        String lowered = suggestion.toLowerCase(Locale.ROOT);
+        String loweredInput = input.toLowerCase(Locale.ROOT);
+        if (lowered.startsWith(loweredInput)
+                || lowered.contains(loweredInput)
+                || loweredInput.contains(lowered)) {
+            suggestions.add(suggestion);
+        }
     }
 
     private List<String> parameterValueSuggestions(DirectorRuntimeParameter parameter, String input) {
