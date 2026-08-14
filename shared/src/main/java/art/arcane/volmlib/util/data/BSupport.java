@@ -830,6 +830,9 @@ public abstract class BSupport<P> {
         KList<String> bt = new KList<>();
 
         for (Material i : Material.values()) {
+            if (!isModernMaterial(i)) {
+                continue;
+            }
             if (i.isBlock()) {
                 String v = i.createBlockData().getAsString(true);
 
@@ -877,6 +880,9 @@ public abstract class BSupport<P> {
         KList<String> bt = new KList<>();
 
         for (Material i : Material.values()) {
+            if (!isModernMaterial(i)) {
+                continue;
+            }
             String v = i.name().toLowerCase().trim();
             bt.add(v);
         }
@@ -884,6 +890,10 @@ public abstract class BSupport<P> {
         appendExternalItemTypes(bt);
 
         return bt.toArray(new String[0]);
+    }
+
+    static boolean isModernMaterial(Material material) {
+        return material != null && !material.isLegacy();
     }
 
     public boolean isWaterLogged(BlockData b) {

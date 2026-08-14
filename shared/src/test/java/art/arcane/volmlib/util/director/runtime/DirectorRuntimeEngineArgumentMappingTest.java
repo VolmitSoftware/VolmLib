@@ -73,6 +73,16 @@ public class DirectorRuntimeEngineArgumentMappingTest {
     }
 
     @Test
+    public void pretokenizedInvocationPreservesOneSemanticArgumentLosslessly() {
+        String text = "Say \"hello\" to the <gold>whole world";
+        DirectorExecutionResult result = engine.execute(DirectorInvocation.pretokenized(
+                sender, "test", List.of("echo", "text=" + text)));
+
+        assertTrue(result.isSuccess());
+        assertEquals(text, rootCommand.text);
+    }
+
+    @Test
     public void optionalParameterRejectsPositionalValue() {
         DirectorExecutionResult result = run("create", "MyWorld", "flat");
 
@@ -173,6 +183,7 @@ public class DirectorRuntimeEngineArgumentMappingTest {
         boolean main;
         String linkSource;
         String linkTarget;
+        String text;
 
         @Director(aliases = {"make"}, description = "Create a world", descriptionKey = "director.test.create")
         public void create(
@@ -200,6 +211,11 @@ public class DirectorRuntimeEngineArgumentMappingTest {
         ) {
             this.linkSource = source;
             this.linkTarget = target;
+        }
+
+        @Director
+        public void echo(@Param(name = "text") String text) {
+            this.text = text;
         }
 
         @Director

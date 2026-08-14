@@ -1,5 +1,6 @@
 package art.arcane.volmlib.util.data;
 
+import org.bukkit.Material;
 import org.bukkit.block.data.BlockData;
 import org.junit.Test;
 
@@ -9,6 +10,13 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 public class BSupportTest {
+    @Test
+    public void materialDiscoveryExcludesLegacyAliases() {
+        assertTrue(BSupport.isModernMaterial(Material.STONE));
+        assertFalse(BSupport.isModernMaterial(Material.valueOf("LEGACY_STONE")));
+        assertFalse(BSupport.isModernMaterial(null));
+    }
+
     @Test
     public void pointedDripstoneTipRecognizesTipAcrossApiDescriptors() {
         BlockData tip = pointedDripstone("TIP", false);

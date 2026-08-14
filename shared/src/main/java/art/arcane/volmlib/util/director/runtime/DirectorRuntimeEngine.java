@@ -77,7 +77,9 @@ public final class DirectorRuntimeEngine implements DirectorCommandEngine {
             return DirectorExecutionResult.notHandled();
         }
 
-        List<String> args = tokenize(invocation.getArgs(), true);
+        List<String> args = invocation.isPretokenized()
+                ? invocation.getArgs()
+                : tokenize(invocation.getArgs(), true);
         Traversal traversal = traverseForExecution(root, args);
         if (traversal.node == null || !traversal.node.isInvocable()) {
             return DirectorExecutionResult.notHandled();
