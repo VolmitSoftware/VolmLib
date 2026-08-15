@@ -8,6 +8,7 @@ import org.bukkit.plugin.Plugin;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 
 public final class HudSlotService {
@@ -73,6 +74,14 @@ public final class HudSlotService {
     }
   }
 
+  void retire(UUID playerId, HudSlotRequest request, long sessionId) {
+    for (HudSurface surface : request.preferences()) {
+      if (surface.isArbitrated()) {
+        ledger.release(localKey(playerId, surface), sessionId);
+      }
+    }
+  }
+
   private boolean claimGlobal(Player player, HudSurface surface, HudSlotRequest request, long sinceMillis, long nowMillis) {
     HudBid mine = new HudBid(request.priority(), sinceMillis, nowMillis, request.ttlMillis(), request.purpose());
     player.setMetadata(surface.metadataKey(), new FixedMetadataValue(plugin, mine.encode()));
@@ -109,6 +118,10 @@ public final class HudSlotService {
   }
 
   private static String localKey(Player player, HudSurface surface) {
-    return player.getUniqueId() + "|" + surface.name();
+    return localKey(player.getUniqueId(), surface);
+  }
+
+  private static String localKey(UUID playerId, HudSurface surface) {
+    return playerId + "|" + surface.name();
   }
 }

@@ -8,6 +8,7 @@ import org.bukkit.entity.Player;
 
 import java.util.Iterator;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 public final class HudBossBarLane {
@@ -44,6 +45,10 @@ public final class HudBossBarLane {
     }
   }
 
+  public void retire(UUID playerId, String laneId) {
+    bars.remove(laneKey(playerId, laneId));
+  }
+
   public void shutdown() {
     Iterator<Map.Entry<String, TrackedBar>> iterator = bars.entrySet().iterator();
     while (iterator.hasNext()) {
@@ -65,7 +70,11 @@ public final class HudBossBarLane {
   }
 
   private static String laneKey(Player player, String laneId) {
-    return player.getUniqueId() + "|" + laneId;
+    return laneKey(player.getUniqueId(), laneId);
+  }
+
+  private static String laneKey(UUID playerId, String laneId) {
+    return playerId + "|" + laneId;
   }
 
   private static final class TrackedBar {

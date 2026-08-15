@@ -2,9 +2,12 @@ package art.arcane.volmlib.util.hud;
 
 import org.bukkit.entity.Player;
 
+import java.util.UUID;
+
 public final class HudSlotClaim {
   private final HudSlotService service;
   private final Player player;
+  private final UUID playerId;
   private final HudSlotRequest request;
   private final long sessionId;
   private final long sinceMillis;
@@ -13,6 +16,7 @@ public final class HudSlotClaim {
   HudSlotClaim(HudSlotService service, Player player, HudSlotRequest request, long sessionId, long sinceMillis) {
     this.service = service;
     this.player = player;
+    this.playerId = player.getUniqueId();
     this.request = request;
     this.sessionId = sessionId;
     this.sinceMillis = sinceMillis;
@@ -31,5 +35,10 @@ public final class HudSlotClaim {
   public void release() {
     granted = null;
     service.releaseAll(player, request, sessionId);
+  }
+
+  public void retire() {
+    granted = null;
+    service.retire(playerId, request, sessionId);
   }
 }
