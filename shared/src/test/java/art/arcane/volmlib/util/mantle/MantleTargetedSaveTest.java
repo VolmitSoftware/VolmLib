@@ -18,16 +18,21 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BiConsumer;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotSame;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
@@ -148,13 +153,74 @@ public class MantleTargetedSaveTest {
         }
     }
 
+    @Test
+    public void completedRegionLoadDoesNotRetainAClosedFuture() throws Exception {
+        TestRuntime runtime = new TestRuntime(
+                temporaryFolder.newFolder("completed-region-load"),
+                new ImmediateRegionLoadBurst()
+        );
+        try {
+            runtime.mantle.getChunks(0, 0, 0, 0, 2, (x, z, chunk) -> {
+            });
+            long regionKey = Mantle.key(0, 0);
+            TectonicPlate<TestSection> original = runtime.mantle.getLoadedRegions().get(regionKey);
+
+            runtime.mantle.saveTectonicPlates(List.of(regionKey));
+
+            assertTrue(original.isClosed());
+            runtime.mantle.getChunks(0, 0, 0, 0, 2, (x, z, chunk) -> {
+            });
+            TectonicPlate<TestSection> reloaded = runtime.mantle.getLoadedRegions().get(regionKey);
+            assertNotSame(original, reloaded);
+            assertFalse(reloaded.isClosed());
+        } finally {
+            runtime.close();
+        }
+    }
+
+    @Test(timeout = 3_000L)
+    public void concurrentObserverCannotSeeSourceCompletionBeforePublishedLoadCompletes() throws Exception {
+        PausingImmediateRegionLoadBurst burst = new PausingImmediateRegionLoadBurst();
+        TestRuntime runtime = new TestRuntime(
+                temporaryFolder.newFolder("concurrent-completed-region-load"),
+                burst
+        );
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        long regionKey = Mantle.key(0, 0);
+        TectonicPlate<TestSection> original = null;
+        try {
+            Future<CompletableFuture<TectonicPlate<TestSection>>> initialCall = executor.submit(
+                    () -> runtime.loadRegionForTest(0, 0));
+            assertTrue(burst.callbackEntered.await(1L, TimeUnit.SECONDS));
+            original = runtime.mantle.getLoadedRegions().remove(regionKey);
+            assertTrue(original != null);
+
+            CompletableFuture<TectonicPlate<TestSection>> observer =
+                    runtime.loadRegionForTest(0, 0);
+
+            assertFalse(observer.isDone());
+            burst.releaseCallback();
+            CompletableFuture<TectonicPlate<TestSection>> initial = initialCall.get(1L, TimeUnit.SECONDS);
+            assertSame(original, initial.get(1L, TimeUnit.SECONDS));
+            assertSame(original, observer.get(1L, TimeUnit.SECONDS));
+        } finally {
+            burst.releaseCallback();
+            if (original != null && !original.isClosed()) {
+                runtime.mantle.getLoadedRegions().putIfAbsent(regionKey, original);
+            }
+            executor.shutdownNow();
+            executor.awaitTermination(1L, TimeUnit.SECONDS);
+            runtime.close();
+        }
+    }
+
     private static final class TestRuntime implements AutoCloseable {
         private final MultiBurstSupport burst;
         private final RecordingRegionIo regionIo;
         private final Mantle<TectonicPlate<TestSection>, MantleChunk<TestSection>> mantle;
 
         private TestRuntime(File dataFolder) {
-            this.burst = new MultiBurstSupport(
+            this(dataFolder, new MultiBurstSupport(
                     "mantle-targeted-save-test",
                     Thread.NORM_PRIORITY,
                     () -> 1,
@@ -168,7 +234,11 @@ public class MantleTargetedSaveTest {
                     ignored -> {
                     },
                     1_000L
-            );
+            ));
+        }
+
+        private TestRuntime(File dataFolder, MultiBurstSupport burst) {
+            this.burst = burst;
             this.regionIo = new RecordingRegionIo();
             this.mantle = new TestMantle(
                     dataFolder,
@@ -183,6 +253,88 @@ public class MantleTargetedSaveTest {
             mantle.close();
             burst.shutdownNow();
         }
+
+        private CompletableFuture<TectonicPlate<TestSection>> loadRegionForTest(int x, int z) {
+            return ((TestMantle) mantle).loadRegionForTest(x, z);
+        }
+    }
+
+    private static class ImmediateRegionLoadBurst extends MultiBurstSupport {
+        protected ImmediateRegionLoadBurst() {
+            super(
+                    "mantle-immediate-load-test",
+                    Thread.NORM_PRIORITY,
+                    () -> 1,
+                    ignored -> 1,
+                    System::currentTimeMillis,
+                    error -> {
+                        throw new AssertionError(error);
+                    },
+                    ignored -> {
+                    },
+                    ignored -> {
+                    },
+                    1_000L
+            );
+        }
+
+        @Override
+        public <T> CompletableFuture<T> completableFuture(Callable<T> operation) {
+            try {
+                return CompletableFuture.completedFuture(operation.call());
+            } catch (Exception exception) {
+                return CompletableFuture.failedFuture(exception);
+            }
+        }
+    }
+
+    private static final class PausingImmediateRegionLoadBurst extends ImmediateRegionLoadBurst {
+        private final AtomicBoolean pauseNextCallback = new AtomicBoolean(true);
+        private final CountDownLatch callbackEntered = new CountDownLatch(1);
+        private final CountDownLatch allowCallback = new CountDownLatch(1);
+
+        @Override
+        public <T> CompletableFuture<T> completableFuture(Callable<T> operation) {
+            try {
+                return new PausingCompletedFuture<>(operation.call(), this);
+            } catch (Exception exception) {
+                return CompletableFuture.failedFuture(exception);
+            }
+        }
+
+        private void awaitCallback() {
+            if (!pauseNextCallback.compareAndSet(true, false)) {
+                return;
+            }
+            callbackEntered.countDown();
+            try {
+                if (!allowCallback.await(1L, TimeUnit.SECONDS)) {
+                    throw new IllegalStateException("Timed out waiting to release region-load completion callback");
+                }
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException("Interrupted waiting to release region-load completion callback", exception);
+            }
+        }
+
+        private void releaseCallback() {
+            allowCallback.countDown();
+        }
+    }
+
+    private static final class PausingCompletedFuture<T> extends CompletableFuture<T> {
+        private final PausingImmediateRegionLoadBurst burst;
+
+        private PausingCompletedFuture(T value, PausingImmediateRegionLoadBurst burst) {
+            this.burst = burst;
+            complete(value);
+        }
+
+        @Override
+        public CompletableFuture<T> whenComplete(BiConsumer<? super T, ? super Throwable> action) {
+            burst.awaitCallback();
+            return super.whenComplete(action);
+        }
     }
 
     private static final class TestMantle
@@ -192,6 +344,10 @@ public class MantleTargetedSaveTest {
                            RecordingRegionIo regionIo) {
             super(dataFolder, 16, 32, new HyperLockSupport(), burst,
                     regionIo, ADAPTER, MantleHooks.NONE);
+        }
+
+        private CompletableFuture<TectonicPlate<TestSection>> loadRegionForTest(int x, int z) {
+            return getSafe(x, z);
         }
     }
 

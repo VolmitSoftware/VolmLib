@@ -644,11 +644,33 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
             return CompletableFuture.completedFuture(loaded);
         }
 
-        return loadingRegions.computeIfAbsent(k, id -> {
-            CompletableFuture<P> created = ioBurst.completableFuture(() -> loadRegionNow(x, z));
-            created.whenComplete((region, throwable) -> loadingRegions.remove(id, created));
-            return created;
-        });
+        CompletableFuture<P> existing = loadingRegions.get(k);
+        if (existing != null) {
+            return existing;
+        }
+
+        CompletableFuture<P> published = new CompletableFuture<>();
+        existing = loadingRegions.putIfAbsent(k, published);
+        if (existing != null) {
+            return existing;
+        }
+
+        try {
+            ioBurst.completableFuture(() -> loadRegionNow(x, z))
+                    .whenComplete((region, failure) -> completeRegionLoad(k, published, region, failure));
+        } catch (Throwable failure) {
+            completeRegionLoad(k, published, null, failure);
+        }
+        return published;
+    }
+
+    private void completeRegionLoad(long key, CompletableFuture<P> published, P region, Throwable failure) {
+        loadingRegions.remove(key, published);
+        if (failure == null) {
+            published.complete(region);
+        } else {
+            published.completeExceptionally(failure);
+        }
     }
 
     private P loadRegionNow(int x, int z) {
