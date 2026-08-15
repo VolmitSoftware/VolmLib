@@ -13,7 +13,6 @@ public class WorldCache2D<T> {
     private final ConcurrentLinkedHashMap<Long, ChunkCache2D<T>> chunks;
     private final IntIntFunction<T> resolver;
     private final Supplier<? extends ChunkCache2D<T>> chunkSupplier;
-    private final ThreadLocal<LastChunkReference<ChunkCache2D<T>>> lastChunk = ThreadLocal.withInitial(LastChunkReference::new);
 
     public WorldCache2D(Function2<Integer, Integer, T> resolver, Supplier<? extends ChunkCache2D<T>> chunkSupplier) {
         this(resolver, 1024, chunkSupplier);
@@ -72,14 +71,9 @@ public class WorldCache2D<T> {
     }
 
     private ChunkCache2D<T> chunkFor(long key) {
-        LastChunkReference<ChunkCache2D<T>> local = lastChunk.get();
-        ChunkCache2D<T> chunk = local.get(key);
+        ChunkCache2D<T> chunk = chunks.get(key);
         if (chunk == null) {
-            chunk = chunks.get(key);
-            if (chunk == null) {
-                chunk = chunks.computeIfAbsent(key, ignored -> chunkSupplier.get());
-            }
-            local.set(key, chunk);
+            chunk = chunks.computeIfAbsent(key, ignored -> chunkSupplier.get());
         }
 
         return chunk;

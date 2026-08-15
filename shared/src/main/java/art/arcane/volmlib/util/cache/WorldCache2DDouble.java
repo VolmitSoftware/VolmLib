@@ -7,7 +7,6 @@ import java.util.function.ToDoubleBiFunction;
 public class WorldCache2DDouble {
     private final ConcurrentLinkedHashMap<Long, ChunkCache2DDouble> chunks;
     private final ToDoubleBiFunction<Integer, Integer> resolver;
-    private final ThreadLocal<LastChunkReference<ChunkCache2DDouble>> lastChunk = ThreadLocal.withInitial(LastChunkReference::new);
 
     public WorldCache2DDouble(ToDoubleBiFunction<Integer, Integer> resolver, int size) {
         this.resolver = resolver;
@@ -57,14 +56,9 @@ public class WorldCache2DDouble {
     }
 
     private ChunkCache2DDouble chunkFor(long key) {
-        LastChunkReference<ChunkCache2DDouble> local = lastChunk.get();
-        ChunkCache2DDouble chunk = local.get(key);
+        ChunkCache2DDouble chunk = chunks.get(key);
         if (chunk == null) {
-            chunk = chunks.get(key);
-            if (chunk == null) {
-                chunk = chunks.computeIfAbsent(key, ignored -> new ChunkCache2DDouble());
-            }
-            local.set(key, chunk);
+            chunk = chunks.computeIfAbsent(key, ignored -> new ChunkCache2DDouble());
         }
 
         return chunk;
