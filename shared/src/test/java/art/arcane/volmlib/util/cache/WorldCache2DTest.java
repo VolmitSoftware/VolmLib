@@ -46,4 +46,17 @@ public class WorldCache2DTest {
         assertNull(cache.get(1, 2));
         assertEquals(2, calls.get());
     }
+
+    @Test
+    public void evictedChunksAreNotRetainedOutsideTheDeclaredCapacity() {
+        AtomicInteger calls = new AtomicInteger();
+        WorldCache2D<Integer> cache = new WorldCache2D<>((x, z) -> calls.incrementAndGet(),
+                1, () -> new ChunkCache2D<>("iris"));
+
+        assertEquals(1, cache.get(0, 0).intValue());
+        assertEquals(2, cache.get(16, 0).intValue());
+        assertEquals(3, cache.get(0, 0).intValue());
+        assertEquals(3, calls.get());
+        assertEquals(256L, cache.getSize());
+    }
 }

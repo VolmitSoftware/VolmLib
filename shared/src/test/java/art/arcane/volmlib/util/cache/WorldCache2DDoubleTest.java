@@ -43,4 +43,16 @@ public class WorldCache2DDoubleTest {
         assertEquals((3 << 4) * 0.5D - ((-2 << 4) * 0.25D), values[0], 0D);
         assertEquals((((3 << 4) + 15) * 0.5D) - (((-2 << 4) + 15) * 0.25D), values[255], 0D);
     }
+
+    @Test
+    public void evictedChunksAreNotRetainedOutsideTheDeclaredCapacity() {
+        AtomicInteger calls = new AtomicInteger();
+        WorldCache2DDouble cache = new WorldCache2DDouble((x, z) -> calls.incrementAndGet(), 1);
+
+        assertEquals(1D, cache.get(0, 0), 0D);
+        assertEquals(2D, cache.get(16, 0), 0D);
+        assertEquals(3D, cache.get(0, 0), 0D);
+        assertEquals(3, calls.get());
+        assertEquals(256L, cache.getSize());
+    }
 }

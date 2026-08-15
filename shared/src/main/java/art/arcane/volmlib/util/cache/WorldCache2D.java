@@ -4,19 +4,15 @@ import art.arcane.volmlib.util.function.Function2;
 import art.arcane.volmlib.util.function.IntIntFunction;
 import com.googlecode.concurrentlinkedhashmap.ConcurrentLinkedHashMap;
 
-import java.util.Arrays;
 import java.util.function.Supplier;
 
 /**
  * Shared world-level cache composed of per-chunk 2D caches.
  */
 public class WorldCache2D<T> {
-    private static final int LOCAL_CHUNK_SLOTS = 1024;
-
     private final ConcurrentLinkedHashMap<Long, ChunkCache2D<T>> chunks;
     private final IntIntFunction<T> resolver;
     private final Supplier<? extends ChunkCache2D<T>> chunkSupplier;
-    private final ThreadLocal<LocalChunks<T>> localChunks = ThreadLocal.withInitial(LocalChunks::new);
 
     public WorldCache2D(Function2<Integer, Integer, T> resolver, Supplier<? extends ChunkCache2D<T>> chunkSupplier) {
         this(resolver, 1024, chunkSupplier);
@@ -75,52 +71,11 @@ public class WorldCache2D<T> {
     }
 
     private ChunkCache2D<T> chunkFor(long key) {
-        LocalChunks<T> local = localChunks.get();
-        ChunkCache2D<T> chunk = local.get(key);
+        ChunkCache2D<T> chunk = chunks.get(key);
         if (chunk == null) {
-            chunk = chunks.get(key);
-            if (chunk == null) {
-                chunk = chunks.computeIfAbsent(key, $ -> chunkSupplier.get());
-            }
-            local.put(key, chunk);
+            chunk = chunks.computeIfAbsent(key, ignored -> chunkSupplier.get());
         }
 
         return chunk;
-    }
-
-    private static final class LocalChunks<T> {
-        private final long[] keys = new long[LOCAL_CHUNK_SLOTS];
-        private final ChunkCache2D<T>[] chunks;
-
-        @SuppressWarnings("unchecked")
-        private LocalChunks() {
-            Arrays.fill(keys, Long.MIN_VALUE);
-            chunks = (ChunkCache2D<T>[]) new ChunkCache2D[LOCAL_CHUNK_SLOTS];
-        }
-
-        private ChunkCache2D<T> get(long key) {
-            int slot = slot(key);
-            if (keys[slot] == key) {
-                return chunks[slot];
-            }
-
-            return null;
-        }
-
-        private void put(long key, ChunkCache2D<T> chunk) {
-            int slot = slot(key);
-            keys[slot] = key;
-            chunks[slot] = chunk;
-        }
-
-        private int slot(long key) {
-            long mixed = key;
-            mixed ^= mixed >>> 33;
-            mixed *= 0xff51afd7ed558ccdL;
-            mixed ^= mixed >>> 33;
-            mixed *= 0xc4ceb9fe1a85ec53L;
-            mixed ^= mixed >>> 33;
-            return (int) mixed & (LOCAL_CHUNK_SLOTS - 1);
-        }
     }
 }
