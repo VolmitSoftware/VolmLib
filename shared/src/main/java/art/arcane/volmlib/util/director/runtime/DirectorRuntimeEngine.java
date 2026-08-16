@@ -303,11 +303,14 @@ public final class DirectorRuntimeEngine implements DirectorCommandEngine {
         for (DirectorRuntimeParameter parameter : node.getParameters()) {
             DirectorParameterDescriptor descriptor = parameter.getDescriptor();
             if (descriptor.isContextual()) {
+                if (descriptor.isContextualOverride()) {
+                    out.append(" [").append(descriptor.getName()).append("=...]");
+                }
                 continue;
             }
 
             if (descriptor.isRequired()) {
-                out.append(" <").append(descriptor.getName()).append('>');
+                out.append(" <").append(descriptor.getName()).append("=...>");
             } else {
                 out.append(" [").append(descriptor.getName()).append("=...]");
             }
@@ -483,7 +486,7 @@ public final class DirectorRuntimeEngine implements DirectorCommandEngine {
             String key = last.substring(0, split).trim();
             String valuePrefix = last.substring(split + 1).trim();
             DirectorRuntimeParameter parameter = findBestParameter(node.getParameters(), key, true);
-            if (parameter == null || parameter.getDescriptor().isContextual()) {
+            if (parameter == null || isHiddenContext(parameter.getDescriptor())) {
                 return List.of();
             }
 
@@ -492,22 +495,18 @@ public final class DirectorRuntimeEngine implements DirectorCommandEngine {
             }
 
             if (suggestions.isEmpty()) {
-                suggestions.add(parameter.getDescriptor().getName() + "=");
+                suggestions.add(parameter.getDescriptor().getName() + "=" + valuePrefix);
             }
 
             return suggestions.stream().sorted(String::compareToIgnoreCase).toList();
         }
 
         for (DirectorRuntimeParameter parameter : node.getParameters()) {
-            if (consumed.contains(parameter) || parameter.getDescriptor().isContextual()) {
+            if (consumed.contains(parameter) || isHiddenContext(parameter.getDescriptor())) {
                 continue;
             }
 
             DirectorParameterDescriptor descriptor = parameter.getDescriptor();
-            if (descriptor.isRequired()) {
-                continue;
-            }
-
             List<String> values = parameterValueSuggestions(parameter, "");
             if (values.isEmpty()) {
                 addMatchingSuggestion(suggestions, descriptor.getName() + "=", last);
@@ -518,22 +517,11 @@ public final class DirectorRuntimeEngine implements DirectorCommandEngine {
             }
         }
 
-        DirectorRuntimeParameter nextUnconsumed = null;
-        for (DirectorRuntimeParameter parameter : node.getParameters()) {
-            DirectorParameterDescriptor descriptor = parameter.getDescriptor();
-            if (!consumed.contains(parameter) && !descriptor.isContextual() && descriptor.isRequired()) {
-                nextUnconsumed = parameter;
-                break;
-            }
-        }
-
-        if (nextUnconsumed != null) {
-            for (String value : parameterValueSuggestions(nextUnconsumed, last)) {
-                suggestions.add(value);
-            }
-        }
-
         return suggestions.stream().sorted(String::compareToIgnoreCase).toList();
+    }
+
+    private boolean isHiddenContext(DirectorParameterDescriptor descriptor) {
+        return descriptor.isContextual() && !descriptor.isContextualOverride();
     }
 
     private void addMatchingSuggestion(Set<String> suggestions, String suggestion, String input) {

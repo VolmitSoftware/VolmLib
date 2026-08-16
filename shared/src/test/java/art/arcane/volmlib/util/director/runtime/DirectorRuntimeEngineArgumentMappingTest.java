@@ -113,18 +113,54 @@ public class DirectorRuntimeEngineArgumentMappingTest {
 
         assertTrue(sender.messages.stream().anyMatch(message -> message.contains("flat")));
         assertTrue(sender.messages.stream().anyMatch(message -> message.toLowerCase().contains("usage")));
+        assertTrue(sender.messages.stream().anyMatch(message -> message.contains("<name=...>")));
     }
 
     @Test
-    public void tabCompleteUsesPositionalRequiredValuesAndCompleteOptionalValues() {
-        List<String> suggestions = engine.tabComplete(new DirectorInvocation(sender, "test", List.of("create", "MyWorld", "")));
+    public void tabCompleteKeysRequiredAndOptionalValues() {
+        List<String> suggestions = engine.tabComplete(new DirectorInvocation(sender, "test", List.of("create", "")));
 
         assertFalse(suggestions.contains("true"));
         assertFalse(suggestions.contains("false"));
         assertFalse(suggestions.contains("main="));
+        assertTrue(suggestions.contains("name="));
         assertTrue(suggestions.contains("main=false"));
         assertTrue(suggestions.contains("main=true"));
         assertTrue(suggestions.contains("seed="));
+        assertTrue(suggestions.contains("type="));
+    }
+
+    @Test
+    public void tabCompleteKeepsArbitraryTypedValuesIntact() {
+        List<String> radius = engine.tabComplete(
+                new DirectorInvocation(sender, "test", List.of("pregen", "radius=4000")));
+        List<String> name = engine.tabComplete(
+                new DirectorInvocation(sender, "test", List.of("create", "name=MyWorld")));
+
+        assertEquals(List.of("radius=4000"), radius);
+        assertEquals(List.of("name=MyWorld"), name);
+    }
+
+    @Test
+    public void tabCompleteUsesCanonicalKeyForAliasesAndDoesNotRepeatConsumedValues() {
+        List<String> alias = engine.tabComplete(
+                new DirectorInvocation(sender, "test", List.of("create", "world-name=MyWorld")));
+        List<String> remaining = engine.tabComplete(
+                new DirectorInvocation(sender, "test", List.of("create", "name=MyWorld", "")));
+
+        assertEquals(List.of("name=MyWorld"), alias);
+        assertFalse(remaining.contains("name="));
+    }
+
+    @Test
+    public void tabCompleteExposesOnlyConfigurableContextualOverrides() {
+        List<String> configurable = engine.tabComplete(
+                new DirectorInvocation(sender, "test", List.of("contextual", "")));
+        List<String> injected = engine.tabComplete(
+                new DirectorInvocation(sender, "test", List.of("injected", "")));
+
+        assertEquals(List.of("world="), configurable);
+        assertEquals(List.of(), injected);
     }
 
     @Test
@@ -216,6 +252,21 @@ public class DirectorRuntimeEngineArgumentMappingTest {
         @Director
         public void echo(@Param(name = "text") String text) {
             this.text = text;
+        }
+
+        @Director
+        public void pregen(@Param(name = "radius") int radius) {
+        }
+
+        @Director
+        public void contextual(
+                @Param(name = "world", contextual = true, contextualOverride = true)
+                String world
+        ) {
+        }
+
+        @Director
+        public void injected(@Param(name = "sender", contextual = true) String sender) {
         }
 
         @Director

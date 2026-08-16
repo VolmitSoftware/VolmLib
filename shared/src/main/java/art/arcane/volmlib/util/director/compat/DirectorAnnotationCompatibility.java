@@ -60,6 +60,7 @@ public final class DirectorAnnotationCompatibility {
                     parameter.getType(),
                     defaultValue.isEmpty(),
                     param.contextual(),
+                    param.contextualOverride(),
                     defaultValue,
                     readAliases(param.aliases())
             ));

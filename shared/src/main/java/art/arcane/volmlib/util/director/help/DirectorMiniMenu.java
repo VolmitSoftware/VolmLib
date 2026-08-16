@@ -319,8 +319,12 @@ public final class DirectorMiniMenu {
     }
 
     private static String renderConsoleParameter(DirectorParameterDescriptor parameter) {
+        if (parameter.isContextual()) {
+            return "[" + parameter.getName() + "=...]";
+        }
+
         if (parameter.isRequired()) {
-            return "<" + parameter.getName() + ">";
+            return "<" + parameter.getName() + "=...>";
         }
 
         if (parameter.getDefaultValue() != null && !parameter.getDefaultValue().isBlank()) {
@@ -448,9 +452,10 @@ public final class DirectorMiniMenu {
     }
 
     private static String renderParameterChip(DirectorParameterDescriptor parameter, Theme theme, DirectorTextResolver resolver) {
-        String bracketColor = parameter.isRequired() ? theme.required() : theme.muted();
-        String open = parameter.isRequired() ? "[" : "⊰";
-        String close = parameter.isRequired() ? "]" : "⊱";
+        boolean required = parameter.isRequired() && !parameter.isContextual();
+        String bracketColor = required ? theme.required() : theme.muted();
+        String open = required ? "[" : "⊰";
+        String close = required ? "]" : "⊱";
 
         return "<hover:show_text:'" + renderParameterHover(parameter, theme, resolver) + "'>"
                 + "<" + bracketColor + ">" + open + "</" + bracketColor + ">"
@@ -478,7 +483,7 @@ public final class DirectorMiniMenu {
         hover.append(renderDescriptionLine(parameter.getDescription(), parameter.getDescriptionKey(), theme, resolver));
 
         hover.append(nl);
-        if (parameter.isRequired()) {
+        if (parameter.isRequired() && !parameter.isContextual()) {
             hover.append("<").append(theme.required()).append(">⚠ <font:minecraft:uniform>")
                     .append(escapeText(resolve(resolver, DirectorHelpMessages.REQUIRED)))
                     .append("</font></").append(theme.required()).append(">");
@@ -503,7 +508,7 @@ public final class DirectorMiniMenu {
     private static List<DirectorParameterDescriptor> visibleParameters(DirectorRuntimeNode node) {
         List<DirectorParameterDescriptor> visible = new ArrayList<>();
         for (DirectorParameterDescriptor parameter : node.getDescriptor().getParameters()) {
-            if (!parameter.isContextual()) {
+            if (!parameter.isContextual() || parameter.isContextualOverride()) {
                 visible.add(parameter);
             }
         }

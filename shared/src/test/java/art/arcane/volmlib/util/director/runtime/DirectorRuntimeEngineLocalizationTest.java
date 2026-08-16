@@ -95,10 +95,10 @@ public class DirectorRuntimeEngineLocalizationTest {
                 )
         );
         assertEquals(
-                "Usage: test create <name>",
+                "Usage: test create <name=...>",
                 DirectorTextResolver.ENGLISH.resolve(
                         DirectorRuntimeMessages.USAGE,
-                        MessageArgument.untrusted("usage", "test create <name>")
+                        MessageArgument.untrusted("usage", "test create <name=...>")
                 )
         );
     }

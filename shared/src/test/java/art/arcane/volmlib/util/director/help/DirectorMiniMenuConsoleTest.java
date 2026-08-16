@@ -98,7 +98,7 @@ public class DirectorMiniMenuConsoleTest {
         assertEquals(
                 List.of(
                         "--- /test pregen ---",
-                        "start <radius> [pattern=spiral] - Start a pregeneration task",
+                        "start <radius=...> [world=...] [pattern=spiral] - Start a pregeneration task",
                         "stop - Stop the running pregeneration"
                 ),
                 lines
@@ -232,6 +232,8 @@ public class DirectorMiniMenuConsoleTest {
         public void start(
                 @Param(name = "radius", description = "Radius in blocks")
                 int radius,
+                @Param(name = "world", contextual = true, contextualOverride = true)
+                String world,
                 @Param(name = "pattern", description = "Traversal pattern", defaultValue = "spiral")
                 String pattern
         ) {

@@ -25,5 +25,7 @@ public @interface Param {
 
     boolean contextual() default false;
 
+    boolean contextualOverride() default false;
+
     Class<? extends DirectorParameterHandlerType> customHandler() default NoParameterHandler.class;
 }
