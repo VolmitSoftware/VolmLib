@@ -52,7 +52,7 @@ public class MantleTargetedSaveTest {
             long requested = Mantle.key(0, 0);
             long untouched = Mantle.key(1, 0);
 
-            runtime.mantle.saveTectonicPlates(List.of(requested));
+            assertEquals(Set.of(), runtime.mantle.saveIdleTectonicPlates(List.of(requested)));
 
             assertEquals(Set.of(requested), runtime.regionIo.successfulWrites);
             assertEquals(1, runtime.regionIo.attempts(requested));
@@ -74,7 +74,7 @@ public class MantleTargetedSaveTest {
             runtime.regionIo.failWritesFor(requested);
 
             assertThrows(IllegalStateException.class,
-                    () -> runtime.mantle.saveTectonicPlates(List.of(requested)));
+                    () -> runtime.mantle.saveIdleTectonicPlates(List.of(requested)));
 
             assertEquals(1, runtime.regionIo.attempts(requested));
             assertFalse(runtime.regionIo.successfulWrites.contains(requested));
@@ -86,7 +86,7 @@ public class MantleTargetedSaveTest {
             chunk.release();
 
             runtime.regionIo.allowWrites();
-            runtime.mantle.saveTectonicPlates(List.of(requested));
+            assertEquals(Set.of(), runtime.mantle.saveIdleTectonicPlates(List.of(requested)));
             assertEquals(2, runtime.regionIo.attempts(requested));
             assertFalse(runtime.mantle.isChunkLoaded(0, 0));
         } finally {
@@ -103,7 +103,7 @@ public class MantleTargetedSaveTest {
             long requested = Mantle.key(0, 0);
             runtime.regionIo.blockWritesFor(requested);
             Future<?> saving = executor.submit(
-                    () -> runtime.mantle.saveTectonicPlates(List.of(requested)));
+                    () -> runtime.mantle.saveIdleTectonicPlates(List.of(requested)));
             assertTrue(runtime.regionIo.writeEntered.await(1L, TimeUnit.SECONDS));
 
             Future<?> acquiring = executor.submit(
@@ -123,32 +123,75 @@ public class MantleTargetedSaveTest {
     }
 
     @Test(timeout = 2_000L)
-    public void busyRegionUsesTheBoundedWaitAndRemainsLoadedForRetry() throws Exception {
-        TestRuntime runtime = new TestRuntime(temporaryFolder.newFolder("targeted-busy"));
+    public void idleSaveDefersBusyRegionsWithoutBlockingOtherRegions() throws Exception {
+        TestRuntime runtime = new TestRuntime(temporaryFolder.newFolder("targeted-idle-save"));
         try {
-            MantleChunk<TestSection> chunk = runtime.mantle.getChunk(0, 0).use();
-            long requested = Mantle.key(0, 0);
+            MantleChunk<TestSection> busyChunk = runtime.mantle.getChunk(0, 0).use();
+            runtime.mantle.getChunk(32, 0);
+            long busy = Mantle.key(0, 0);
+            long idle = Mantle.key(1, 0);
             try {
                 long started = System.nanoTime();
-                assertThrows(IllegalStateException.class,
-                        () -> runtime.mantle.saveTectonicPlates(
-                                List.of(requested), 20_000_000L));
+                Set<Long> deferred = runtime.mantle.saveIdleTectonicPlates(List.of(busy, idle));
                 long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
 
                 assertTrue(elapsedMillis < 500L);
-                assertEquals(0, runtime.regionIo.attempts(requested));
+                assertEquals(Set.of(busy), deferred);
+                assertEquals(0, runtime.regionIo.attempts(busy));
+                assertEquals(1, runtime.regionIo.attempts(idle));
                 assertTrue(runtime.mantle.isChunkLoaded(0, 0));
-                assertFalse(chunk.isClosed());
+                assertFalse(runtime.mantle.isChunkLoaded(32, 0));
+                assertFalse(busyChunk.isClosed());
             } finally {
-                chunk.release();
+                busyChunk.release();
             }
 
-            assertSame(chunk, chunk.use());
-            chunk.release();
-            runtime.mantle.saveTectonicPlates(List.of(requested), 20_000_000L);
-            assertEquals(1, runtime.regionIo.attempts(requested));
+            assertEquals(Set.of(), runtime.mantle.saveIdleTectonicPlates(List.of(busy)));
+            assertEquals(1, runtime.regionIo.attempts(busy));
             assertFalse(runtime.mantle.isChunkLoaded(0, 0));
         } finally {
+            runtime.close();
+        }
+    }
+
+    @Test(timeout = 2_000L)
+    public void idleSaveDefersLockedRegionWithoutWaitingForTheOwner() throws Exception {
+        TestRuntime runtime = new TestRuntime(temporaryFolder.newFolder("targeted-locked-save"));
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        CountDownLatch lockHeld = new CountDownLatch(1);
+        CountDownLatch releaseLock = new CountDownLatch(1);
+        long requested = Mantle.key(0, 0);
+        try {
+            runtime.mantle.getChunk(0, 0);
+            Future<Void> holder = executor.submit((Callable<Void>) () -> {
+                runtime.hyperLock.lock(0, 0);
+                try {
+                    lockHeld.countDown();
+                    assertTrue(releaseLock.await(1L, TimeUnit.SECONDS));
+                } finally {
+                    runtime.hyperLock.unlock(0, 0);
+                }
+                return null;
+            });
+            assertTrue(lockHeld.await(1L, TimeUnit.SECONDS));
+
+            long started = System.nanoTime();
+            Set<Long> deferred = runtime.mantle.saveIdleTectonicPlates(List.of(requested));
+            long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
+
+            assertTrue(elapsedMillis < 500L);
+            assertEquals(Set.of(requested), deferred);
+            assertEquals(0, runtime.regionIo.attempts(requested));
+            assertTrue(runtime.mantle.isChunkLoaded(0, 0));
+
+            releaseLock.countDown();
+            holder.get(1L, TimeUnit.SECONDS);
+            assertEquals(Set.of(), runtime.mantle.saveIdleTectonicPlates(List.of(requested)));
+            assertEquals(1, runtime.regionIo.attempts(requested));
+        } finally {
+            releaseLock.countDown();
+            executor.shutdownNow();
+            executor.awaitTermination(1L, TimeUnit.SECONDS);
             runtime.close();
         }
     }
@@ -165,7 +208,7 @@ public class MantleTargetedSaveTest {
             long regionKey = Mantle.key(0, 0);
             TectonicPlate<TestSection> original = runtime.mantle.getLoadedRegions().get(regionKey);
 
-            runtime.mantle.saveTectonicPlates(List.of(regionKey));
+            assertEquals(Set.of(), runtime.mantle.saveIdleTectonicPlates(List.of(regionKey)));
 
             assertTrue(original.isClosed());
             runtime.mantle.getChunks(0, 0, 0, 0, 2, (x, z, chunk) -> {
@@ -216,6 +259,7 @@ public class MantleTargetedSaveTest {
 
     private static final class TestRuntime implements AutoCloseable {
         private final MultiBurstSupport burst;
+        private final HyperLockSupport hyperLock;
         private final RecordingRegionIo regionIo;
         private final Mantle<TectonicPlate<TestSection>, MantleChunk<TestSection>> mantle;
 
@@ -239,9 +283,11 @@ public class MantleTargetedSaveTest {
 
         private TestRuntime(File dataFolder, MultiBurstSupport burst) {
             this.burst = burst;
+            this.hyperLock = new HyperLockSupport();
             this.regionIo = new RecordingRegionIo();
             this.mantle = new TestMantle(
                     dataFolder,
+                    hyperLock,
                     burst,
                     regionIo
             );
@@ -340,9 +386,10 @@ public class MantleTargetedSaveTest {
     private static final class TestMantle
             extends art.arcane.volmlib.util.mantle.runtime.Mantle<TestSection> {
         private TestMantle(File dataFolder,
+                           HyperLockSupport hyperLock,
                            MultiBurstSupport burst,
                            RecordingRegionIo regionIo) {
-            super(dataFolder, 16, 32, new HyperLockSupport(), burst,
+            super(dataFolder, 16, 32, hyperLock, burst,
                     regionIo, ADAPTER, MantleHooks.NONE);
         }
 

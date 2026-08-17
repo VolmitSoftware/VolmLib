@@ -1,13 +1,16 @@
 package art.arcane.volmlib.util.data;
 
+import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.block.data.BlockData;
 import org.junit.Test;
+import org.mockito.MockedStatic;
 
 import java.lang.reflect.Proxy;
 
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
+import static org.mockito.Mockito.mockStatic;
 
 public class BSupportTest {
     @Test
@@ -37,6 +40,32 @@ public class BSupportTest {
         assertFalse(BSupport.isPointedDripstoneTip(other));
         assertFalse(BSupport.isPointedDripstoneTip(pointedDripstone("TIP", true)));
         assertFalse(BSupport.isPointedDripstoneTip(null));
+    }
+
+    @Test
+    public void cactusPlacementAndDecorantClassificationMatchVanillaSupport() {
+        try (MockedStatic<Bukkit> bukkit = mockStatic(Bukkit.class)) {
+            bukkit.when(() -> Bukkit.createBlockData(Material.AIR)).thenReturn(blockData(Material.AIR));
+            BSupport<Object> support = new BSupport<Object>() {
+            };
+            BlockData cactus = blockData(Material.CACTUS);
+
+            assertTrue(support.canPlaceOnto(Material.CACTUS, Material.CACTUS));
+            assertTrue(support.canPlaceOnto(Material.CACTUS, Material.SAND));
+            assertTrue(support.canPlaceOnto(Material.CACTUS, Material.RED_SAND));
+            assertFalse(support.canPlaceOnto(Material.CACTUS, Material.STONE));
+            assertTrue(support.isDecorant(cactus));
+        }
+    }
+
+    private static BlockData blockData(Material material) {
+        return (BlockData) Proxy.newProxyInstance(
+                BlockData.class.getClassLoader(),
+                new Class<?>[]{BlockData.class},
+                (proxy, method, arguments) -> method.getName().equals("getMaterial")
+                        ? material
+                        : defaultValue(method.getReturnType())
+        );
     }
 
     private static BlockData pointedDripstone(String thicknessName, boolean fail) {

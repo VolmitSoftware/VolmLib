@@ -252,6 +252,7 @@ public abstract class BSupport<P> {
                 BROWN_MUSHROOM,
                 CRIMSON_ROOTS,
                 AZURE_BLUET,
+                CACTUS,
                 WEEPING_VINES,
                 WEEPING_VINES_PLANT,
                 WARPED_ROOTS,
@@ -391,6 +392,10 @@ public abstract class BSupport<P> {
     }
 
     public boolean canPlaceOnto(Material mat, Material onto) {
+        if (mat.equals(CACTUS)) {
+            return onto.equals(CACTUS) || onto.equals(SAND) || onto.equals(RED_SAND);
+        }
+
         if ((onto.equals(CRIMSON_NYLIUM) || onto.equals(WARPED_NYLIUM)) &&
                 (mat.equals(CRIMSON_FUNGUS) || mat.equals(CRIMSON_ROOTS) || mat.equals(WARPED_FUNGUS) || mat.equals(WARPED_ROOTS))) {
             return true;

@@ -14,6 +14,8 @@ import art.arcane.volmlib.util.parallel.MultiBurstSupport;
 import org.bukkit.Chunk;
 
 import java.io.File;
+import java.util.LinkedHashSet;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -30,7 +32,6 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?>> extends MantleAccessSupport<P> {
     public static final int DEFAULT_LOCK_SIZE = Short.MAX_VALUE;
-    private static final long TARGETED_SAVE_WAIT_NANOS = TimeUnit.SECONDS.toNanos(5L);
 
     private final File dataFolder;
     private final int lockSize;
@@ -519,30 +520,21 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
         }
     }
 
-    public synchronized void saveTectonicPlates(Iterable<Long> regionIds) {
-        saveTectonicPlates(regionIds, TARGETED_SAVE_WAIT_NANOS);
-    }
-
-    synchronized void saveTectonicPlates(Iterable<Long> regionIds,
-                                          long waitNanos) {
+    public synchronized Set<Long> saveIdleTectonicPlates(Iterable<Long> regionIds) {
         ensureOpen();
         if (regionIds == null) {
             throw new IllegalArgumentException("Tectonic plate region ids must not be null");
         }
-        if (waitNanos < 0L) {
-            throw new IllegalArgumentException("Tectonic plate save wait must not be negative");
-        }
-        unloadSemaphore().acquireUninterruptibly(lockSize);
-        try {
-            for (Long regionId : regionIds) {
-                if (regionId == null) {
-                    throw new IllegalArgumentException("Tectonic plate region id must not be null");
-                }
-                saveTectonicPlate(regionId, waitNanos);
+        Set<Long> deferred = new LinkedHashSet<>();
+        for (Long regionId : regionIds) {
+            if (regionId == null) {
+                throw new IllegalArgumentException("Tectonic plate region id must not be null");
             }
-        } finally {
-            unloadSemaphore().release(lockSize);
+            if (!trySaveIdleTectonicPlate(regionId)) {
+                deferred.add(regionId);
+            }
         }
+        return Set.copyOf(deferred);
     }
 
     public void deleteChunkSlice(int x, int z, Class<?> type) {
@@ -808,41 +800,44 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
         }
     }
 
-    private void saveTectonicPlate(long id, long waitNanos) {
-        long deadline = System.nanoTime() + waitNanos;
-        if (!trySaveTectonicPlate(id, deadline)) {
-            throw new IllegalStateException("Cannot save Tectonic Plate "
-                    + CacheKey.keyX(id) + " " + CacheKey.keyZ(id) + " while it is in use");
+    private boolean trySaveIdleTectonicPlate(long id) {
+        int regionX = CacheKey.keyX(id);
+        int regionZ = CacheKey.keyZ(id);
+        if (!hyperLock.tryLock(regionX, regionZ)) {
+            return false;
+        }
+        try {
+            return saveTectonicPlateLocked(id, System.nanoTime());
+        } finally {
+            hyperLock.unlock(regionX, regionZ);
         }
     }
 
-    private boolean trySaveTectonicPlate(long id, long deadlineNanos) {
-        return hyperLock.withResult(CacheKey.keyX(id), CacheKey.keyZ(id), () -> {
-            P plate = loadedRegions.get(id);
-            if (plate == null) {
-                return true;
-            }
-
-            try {
-                if (!plate.sealUntil(deadlineNanos)) {
-                    return false;
-                }
-                persistTargetedRegion(id, plate);
-            } catch (InterruptedException error) {
-                Thread.currentThread().interrupt();
-                throw new IllegalStateException("Interrupted while saving Tectonic Plate "
-                        + CacheKey.keyX(id) + " " + CacheKey.keyZ(id), error);
-            } catch (Exception error) {
-                throw new IllegalStateException("Failed to save Tectonic Plate "
-                        + CacheKey.keyX(id) + " " + CacheKey.keyZ(id), error);
-            }
-
-            if (loadedRegions.remove(id, plate)) {
-                lastUse.remove(id);
-                toUnload.remove(id);
-            }
+    private boolean saveTectonicPlateLocked(long id, long deadlineNanos) {
+        P plate = loadedRegions.get(id);
+        if (plate == null) {
             return true;
-        });
+        }
+
+        try {
+            if (!plate.sealUntil(deadlineNanos)) {
+                return false;
+            }
+            persistTargetedRegion(id, plate);
+        } catch (InterruptedException error) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Interrupted while saving Tectonic Plate "
+                    + CacheKey.keyX(id) + " " + CacheKey.keyZ(id), error);
+        } catch (Exception error) {
+            throw new IllegalStateException("Failed to save Tectonic Plate "
+                    + CacheKey.keyX(id) + " " + CacheKey.keyZ(id), error);
+        }
+
+        if (loadedRegions.remove(id, plate)) {
+            lastUse.remove(id);
+            toUnload.remove(id);
+        }
+        return true;
     }
 
     private void persistTargetedRegion(long id, P plate) throws Exception {
