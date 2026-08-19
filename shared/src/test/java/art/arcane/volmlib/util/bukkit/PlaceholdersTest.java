@@ -10,7 +10,7 @@ import static org.junit.Assert.assertTrue;
 
 public class PlaceholdersTest {
     @Test
-    public void containsPlaceholder_isTheCheapGuardHoloUiCallsPerLine() {
+    public void containsPlaceholder_isTheCheapGuardGlossCallsPerLine() {
         assertFalse(Placeholders.containsPlaceholder(null));
         assertFalse(Placeholders.containsPlaceholder(""));
         assertFalse(Placeholders.containsPlaceholder("Balance"));

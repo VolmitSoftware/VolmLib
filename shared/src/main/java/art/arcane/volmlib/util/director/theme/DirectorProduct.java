@@ -6,6 +6,6 @@ public enum DirectorProduct {
     ADAPT,
     BILE,
     HIDDENORE,
-    HOLOUI,
-    WORMHOLES
+    WORMHOLES,
+    GLOSS
 }

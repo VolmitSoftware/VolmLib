@@ -63,6 +63,39 @@ public class IntegrationMetricSchemaTest {
     }
 
     @Test
+    public void exposesGlossSchema() {
+        Set<String> glossKeys = IntegrationMetricSchema.glossKeys();
+        Set<String> allKeys = IntegrationMetricSchema.allKeys();
+
+        assertEquals(19, glossKeys.size());
+        for (String key : glossKeys) {
+            assertTrue(key.startsWith("gloss."));
+            assertTrue(allKeys.contains(key));
+            assertEquals("gloss", IntegrationMetricSchema.descriptor(key).tags().get("plugin"));
+        }
+        for (String key : allKeys) {
+            assertFalse(key.startsWith("holoui."));
+        }
+
+        IntegrationMetricDescriptor sessionHolders = IntegrationMetricSchema.descriptor(IntegrationMetricSchema.GLOSS_SESSION_HOLDERS);
+        assertEquals(IntegrationMetricType.INTEGER, sessionHolders.type());
+        assertEquals("players", sessionHolders.unit());
+        assertEquals("sessions", sessionHolders.tags().get("domain"));
+
+        IntegrationMetricDescriptor tickMs = IntegrationMetricSchema.descriptor(IntegrationMetricSchema.GLOSS_TICK_MS);
+        assertEquals(IntegrationMetricType.DOUBLE, tickMs.type());
+        assertEquals("ms-per-second", tickMs.unit());
+
+        IntegrationMetricDescriptor bubbles = IntegrationMetricSchema.descriptor(IntegrationMetricSchema.GLOSS_BUBBLES_PER_SECOND);
+        assertEquals(IntegrationMetricType.DOUBLE, bubbles.type());
+        assertEquals("bubbles-per-second", bubbles.unit());
+
+        IntegrationMetricDescriptor holograms = IntegrationMetricSchema.descriptor(IntegrationMetricSchema.GLOSS_HOLOGRAMS_ACTIVE);
+        assertEquals(IntegrationMetricType.INTEGER, holograms.type());
+        assertEquals("holograms", holograms.unit());
+    }
+
+    @Test
     public void metricGroupsAreImmutableAndRejectDescriptorMismatches() {
         long now = System.currentTimeMillis();
         String key = IntegrationMetricSchema.IRIS_LOADED_CHUNKS;

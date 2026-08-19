@@ -199,7 +199,7 @@ public class Form {
                     continue;
                 }
 
-                arg8 = arg9.start();
+                arg8 = arg9.start() + arg6;
             }
 
             if (arg5 - arg6 <= len) {
@@ -322,7 +322,7 @@ public class Form {
                         continue;
                     }
 
-                    arg8 = arg9.start();
+                    arg8 = arg9.start() + arg6;
                 }
 
                 if (arg5 - arg6 <= len) {
@@ -983,6 +983,16 @@ public class Form {
      */
     public static String f(int i) {
         return NF.get().format(i);
+    }
+
+    /**
+     * Converts an enum-style constant name to lowercase words
+     *
+     * @param name the constant name, e.g. DIAMOND_SWORD
+     * @return the pretty name, e.g. "diamond sword"
+     */
+    public static String prettyEnumName(String name) {
+        return name.toLowerCase(java.util.Locale.ROOT).replace('_', ' ');
     }
 
     /**

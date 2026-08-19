@@ -54,10 +54,10 @@ public class HudComposerTest {
   public void test_compose_contestedSlot_stacksInDeterministicOrder() {
     String line = HudComposer.compose(List.of(
       source("Wormholes", "wormholes:notice", HudPriority.NOTICE, 5L, List.of(HudSlot.CENTER, HudSlot.RIGHT), "wormholes"),
-      source("HoloUi", "holoui:reload", HudPriority.NOTICE, 5L, List.of(HudSlot.CENTER, HudSlot.RIGHT), "holoui"),
+      source("Gloss", "gloss:reload", HudPriority.NOTICE, 5L, List.of(HudSlot.CENTER, HudSlot.RIGHT), "gloss"),
       source("React", "react:monitor", HudPriority.PINNED, 9L, List.of(HudSlot.CENTER), "monitor")
     ), 1000L);
-    assertEquals("monitor" + SEP + "holoui" + SEP + "wormholes", line);
+    assertEquals("monitor" + SEP + "gloss" + SEP + "wormholes", line);
   }
 
   @Test

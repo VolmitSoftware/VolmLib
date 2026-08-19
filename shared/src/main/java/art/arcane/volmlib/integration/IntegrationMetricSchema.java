@@ -125,17 +125,25 @@ public final class IntegrationMetricSchema {
     public static final String WORMHOLES_TRANSFERS_IN_FLIGHT = "wormholes.transfers-in-flight";
     public static final String WORMHOLES_TRANSFERS_FAILED_TOTAL = "wormholes.transfers-failed-total";
 
-    public static final String HOLOUI_SESSION_HOLDERS = "holoui.session-holders";
-    public static final String HOLOUI_MENUS_OPEN = "holoui.menus-open";
-    public static final String HOLOUI_PREVIEWS_OPEN = "holoui.previews-open";
-    public static final String HOLOUI_DISPLAY_ENTITIES = "holoui.display-entities";
-    public static final String HOLOUI_DISPLAY_ENTITIES_VISIBLE = "holoui.display-entities-visible";
-    public static final String HOLOUI_MENU_DEFINITIONS = "holoui.menu-definitions";
-    public static final String HOLOUI_PACKETS_PER_SECOND = "holoui.packets-per-second";
-    public static final String HOLOUI_SPAWNS_PER_SECOND = "holoui.spawns-per-second";
-    public static final String HOLOUI_TICK_MS = "holoui.tick-ms";
-    public static final String HOLOUI_PREVIEW_REFRESH_PER_SECOND = "holoui.preview-refresh-per-second";
-    public static final String HOLOUI_BUILDER_SERVER_RUNNING = "holoui.builder-server-running";
+    public static final String GLOSS_SESSION_HOLDERS = "gloss.session-holders";
+    public static final String GLOSS_MENUS_OPEN = "gloss.menus-open";
+    public static final String GLOSS_PREVIEWS_OPEN = "gloss.previews-open";
+    public static final String GLOSS_DISPLAY_ENTITIES = "gloss.display-entities";
+    public static final String GLOSS_DISPLAY_ENTITIES_VISIBLE = "gloss.display-entities-visible";
+    public static final String GLOSS_MENU_DEFINITIONS = "gloss.menu-definitions";
+    public static final String GLOSS_PACKETS_PER_SECOND = "gloss.packets-per-second";
+    public static final String GLOSS_SPAWNS_PER_SECOND = "gloss.spawns-per-second";
+    public static final String GLOSS_TICK_MS = "gloss.tick-ms";
+    public static final String GLOSS_PREVIEW_REFRESH_PER_SECOND = "gloss.preview-refresh-per-second";
+    public static final String GLOSS_BUILDER_SERVER_RUNNING = "gloss.builder-server-running";
+    public static final String GLOSS_HOLOGRAMS_ACTIVE = "gloss.holograms-active";
+    public static final String GLOSS_PANELS_ACTIVE = "gloss.panels-active";
+    public static final String GLOSS_BOARDS_ACTIVE = "gloss.boards-active";
+    public static final String GLOSS_TABLIST_PLAYERS = "gloss.tablist-players";
+    public static final String GLOSS_BUBBLES_PER_SECOND = "gloss.bubbles-per-second";
+    public static final String GLOSS_INDICATORS_PER_SECOND = "gloss.indicators-per-second";
+    public static final String GLOSS_ANIMATIONS_ACTIVE = "gloss.animations-active";
+    public static final String GLOSS_EMOJI_REPLACEMENTS_PER_SECOND = "gloss.emoji-replacements-per-second";
 
     public static final String HIDDENORE_BLOCKS_BROKEN_PER_SECOND = "hiddenore.blocks-broken-per-second";
     public static final String HIDDENORE_DROPS_INJECTED_PER_SECOND = "hiddenore.drops-injected-per-second";
@@ -278,19 +286,27 @@ public final class IntegrationMetricSchema {
         );
     }
 
-    public static Set<String> holouiKeys() {
+    public static Set<String> glossKeys() {
         return Set.of(
-                HOLOUI_SESSION_HOLDERS,
-                HOLOUI_MENUS_OPEN,
-                HOLOUI_PREVIEWS_OPEN,
-                HOLOUI_DISPLAY_ENTITIES,
-                HOLOUI_DISPLAY_ENTITIES_VISIBLE,
-                HOLOUI_MENU_DEFINITIONS,
-                HOLOUI_PACKETS_PER_SECOND,
-                HOLOUI_SPAWNS_PER_SECOND,
-                HOLOUI_TICK_MS,
-                HOLOUI_PREVIEW_REFRESH_PER_SECOND,
-                HOLOUI_BUILDER_SERVER_RUNNING
+                GLOSS_SESSION_HOLDERS,
+                GLOSS_MENUS_OPEN,
+                GLOSS_PREVIEWS_OPEN,
+                GLOSS_DISPLAY_ENTITIES,
+                GLOSS_DISPLAY_ENTITIES_VISIBLE,
+                GLOSS_MENU_DEFINITIONS,
+                GLOSS_PACKETS_PER_SECOND,
+                GLOSS_SPAWNS_PER_SECOND,
+                GLOSS_TICK_MS,
+                GLOSS_PREVIEW_REFRESH_PER_SECOND,
+                GLOSS_BUILDER_SERVER_RUNNING,
+                GLOSS_HOLOGRAMS_ACTIVE,
+                GLOSS_PANELS_ACTIVE,
+                GLOSS_BOARDS_ACTIVE,
+                GLOSS_TABLIST_PLAYERS,
+                GLOSS_BUBBLES_PER_SECOND,
+                GLOSS_INDICATORS_PER_SECOND,
+                GLOSS_ANIMATIONS_ACTIVE,
+                GLOSS_EMOJI_REPLACEMENTS_PER_SECOND
         );
     }
 
@@ -437,17 +453,25 @@ public final class IntegrationMetricSchema {
         putMetric(descriptors, WORMHOLES_TRANSFERS_IN_FLIGHT, IntegrationMetricType.INTEGER, "transfers", "wormholes", "travel");
         putMetric(descriptors, WORMHOLES_TRANSFERS_FAILED_TOTAL, IntegrationMetricType.LONG, "transfers", "wormholes", "travel");
 
-        putMetric(descriptors, HOLOUI_SESSION_HOLDERS, IntegrationMetricType.INTEGER, "players", "holoui", "sessions");
-        putMetric(descriptors, HOLOUI_MENUS_OPEN, IntegrationMetricType.INTEGER, "menus", "holoui", "sessions");
-        putMetric(descriptors, HOLOUI_PREVIEWS_OPEN, IntegrationMetricType.INTEGER, "previews", "holoui", "sessions");
-        putMetric(descriptors, HOLOUI_DISPLAY_ENTITIES, IntegrationMetricType.INTEGER, "entities", "holoui", "rendering");
-        putMetric(descriptors, HOLOUI_DISPLAY_ENTITIES_VISIBLE, IntegrationMetricType.INTEGER, "entities", "holoui", "rendering");
-        putMetric(descriptors, HOLOUI_MENU_DEFINITIONS, IntegrationMetricType.INTEGER, "menus", "holoui", "config");
-        putMetric(descriptors, HOLOUI_PACKETS_PER_SECOND, IntegrationMetricType.DOUBLE, "packets-per-second", "holoui", "rendering");
-        putMetric(descriptors, HOLOUI_SPAWNS_PER_SECOND, IntegrationMetricType.DOUBLE, "entities-per-second", "holoui", "rendering");
-        putMetric(descriptors, HOLOUI_TICK_MS, IntegrationMetricType.DOUBLE, "ms-per-second", "holoui", "sessions");
-        putMetric(descriptors, HOLOUI_PREVIEW_REFRESH_PER_SECOND, IntegrationMetricType.DOUBLE, "ops-per-second", "holoui", "sessions");
-        putMetric(descriptors, HOLOUI_BUILDER_SERVER_RUNNING, IntegrationMetricType.INTEGER, "boolean", "holoui", "config");
+        putMetric(descriptors, GLOSS_SESSION_HOLDERS, IntegrationMetricType.INTEGER, "players", "gloss", "sessions");
+        putMetric(descriptors, GLOSS_MENUS_OPEN, IntegrationMetricType.INTEGER, "menus", "gloss", "sessions");
+        putMetric(descriptors, GLOSS_PREVIEWS_OPEN, IntegrationMetricType.INTEGER, "previews", "gloss", "sessions");
+        putMetric(descriptors, GLOSS_DISPLAY_ENTITIES, IntegrationMetricType.INTEGER, "entities", "gloss", "rendering");
+        putMetric(descriptors, GLOSS_DISPLAY_ENTITIES_VISIBLE, IntegrationMetricType.INTEGER, "entities", "gloss", "rendering");
+        putMetric(descriptors, GLOSS_MENU_DEFINITIONS, IntegrationMetricType.INTEGER, "menus", "gloss", "config");
+        putMetric(descriptors, GLOSS_PACKETS_PER_SECOND, IntegrationMetricType.DOUBLE, "packets-per-second", "gloss", "rendering");
+        putMetric(descriptors, GLOSS_SPAWNS_PER_SECOND, IntegrationMetricType.DOUBLE, "entities-per-second", "gloss", "rendering");
+        putMetric(descriptors, GLOSS_TICK_MS, IntegrationMetricType.DOUBLE, "ms-per-second", "gloss", "sessions");
+        putMetric(descriptors, GLOSS_PREVIEW_REFRESH_PER_SECOND, IntegrationMetricType.DOUBLE, "ops-per-second", "gloss", "sessions");
+        putMetric(descriptors, GLOSS_BUILDER_SERVER_RUNNING, IntegrationMetricType.INTEGER, "boolean", "gloss", "config");
+        putMetric(descriptors, GLOSS_HOLOGRAMS_ACTIVE, IntegrationMetricType.INTEGER, "holograms", "gloss", "rendering");
+        putMetric(descriptors, GLOSS_PANELS_ACTIVE, IntegrationMetricType.INTEGER, "panels", "gloss", "rendering");
+        putMetric(descriptors, GLOSS_BOARDS_ACTIVE, IntegrationMetricType.INTEGER, "boards", "gloss", "boards");
+        putMetric(descriptors, GLOSS_TABLIST_PLAYERS, IntegrationMetricType.INTEGER, "players", "gloss", "tablist");
+        putMetric(descriptors, GLOSS_BUBBLES_PER_SECOND, IntegrationMetricType.DOUBLE, "bubbles-per-second", "gloss", "chat");
+        putMetric(descriptors, GLOSS_INDICATORS_PER_SECOND, IntegrationMetricType.DOUBLE, "indicators-per-second", "gloss", "combat");
+        putMetric(descriptors, GLOSS_ANIMATIONS_ACTIVE, IntegrationMetricType.INTEGER, "animations", "gloss", "rendering");
+        putMetric(descriptors, GLOSS_EMOJI_REPLACEMENTS_PER_SECOND, IntegrationMetricType.DOUBLE, "ops-per-second", "gloss", "chat");
 
         putMetric(descriptors, HIDDENORE_BLOCKS_BROKEN_PER_SECOND, IntegrationMetricType.DOUBLE, "blocks-per-second", "hiddenore", "mining");
         putMetric(descriptors, HIDDENORE_DROPS_INJECTED_PER_SECOND, IntegrationMetricType.DOUBLE, "drops-per-second", "hiddenore", "mining");

@@ -46,15 +46,6 @@ public final class DirectorThemes {
             "minecraft:block.respawn_anchor.deplete"
     );
 
-    public static final DirectorTheme HOLOUI = new DirectorTheme(
-            DirectorProduct.HOLOUI,
-            "#ffadad",
-            "#a0c4ff",
-            "#ffd6a5",
-            "minecraft:block.amethyst_cluster.break",
-            "minecraft:block.respawn_anchor.deplete"
-    );
-
     public static final DirectorTheme WORMHOLES = new DirectorTheme(
             DirectorProduct.WORMHOLES,
             "#d4af37",
@@ -62,6 +53,15 @@ public final class DirectorThemes {
             "#f4d35e",
             "minecraft:block.amethyst_cluster.break",
             "minecraft:block.note_block.bass"
+    );
+
+    public static final DirectorTheme GLOSS = new DirectorTheme(
+            DirectorProduct.GLOSS,
+            "#8a2be2",
+            "#5c19c4",
+            "#b47aff",
+            "minecraft:block.amethyst_cluster.break",
+            "minecraft:block.respawn_anchor.deplete"
     );
 
     private DirectorThemes() {
@@ -78,8 +78,8 @@ public final class DirectorThemes {
             case ADAPT -> ADAPT;
             case BILE -> BILE;
             case HIDDENORE -> HIDDENORE;
-            case HOLOUI -> HOLOUI;
             case WORMHOLES -> WORMHOLES;
+            case GLOSS -> GLOSS;
         };
     }
 }

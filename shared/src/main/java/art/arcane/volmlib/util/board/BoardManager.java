@@ -1,5 +1,6 @@
 package art.arcane.volmlib.util.board;
 
+import art.arcane.volmlib.util.scheduling.FoliaScheduler;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -16,7 +17,9 @@ public class BoardManager<B extends Board> {
     private final JavaPlugin plugin;
     private final BiFunction<Player, BoardSettings, B> boardFactory;
     private final Map<UUID, B> scoreboards;
-    private final BukkitTask updateTask;
+    private final boolean foliaRuntime;
+    private volatile boolean stopped;
+    private BukkitTask updateTask;
     private BoardSettings boardSettings;
 
     public BoardManager(JavaPlugin plugin, BoardSettings boardSettings, BiFunction<Player, BoardSettings, B> boardFactory) {
@@ -24,7 +27,8 @@ public class BoardManager<B extends Board> {
         this.boardSettings = boardSettings;
         this.boardFactory = boardFactory;
         this.scoreboards = new ConcurrentHashMap<>();
-        this.updateTask = new BoardUpdateTask<>(this).runTaskTimer(plugin, 2L, 20L);
+        this.foliaRuntime = FoliaScheduler.isFolia(plugin.getServer());
+        startDriver();
         plugin.getServer().getOnlinePlayers().forEach(this::setup);
     }
 
@@ -47,7 +51,7 @@ public class BoardManager<B extends Board> {
 
     public void setup(Player player) {
         Optional.ofNullable(scoreboards.remove(player.getUniqueId())).ifPresent(Board::resetScoreboard);
-        if (player.getScoreboard().equals(Bukkit.getScoreboardManager().getMainScoreboard())) {
+        if (!foliaRuntime && player.getScoreboard().equals(Bukkit.getScoreboardManager().getMainScoreboard())) {
             player.setScoreboard(Bukkit.getScoreboardManager().getNewScoreboard());
         }
 
@@ -63,8 +67,42 @@ public class BoardManager<B extends Board> {
     }
 
     public void onDisable() {
-        updateTask.cancel();
+        stopped = true;
+        if (updateTask != null) {
+            updateTask.cancel();
+        }
         plugin.getServer().getOnlinePlayers().forEach(this::remove);
         scoreboards.clear();
+    }
+
+    private void startDriver() {
+        long intervalTicks = boardSettings != null ? boardSettings.getUpdateIntervalTicks() : 20L;
+        if (foliaRuntime) {
+            scheduleFoliaTick(intervalTicks);
+            return;
+        }
+        updateTask = new BoardUpdateTask<>(this).runTaskTimer(plugin, 2L, intervalTicks);
+    }
+
+    private void scheduleFoliaTick(long intervalTicks) {
+        boolean scheduled = FoliaScheduler.runAsync(plugin, () -> {
+            if (stopped || !plugin.isEnabled()) {
+                return;
+            }
+            updateAll();
+            scheduleFoliaTick(boardSettings != null ? boardSettings.getUpdateIntervalTicks() : intervalTicks);
+        }, intervalTicks);
+        if (!scheduled) {
+            stopped = true;
+        }
+    }
+
+    private void updateAll() {
+        for (Map.Entry<UUID, B> entry : scoreboards.entrySet()) {
+            if (Bukkit.getPlayer(entry.getKey()) == null) {
+                continue;
+            }
+            entry.getValue().update();
+        }
     }
 }

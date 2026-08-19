@@ -727,19 +727,6 @@ public final class DirectorMiniMenu {
                 );
             }
 
-            if (theme.getProduct() == DirectorProduct.HOLOUI) {
-                return new Theme(
-                        "#ffadad",
-                        "#a0c4ff",
-                        "#ffd6a5",
-                        "#caffbf",
-                        "#fef3ff",
-                        "#ffd6a5",
-                        "#bde0fe",
-                        "#d9c7ef"
-                );
-            }
-
             String primaryLeft = normalizeHex(theme.getPrimaryHex(), "#1f5f9f");
             String primaryRight = normalizeHex(theme.getSecondaryHex(), "#4f7fd6");
             String accent = normalizeHex(theme.getAccentHex(), "#ffd966");

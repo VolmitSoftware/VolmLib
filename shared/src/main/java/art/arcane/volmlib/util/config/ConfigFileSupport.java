@@ -1,0 +1,362 @@
+package art.arcane.volmlib.util.config;
+
+import art.arcane.volmlib.util.io.IO;
+import com.google.gson.JsonElement;
+
+import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.util.Locale;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BiFunction;
+import java.util.function.Consumer;
+
+public final class ConfigFileSupport {
+    private static final long MAX_CONFIG_BYTES_DEFAULT = 2L * 1024L * 1024L;
+    private static final long MAX_CONFIG_BYTES_SKILL_OR_ADAPTATION = 256L * 1024L;
+    private static final AtomicInteger CREATED_MISSING_CONFIGS = new AtomicInteger();
+
+    private ConfigFileSupport() {
+    }
+
+    public static <T> T load(
+            ConfigIo io,
+            File canonicalFile,
+            File legacyFile,
+            Class<T> type,
+            T fallback,
+            boolean overwriteOnReadFailure,
+            String sourceTag,
+            String createdMessage
+    ) throws IOException {
+        return load(
+                io,
+                canonicalFile,
+                legacyFile,
+                type,
+                fallback,
+                overwriteOnReadFailure,
+                sourceTag,
+                createdMessage,
+                null,
+                false,
+                null,
+                ConfigExposePolicy.ALL
+        );
+    }
+
+    public static <T> T load(
+            ConfigIo io,
+            File canonicalFile,
+            File legacyFile,
+            Class<T> type,
+            T fallback,
+            boolean overwriteOnReadFailure,
+            String sourceTag,
+            String createdMessage,
+            Consumer<T> normalizeBeforeWrite,
+            boolean forceCanonicalizeExisting
+    ) throws IOException {
+        return load(
+                io,
+                canonicalFile,
+                legacyFile,
+                type,
+                fallback,
+                overwriteOnReadFailure,
+                sourceTag,
+                createdMessage,
+                normalizeBeforeWrite,
+                forceCanonicalizeExisting,
+                null,
+                ConfigExposePolicy.ALL
+        );
+    }
+
+    public static <T> T load(
+            ConfigIo io,
+            File canonicalFile,
+            File legacyFile,
+            Class<T> type,
+            T fallback,
+            boolean overwriteOnReadFailure,
+            String sourceTag,
+            String createdMessage,
+            Consumer<T> normalizeBeforeWrite,
+            boolean forceCanonicalizeExisting,
+            BiFunction<String, File, String> migrateBeforeRead,
+            ConfigExposePolicy exposePolicy
+    ) throws IOException {
+        ConfigIo configIo = io == null ? ConfigIo.SILENT : io;
+        ConfigExposePolicy policy = exposePolicy == null ? ConfigExposePolicy.ALL : exposePolicy;
+        long maxConfigBytes = maxConfigBytesForSourceTag(sourceTag);
+        boolean canonicalizeExisting = forceCanonicalizeExisting
+                || shouldCanonicalizeExisting(sourceTag, overwriteOnReadFailure);
+        if (canonicalFile != null && canonicalFile.exists()) {
+            try {
+                if (canonicalFile.length() > maxConfigBytes) {
+                    throw new IOException("Config file is too large (" + canonicalFile.length() + " bytes)");
+                }
+                String raw = IO.readAll(canonicalFile);
+                String migratedRaw = migrateRaw(raw, canonicalFile, migrateBeforeRead);
+                T loaded = normalizeConfig(deserialize(migratedRaw, canonicalFile, type), normalizeBeforeWrite);
+                if (loaded == null) {
+                    throw new IOException("Config parser returned null.");
+                }
+
+                if (canonicalizeExisting) {
+                    String canonical = serialize(loaded, canonicalFile, sourceTag, policy);
+                    if (!normalize(canonical).equals(normalize(raw))) {
+                        ConfigRewriteReporter.reportRewrite(configIo, canonicalFile, sourceTag, raw, canonical);
+                        IO.writeAll(canonicalFile, canonical);
+                    }
+                }
+                deleteLegacyFileIfMigrated(configIo, canonicalFile, legacyFile, sourceTag);
+                return loaded;
+            } catch (Throwable e) {
+                if (overwriteOnReadFailure) {
+                    T normalizedFallback = normalizeConfig(fallback, normalizeBeforeWrite);
+                    ConfigRewriteReporter.reportFallbackRewrite(configIo, canonicalFile, sourceTag, reason("invalid config", e));
+                    IO.writeAll(canonicalFile, serialize(normalizedFallback, canonicalFile, sourceTag, policy));
+                    return normalizedFallback;
+                }
+
+                throw new IOException("Invalid config", e);
+            }
+        }
+
+        if (legacyFile != null && legacyFile.exists()) {
+            try {
+                if (legacyFile.length() > maxConfigBytes) {
+                    throw new IOException("Legacy config file is too large (" + legacyFile.length() + " bytes)");
+                }
+                String raw = IO.readAll(legacyFile);
+                String migratedRaw = migrateRaw(raw, legacyFile, migrateBeforeRead);
+                T loaded = normalizeConfig(deserialize(migratedRaw, legacyFile, type), normalizeBeforeWrite);
+                if (loaded == null) {
+                    throw new IOException("Config parser returned null.");
+                }
+
+                IO.writeAll(canonicalFile, serialize(loaded, canonicalFile, sourceTag, policy));
+                configIo.info("Migrated legacy config [" + relativePath(configIo, legacyFile) + "] -> [" + relativePath(configIo, canonicalFile) + "].");
+                deleteLegacyFileIfMigrated(configIo, canonicalFile, legacyFile, sourceTag);
+                return loaded;
+            } catch (Throwable e) {
+                if (overwriteOnReadFailure) {
+                    T normalizedFallback = normalizeConfig(fallback, normalizeBeforeWrite);
+                    ConfigRewriteReporter.reportFallbackRewrite(configIo, canonicalFile, sourceTag, reason("invalid legacy config", e));
+                    IO.writeAll(canonicalFile, serialize(normalizedFallback, canonicalFile, sourceTag, policy));
+                    return normalizedFallback;
+                }
+
+                throw new IOException("Invalid legacy config", e);
+            }
+        }
+
+        T normalizedFallback = normalizeConfig(fallback, normalizeBeforeWrite);
+        IO.writeAll(canonicalFile, serialize(normalizedFallback, canonicalFile, sourceTag, policy));
+        recordMissingConfigCreated();
+        return normalizedFallback;
+    }
+
+    public static void recordMissingConfigCreated() {
+        CREATED_MISSING_CONFIGS.incrementAndGet();
+    }
+
+    public static void flushCreatedConfigSummary(ConfigIo io) {
+        int created = CREATED_MISSING_CONFIGS.getAndSet(0);
+        if (created <= 0) {
+            return;
+        }
+
+        ConfigIo configIo = io == null ? ConfigIo.SILENT : io;
+        configIo.info("Created " + created + " missing config " + (created == 1 ? "entry" : "entries") + " from defaults.");
+    }
+
+    public static String normalize(String text) {
+        if (text == null) {
+            return "";
+        }
+        return text.replace("\r\n", "\n").stripTrailing();
+    }
+
+    public static File toTomlFile(File file) {
+        if (file == null) {
+            return null;
+        }
+        return replaceExtension(file, ".toml");
+    }
+
+    public static File toJsonFile(File file) {
+        if (file == null) {
+            return null;
+        }
+        return replaceExtension(file, ".json");
+    }
+
+    public static File replaceExtension(File file, String extension) {
+        String name = file.getName();
+        int idx = name.lastIndexOf('.');
+        String base = idx >= 0 ? name.substring(0, idx) : name;
+        return new File(file.getParentFile(), base + extension);
+    }
+
+    public static boolean isTomlFile(File file) {
+        return file != null && file.getName().toLowerCase(Locale.ROOT).endsWith(".toml");
+    }
+
+    public static boolean isJsonFile(File file) {
+        if (file == null) {
+            return false;
+        }
+        String name = file.getName().toLowerCase(Locale.ROOT);
+        return name.endsWith(".json") || name.endsWith(".yml") || name.endsWith(".yaml");
+    }
+
+    public static boolean isSupportedConfigFile(File file) {
+        return isTomlFile(file) || isJsonFile(file);
+    }
+
+    public static String configNameFromFileName(String fileName) {
+        if (fileName == null) {
+            return null;
+        }
+        String lower = fileName.toLowerCase(Locale.ROOT);
+        if (lower.endsWith(".toml")) {
+            return fileName.substring(0, fileName.length() - 5).toLowerCase(Locale.ROOT);
+        }
+        if (lower.endsWith(".json")) {
+            return fileName.substring(0, fileName.length() - 5).toLowerCase(Locale.ROOT);
+        }
+        if (lower.endsWith(".yml")) {
+            return fileName.substring(0, fileName.length() - 4).toLowerCase(Locale.ROOT);
+        }
+        if (lower.endsWith(".yaml")) {
+            return fileName.substring(0, fileName.length() - 5).toLowerCase(Locale.ROOT);
+        }
+        return null;
+    }
+
+    public static JsonElement parseToJsonElement(String raw, File file) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+
+        try {
+            if (isTomlFile(file)) {
+                return TomlCodec.toJsonElement(raw);
+            }
+
+            return ConfigJson.fromJson(raw, JsonElement.class);
+        } catch (Throwable ignored) {
+        }
+
+        try {
+            return TomlCodec.toJsonElement(raw);
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
+    public static String serializeJsonElementToToml(JsonElement element) {
+        return TomlCodec.toToml(element);
+    }
+
+    public static boolean deleteLegacyFileIfMigrated(ConfigIo io, File canonicalFile, File legacyFile, String sourceTag) {
+        if (canonicalFile == null || legacyFile == null) {
+            return false;
+        }
+        if (!canonicalFile.exists() || !canonicalFile.isFile() || !legacyFile.exists() || !legacyFile.isFile()) {
+            return false;
+        }
+        if (canonicalFile.getAbsoluteFile().equals(legacyFile.getAbsoluteFile())) {
+            return false;
+        }
+
+        ConfigIo configIo = io == null ? ConfigIo.SILENT : io;
+        try {
+            boolean deleted = Files.deleteIfExists(legacyFile.toPath());
+            if (deleted) {
+                configIo.verbose("Deleted migrated legacy config [" + relativePath(configIo, legacyFile) + "] for [" + (sourceTag == null ? "config" : sourceTag) + "].");
+            }
+            return deleted;
+        } catch (Throwable e) {
+            configIo.warn("Failed to delete migrated legacy config [" + relativePath(configIo, legacyFile) + "]: " + e.getMessage());
+            return false;
+        }
+    }
+
+    private static <T> T deserialize(String raw, File sourceFile, Class<T> type) throws IOException {
+        try {
+            if (isTomlFile(sourceFile)) {
+                return TomlCodec.fromToml(raw, type);
+            }
+            return ConfigJson.fromJson(raw, type);
+        } catch (Throwable e) {
+            throw new IOException("Failed to parse " + sourceFile.getName(), e);
+        }
+    }
+
+    private static <T> T normalizeConfig(T config, Consumer<T> normalizer) {
+        if (config != null && normalizer != null) {
+            normalizer.accept(config);
+        }
+        return config;
+    }
+
+    private static String migrateRaw(
+            String raw,
+            File sourceFile,
+            BiFunction<String, File, String> migration
+    ) {
+        return migration == null ? raw : migration.apply(raw, sourceFile);
+    }
+
+    private static String serialize(Object loaded, File targetFile, String sourceTag, ConfigExposePolicy exposePolicy) {
+        if (isTomlFile(targetFile)) {
+            return TomlCodec.toToml(loaded, sourceTag, exposePolicy);
+        }
+        return ConfigJson.toJson(loaded, true);
+    }
+
+    private static long maxConfigBytesForSourceTag(String sourceTag) {
+        if (sourceTag != null && (sourceTag.startsWith("skill:") || sourceTag.startsWith("adaptation:"))) {
+            return MAX_CONFIG_BYTES_SKILL_OR_ADAPTATION;
+        }
+        return MAX_CONFIG_BYTES_DEFAULT;
+    }
+
+    private static boolean shouldCanonicalizeExisting(String sourceTag, boolean overwriteOnReadFailure) {
+        if (sourceTag == null) {
+            return true;
+        }
+
+        if (overwriteOnReadFailure && (sourceTag.startsWith("skill:") || sourceTag.startsWith("adaptation:"))) {
+            return false;
+        }
+
+        return true;
+    }
+
+    private static String reason(String prefix, Throwable error) {
+        if (error == null || error.getMessage() == null || error.getMessage().isBlank()) {
+            return prefix;
+        }
+        return prefix + ": " + error.getMessage();
+    }
+
+    private static String relativePath(ConfigIo io, File file) {
+        if (file == null) {
+            return "<unknown>";
+        }
+        try {
+            File dataFolder = io == null ? null : io.dataFolder();
+            if (dataFolder == null) {
+                return file.getPath();
+            }
+            return dataFolder.toPath().relativize(file.toPath()).toString().replace(File.separatorChar, '/');
+        } catch (Throwable ignored) {
+            return file.getPath();
+        }
+    }
+}
