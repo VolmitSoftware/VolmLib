@@ -1,9 +1,13 @@
 package art.arcane.volmlib.util.io;
 
 import java.io.File;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.attribute.BasicFileAttributes;
 
 public class FileWatcher {
     protected final File file;
+    private Path path;
     private long lastModified;
     private long size;
 
@@ -13,9 +17,16 @@ public class FileWatcher {
     }
 
     protected void readProperties() {
-        boolean exists = file.exists();
-        lastModified = exists ? file.lastModified() : -1;
-        size = exists ? file.isDirectory() ? -2 : file.length() : -1;
+        // One stat per poll: exists/lastModified/isDirectory/length used to be four separate
+        // filesystem round trips per watched file, and a hot-reload tree polls all of them.
+        try {
+            BasicFileAttributes attributes = Files.readAttributes(path(), BasicFileAttributes.class);
+            lastModified = attributes.lastModifiedTime().toMillis();
+            size = attributes.isDirectory() ? -2 : attributes.size();
+        } catch (Throwable missing) {
+            lastModified = -1;
+            size = -1;
+        }
     }
 
     public boolean checkModified() {
@@ -33,5 +44,16 @@ public class FileWatcher {
 
     public boolean wasDeleted() {
         return !file.exists();
+    }
+
+    private Path path() {
+        Path resolved = path;
+
+        if (resolved == null) {
+            resolved = file.toPath();
+            path = resolved;
+        }
+
+        return resolved;
     }
 }

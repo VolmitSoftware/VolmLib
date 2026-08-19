@@ -4,15 +4,24 @@ import art.arcane.volmlib.util.collection.KList;
 import art.arcane.volmlib.util.collection.KMap;
 
 import java.io.File;
+import java.util.Map;
 
 public class FolderWatcher extends FileWatcher {
     private KMap<File, FolderWatcher> watchers;
     private KList<File> changed;
     private KList<File> created;
     private KList<File> deleted;
+    private KList<File> pendingCreated;
+    private KList<File> pendingDeleted;
+    /**
+     * Stays false for the duration of the {@link FileWatcher} constructor's {@code readProperties()}
+     * call, so the initial listing is not reported as a wave of creations.
+     */
+    private boolean deltaTracking;
 
     public FolderWatcher(File file) {
         super(file);
+        deltaTracking = true;
     }
 
     protected void readProperties() {
@@ -21,6 +30,8 @@ public class FolderWatcher extends FileWatcher {
             changed = new KList<>();
             created = new KList<>();
             deleted = new KList<>();
+            pendingCreated = new KList<>();
+            pendingDeleted = new KList<>();
         }
 
         if (file.isDirectory()) {
@@ -33,11 +44,25 @@ public class FolderWatcher extends FileWatcher {
 
                     if (!watchers.containsKey(i)) {
                         watchers.put(i, new FolderWatcher(i));
+
+                        if (deltaTracking) {
+                            pendingCreated.add(i);
+                        }
                     }
                 }
             }
 
-            watchers.values().removeIf(FileWatcher::wasDeleted);
+            watchers.values().removeIf(watcher -> {
+                if (!watcher.wasDeleted()) {
+                    return false;
+                }
+
+                if (deltaTracking) {
+                    pendingDeleted.add(watcher.file);
+                }
+
+                return true;
+            });
         } else {
             super.readProperties();
         }
@@ -47,33 +72,35 @@ public class FolderWatcher extends FileWatcher {
         changed.clear();
         created.clear();
         deleted.clear();
+        pendingCreated.clear();
+        pendingDeleted.clear();
 
         if (file.isDirectory()) {
-            KMap<File, FolderWatcher> w = watchers.copy();
+            // readProperties() is the only thing that adds or drops child watchers, so it reports
+            // the membership delta itself instead of every poll copying the watcher map to diff
+            // against afterwards.
             readProperties();
+            deleted.addAll(pendingDeleted);
 
-            for (File i : w.keySet()) {
-                if (!watchers.containsKey(i)) {
-                    deleted.add(i);
-                }
-            }
+            for (Map.Entry<File, FolderWatcher> entry : watchers.entrySet()) {
+                File i = entry.getKey();
 
-            for (File i : watchers.keySet()) {
-                if (!w.containsKey(i)) {
+                if (pendingCreated.contains(i)) {
                     created.add(i);
-                } else {
-                    FolderWatcher fw = watchers.get(i);
-                    if (fw == null) {
-                        continue;
-                    }
-                    if (fw.checkModified()) {
-                        changed.add(fw.file);
-                    }
-
-                    changed.addAll(fw.getChanged());
-                    created.addAll(fw.getCreated());
-                    deleted.addAll(fw.getDeleted());
+                    continue;
                 }
+
+                FolderWatcher fw = entry.getValue();
+                if (fw == null) {
+                    continue;
+                }
+                if (fw.checkModified()) {
+                    changed.add(fw.file);
+                }
+
+                changed.addAll(fw.getChanged());
+                created.addAll(fw.getCreated());
+                deleted.addAll(fw.getDeleted());
             }
 
             return !changed.isEmpty() || !created.isEmpty() || !deleted.isEmpty();
@@ -90,10 +117,12 @@ public class FolderWatcher extends FileWatcher {
         changed.clear();
         created.clear();
         deleted.clear();
+        pendingCreated.clear();
+        pendingDeleted.clear();
 
         if (file.isDirectory()) {
-            for (File i : watchers.keySet()) {
-                FolderWatcher fw = watchers.get(i);
+            for (Map.Entry<File, FolderWatcher> entry : watchers.entrySet()) {
+                FolderWatcher fw = entry.getValue();
                 if (fw == null) {
                     continue;
                 }
@@ -133,5 +162,7 @@ public class FolderWatcher extends FileWatcher {
         changed.clear();
         deleted.clear();
         created.clear();
+        pendingCreated.clear();
+        pendingDeleted.clear();
     }
 }

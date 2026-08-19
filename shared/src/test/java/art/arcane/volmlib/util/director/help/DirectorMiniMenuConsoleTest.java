@@ -173,7 +173,7 @@ public class DirectorMiniMenuConsoleTest {
         DirectorMiniMenu.deliver(sender, page, DirectorMiniMenu.Theme.reactBlue(), DirectorTextResolver.ENGLISH);
 
         List<String> expected = new ArrayList<>();
-        expected.add("\n".repeat(19));
+        expected.add("\n".repeat(DirectorMiniMenu.MENU_LINE_COUNT));
         expected.addAll(DirectorMiniMenu.render(page, DirectorMiniMenu.Theme.reactBlue(), DirectorTextResolver.ENGLISH));
 
         assertEquals(expected, sender.rich);

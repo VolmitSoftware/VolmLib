@@ -5,6 +5,7 @@ import art.arcane.volmlib.util.director.DirectorParameterHandler;
 import art.arcane.volmlib.util.director.DirectorTextResolver;
 import art.arcane.volmlib.util.director.context.DirectorContextMap;
 import art.arcane.volmlib.util.director.context.DirectorContextRegistry;
+import art.arcane.volmlib.util.director.parse.DirectorBracketGrouping;
 import art.arcane.volmlib.util.director.parse.DirectorConfidence;
 import art.arcane.volmlib.util.director.parse.DirectorParser;
 import art.arcane.volmlib.util.director.parse.DirectorParserRegistry;
@@ -248,11 +249,15 @@ public final class DirectorRuntimeEngine implements DirectorCommandEngine {
         List<String> errors = new ArrayList<>();
         List<String> positional = new ArrayList<>();
 
-        for (String token : args) {
-            if (token == null) {
-                continue;
-            }
+        DirectorBracketGrouping.Result grouping = DirectorBracketGrouping.group(args);
+        if (grouping.unclosedKey() != null) {
+            errors.add(resolveText(
+                    DirectorRuntimeMessages.UNCLOSED_GROUP,
+                    MessageArgument.untrusted("key", grouping.unclosedKey())
+            ));
+        }
 
+        for (String token : grouping.tokens()) {
             int split = token.indexOf('=');
             if (split >= 0) {
                 String key = token.substring(0, split).trim();
@@ -447,8 +452,14 @@ public final class DirectorRuntimeEngine implements DirectorCommandEngine {
             return List.of();
         }
 
-        String last = args.isEmpty() ? "" : args.get(args.size() - 1);
-        List<String> previous = args.size() <= 1 ? List.of() : args.subList(0, args.size() - 1);
+        DirectorBracketGrouping.Result grouping = DirectorBracketGrouping.group(args);
+        if (grouping.unclosedKey() != null || grouping.tailGrouped()) {
+            return List.of();
+        }
+
+        List<String> grouped = grouping.tokens();
+        String last = grouped.isEmpty() ? "" : grouped.get(grouped.size() - 1);
+        List<String> previous = grouped.size() <= 1 ? List.of() : grouped.subList(0, grouped.size() - 1);
 
         Set<DirectorRuntimeParameter> consumed = new LinkedHashSet<>();
         int positionalCount = 0;

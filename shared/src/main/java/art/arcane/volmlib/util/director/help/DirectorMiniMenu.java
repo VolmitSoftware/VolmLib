@@ -15,12 +15,16 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.function.ToIntFunction;
 
 public final class DirectorMiniMenu {
+    public static final int MENU_LINE_COUNT = 19;
+
     private static final int HEADER_WIDTH = 44;
     private static final int FOOTER_WIDTH = 75;
     private static final int FOOTER_BUTTON_WIDTH = 10;
-    private static final int CLEAR_LINES = 19;
+    private static final int HEADER_AND_FOOTER_LINES = 2;
+    private static final int BACK_ROW_LINES = 1;
 
     private DirectorMiniMenu() {
     }
@@ -54,7 +58,7 @@ public final class DirectorMiniMenu {
         }
 
         if (renderable && isPlayer(sender)) {
-            deliverRaw(sender, "\n".repeat(CLEAR_LINES));
+            deliverRaw(sender, "\n".repeat(MENU_LINE_COUNT));
         }
 
         for (String line : lines) {
@@ -182,7 +186,20 @@ public final class DirectorMiniMenu {
         return out.toString();
     }
 
-    public static Optional<DirectorHelpPage> resolveHelp(DirectorRuntimeEngine engine, List<String> rawArgs, int pageSize) {
+    public static Optional<DirectorHelpPage> resolveHelp(DirectorRuntimeEngine engine, List<String> rawArgs) {
+        return resolveHelp(engine, rawArgs, DirectorMiniMenu::entryCapacity);
+    }
+
+    static Optional<DirectorHelpPage> resolveHelp(DirectorRuntimeEngine engine, List<String> rawArgs, int pageSize) {
+        int safePageSize = Math.max(1, pageSize);
+        return resolveHelp(engine, rawArgs, ignored -> safePageSize);
+    }
+
+    private static Optional<DirectorHelpPage> resolveHelp(
+            DirectorRuntimeEngine engine,
+            List<String> rawArgs,
+            ToIntFunction<DirectorRuntimeNode> pageSizer
+    ) {
         if (engine == null || engine.getRoot() == null) {
             return Optional.empty();
         }
@@ -190,7 +207,7 @@ public final class DirectorMiniMenu {
         List<String> args = rawArgs == null ? List.of() : rawArgs;
         boolean explicitHelp = args.stream().anyMatch(DirectorMiniMenu::isHelpToken);
         if (!explicitHelp && !args.isEmpty()) {
-            return resolveImplicitHelp(engine.getRoot(), args, pageSize);
+            return resolveImplicitHelp(engine.getRoot(), args, pageSizer);
         }
 
         int requestedPage = readPage(args).orElse(0);
@@ -210,10 +227,14 @@ public final class DirectorMiniMenu {
         }
 
         DirectorRuntimeNode target = cursor.isInvocable() && cursor.getParent() != null ? cursor.getParent() : cursor;
-        return Optional.of(buildPage(target, requestedPage, pageSize));
+        return Optional.of(buildPage(target, requestedPage, pageSizer.applyAsInt(target)));
     }
 
-    private static Optional<DirectorHelpPage> resolveImplicitHelp(DirectorRuntimeNode root, List<String> args, int pageSize) {
+    private static Optional<DirectorHelpPage> resolveImplicitHelp(
+            DirectorRuntimeNode root,
+            List<String> args,
+            ToIntFunction<DirectorRuntimeNode> pageSizer
+    ) {
         DirectorRuntimeNode cursor = root;
 
         for (String token : args) {
@@ -233,7 +254,15 @@ public final class DirectorMiniMenu {
             return Optional.empty();
         }
 
-        return Optional.of(buildPage(cursor, 0, pageSize));
+        return Optional.of(buildPage(cursor, 0, pageSizer.applyAsInt(cursor)));
+    }
+
+    private static int entryCapacity(DirectorRuntimeNode node) {
+        int reservedLines = HEADER_AND_FOOTER_LINES;
+        if (node.getParent() != null) {
+            reservedLines += BACK_ROW_LINES;
+        }
+        return MENU_LINE_COUNT - reservedLines;
     }
 
     private static DirectorHelpPage buildPage(DirectorRuntimeNode target, int requestedPage, int pageSize) {

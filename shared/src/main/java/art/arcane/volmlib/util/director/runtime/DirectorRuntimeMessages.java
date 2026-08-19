@@ -17,6 +17,10 @@ public final class DirectorRuntimeMessages {
             "director.runtime.error.unexpected_argument",
             "Unexpected argument \"{argument}\". Optional parameters must be keyed, e.g. seed=123"
     );
+    public static final TextKey UNCLOSED_GROUP = TextKey.of(
+            "director.runtime.error.unclosed_group",
+            "Missing closing \"]\" for parameter {key}"
+    );
     public static final TextKey CONVERSION_FAILED = TextKey.of(
             "director.runtime.error.conversion_failed",
             "Cannot convert \"{value}\" into {type} for {parameter}"
@@ -42,6 +46,7 @@ public final class DirectorRuntimeMessages {
             INVALID_ORIGIN,
             UNKNOWN_PARAMETER,
             UNEXPECTED_ARGUMENT,
+            UNCLOSED_GROUP,
             CONVERSION_FAILED,
             DEFAULT_PARSE_FAILED,
             MISSING_ARGUMENT,

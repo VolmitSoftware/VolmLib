@@ -29,7 +29,6 @@ public class BoardManager<B extends Board> {
         this.scoreboards = new ConcurrentHashMap<>();
         this.foliaRuntime = FoliaScheduler.isFolia(plugin.getServer());
         startDriver();
-        plugin.getServer().getOnlinePlayers().forEach(this::setup);
     }
 
     public JavaPlugin getPlugin() {
@@ -51,11 +50,9 @@ public class BoardManager<B extends Board> {
 
     public void setup(Player player) {
         Optional.ofNullable(scoreboards.remove(player.getUniqueId())).ifPresent(Board::resetScoreboard);
-        if (!foliaRuntime && player.getScoreboard().equals(Bukkit.getScoreboardManager().getMainScoreboard())) {
-            player.setScoreboard(Bukkit.getScoreboardManager().getNewScoreboard());
-        }
-
-        scoreboards.put(player.getUniqueId(), boardFactory.apply(player, boardSettings));
+        B board = boardFactory.apply(player, boardSettings);
+        scoreboards.put(player.getUniqueId(), board);
+        board.update();
     }
 
     public void remove(Player player) {
@@ -99,10 +96,21 @@ public class BoardManager<B extends Board> {
 
     private void updateAll() {
         for (Map.Entry<UUID, B> entry : scoreboards.entrySet()) {
-            if (Bukkit.getPlayer(entry.getKey()) == null) {
+            Player player = Bukkit.getPlayer(entry.getKey());
+            if (player == null) {
                 continue;
             }
-            entry.getValue().update();
+
+            B board = entry.getValue();
+            // This driver ticks on the async scheduler, but a board render reads live player state
+            // and resolves placeholders, which on a regionized runtime must happen on the thread
+            // that owns the player. Hand each render to that player's entity scheduler.
+            if (foliaRuntime) {
+                FoliaScheduler.runEntity(plugin, player, board::update);
+                continue;
+            }
+
+            board.update();
         }
     }
 }

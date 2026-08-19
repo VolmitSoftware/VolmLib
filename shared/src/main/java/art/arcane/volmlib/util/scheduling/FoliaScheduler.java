@@ -48,6 +48,29 @@ public final class FoliaScheduler {
     private static final Object METHOD_MISS = new Object();
     private static final ConcurrentHashMap<MethodKey, Object> METHOD_CACHE = new ConcurrentHashMap<>(64);
 
+    private static final Class<?>[] NO_PARAMETERS = new Class<?>[0];
+    private static final Object[] NO_ARGUMENTS = new Object[0];
+    private static final Class<?>[] WORLD_CHUNK_PARAMETERS = {World.class, int.class, int.class};
+
+    // Inline caches for the name-based lookups on the hot thread-identity and region-ownership
+    // paths. The owner class is effectively fixed for a given runtime, so these resolve once and
+    // then cost a volatile read instead of a MethodKey plus parameter array per call.
+    private static final DynamicMethod DYNAMIC_IS_TICK_THREAD = new DynamicMethod("isTickThread", NO_PARAMETERS);
+    private static final DynamicMethod DYNAMIC_IS_GLOBAL_TICK_THREAD = new DynamicMethod("isGlobalTickThread", NO_PARAMETERS);
+    private static final DynamicMethod DYNAMIC_IS_OWNED_WORLD_CHUNK_REGION = new DynamicMethod("isOwnedByCurrentRegion", WORLD_CHUNK_PARAMETERS);
+    private static final DynamicMethod DYNAMIC_BUKKIT_IS_OWNED_WORLD_CHUNK_REGION = new DynamicMethod("isOwnedByCurrentRegion", WORLD_CHUNK_PARAMETERS);
+    private static final DynamicMethod DYNAMIC_ENTITY_GET_SCHEDULER = new DynamicMethod("getScheduler", NO_PARAMETERS);
+
+    // Scheduler resolution runs the whole probe chain on every call on a non-regionized runtime
+    // (nothing is ever cached there, because there is no scheduler to cache), and isFolia() sits
+    // on top of it.
+    private static final DynamicMethod DYNAMIC_GET_GLOBAL_REGION_SCHEDULER = new DynamicMethod("getGlobalRegionScheduler", NO_PARAMETERS);
+    private static final DynamicMethod DYNAMIC_GET_REGION_SCHEDULER = new DynamicMethod("getRegionScheduler", NO_PARAMETERS);
+    private static final DynamicMethod DYNAMIC_GET_ASYNC_SCHEDULER = new DynamicMethod("getAsyncScheduler", NO_PARAMETERS);
+    private static final DynamicMethod DYNAMIC_BUKKIT_GET_GLOBAL_REGION_SCHEDULER = new DynamicMethod("getGlobalRegionScheduler", NO_PARAMETERS);
+    private static final DynamicMethod DYNAMIC_BUKKIT_GET_REGION_SCHEDULER = new DynamicMethod("getRegionScheduler", NO_PARAMETERS);
+    private static final DynamicMethod DYNAMIC_BUKKIT_GET_ASYNC_SCHEDULER = new DynamicMethod("getAsyncScheduler", NO_PARAMETERS);
+
     private static volatile SchedulerHandle globalRegionSchedulerHandle;
     private static volatile SchedulerHandle regionSchedulerHandle;
     private static volatile SchedulerHandle asyncSchedulerHandle;
@@ -89,7 +112,7 @@ public final class FoliaScheduler {
         Server server = Bukkit.getServer();
         Boolean serverTickThread = invokeBooleanNoThrow(SERVER_IS_TICK_THREAD, server);
         if (serverTickThread == null) {
-            serverTickThread = invokeBooleanNoThrow(server, "isTickThread", new Class<?>[0]);
+            serverTickThread = invokeBooleanDynamicNoThrow(server, DYNAMIC_IS_TICK_THREAD, NO_ARGUMENTS);
         }
         if (serverTickThread != null) {
             return serverTickThread;
@@ -107,7 +130,7 @@ public final class FoliaScheduler {
 
         Boolean serverGlobalTickThread = invokeBooleanNoThrow(SERVER_IS_GLOBAL_TICK_THREAD, server);
         if (serverGlobalTickThread == null) {
-            serverGlobalTickThread = invokeBooleanNoThrow(server, "isGlobalTickThread", new Class<?>[0]);
+            serverGlobalTickThread = invokeBooleanDynamicNoThrow(server, DYNAMIC_IS_GLOBAL_TICK_THREAD, NO_ARGUMENTS);
         }
         if (serverGlobalTickThread != null) {
             return serverGlobalTickThread;
@@ -277,7 +300,7 @@ public final class FoliaScheduler {
 
         Object scheduler = ENTITY_GET_SCHEDULER == null ? null : invokeNoThrow(ENTITY_GET_SCHEDULER, entity);
         if (scheduler == null) {
-            scheduler = invokeNoThrow(entity, "getScheduler", new Class<?>[0]);
+            scheduler = invokeDynamicNoThrow(entity, DYNAMIC_ENTITY_GET_SCHEDULER, NO_ARGUMENTS);
         }
 
         Runnable fallbackTask = guardedEntityTask(entity, runnable, retired);
@@ -627,7 +650,7 @@ public final class FoliaScheduler {
         }
 
         if (server != null) {
-            Object scheduler = invokeNoThrow(server, "getGlobalRegionScheduler", new Class<?>[0]);
+            Object scheduler = invokeDynamicNoThrow(server, DYNAMIC_GET_GLOBAL_REGION_SCHEDULER, NO_ARGUMENTS);
             if (scheduler != null) {
                 return scheduler;
             }
@@ -640,7 +663,7 @@ public final class FoliaScheduler {
             }
         }
 
-        return invokeStaticNoThrow(Bukkit.class, "getGlobalRegionScheduler", new Class<?>[0]);
+        return invokeStaticDynamicNoThrow(Bukkit.class, DYNAMIC_BUKKIT_GET_GLOBAL_REGION_SCHEDULER, NO_ARGUMENTS);
     }
 
     private static Object getRegionScheduler(Plugin plugin) {
@@ -670,7 +693,7 @@ public final class FoliaScheduler {
         }
 
         if (server != null) {
-            Object scheduler = invokeNoThrow(server, "getRegionScheduler", new Class<?>[0]);
+            Object scheduler = invokeDynamicNoThrow(server, DYNAMIC_GET_REGION_SCHEDULER, NO_ARGUMENTS);
             if (scheduler != null) {
                 return scheduler;
             }
@@ -683,7 +706,7 @@ public final class FoliaScheduler {
             }
         }
 
-        return invokeStaticNoThrow(Bukkit.class, "getRegionScheduler", new Class<?>[0]);
+        return invokeStaticDynamicNoThrow(Bukkit.class, DYNAMIC_BUKKIT_GET_REGION_SCHEDULER, NO_ARGUMENTS);
     }
 
     private static Object getAsyncScheduler(Plugin plugin) {
@@ -713,7 +736,7 @@ public final class FoliaScheduler {
         }
 
         if (server != null) {
-            Object scheduler = invokeNoThrow(server, "getAsyncScheduler", new Class<?>[0]);
+            Object scheduler = invokeDynamicNoThrow(server, DYNAMIC_GET_ASYNC_SCHEDULER, NO_ARGUMENTS);
             if (scheduler != null) {
                 return scheduler;
             }
@@ -726,11 +749,11 @@ public final class FoliaScheduler {
             }
         }
 
-        return invokeStaticNoThrow(Bukkit.class, "getAsyncScheduler", new Class<?>[0]);
+        return invokeStaticDynamicNoThrow(Bukkit.class, DYNAMIC_BUKKIT_GET_ASYNC_SCHEDULER, NO_ARGUMENTS);
     }
 
     private static Method resolveServerMethod(String methodName) {
-        return resolveServerMethod(methodName, new Class<?>[0]);
+        return resolveServerMethod(methodName, NO_PARAMETERS);
     }
 
     private static Method resolveServerMethod(String methodName, Class<?>... parameterTypes) {
@@ -747,10 +770,9 @@ public final class FoliaScheduler {
             return bukkitOwned;
         }
 
-        bukkitOwned = invokeBooleanStaticNoThrow(
+        bukkitOwned = invokeBooleanStaticDynamicNoThrow(
                 Bukkit.class,
-                "isOwnedByCurrentRegion",
-                new Class<?>[]{World.class, int.class, int.class},
+                DYNAMIC_BUKKIT_IS_OWNED_WORLD_CHUNK_REGION,
                 world,
                 chunkX,
                 chunkZ
@@ -764,10 +786,9 @@ public final class FoliaScheduler {
             return serverOwned;
         }
 
-        return invokeBooleanNoThrow(
+        return invokeBooleanDynamicNoThrow(
                 server,
-                "isOwnedByCurrentRegion",
-                new Class<?>[]{World.class, int.class, int.class},
+                DYNAMIC_IS_OWNED_WORLD_CHUNK_REGION,
                 world,
                 chunkX,
                 chunkZ
@@ -814,8 +835,11 @@ public final class FoliaScheduler {
         }
     }
 
-    private static Object invokeStaticNoThrow(Class<?> owner, String methodName, Class<?>[] parameterTypes, Object... args) {
-        Method method = cachedMethod(owner, methodName, parameterTypes);
+    private static Object invokeStaticDynamicNoThrow(Class<?> owner, DynamicMethod dynamic, Object... args) {
+        return invokeStaticNoThrow(dynamic.resolve(owner), args);
+    }
+
+    private static Object invokeStaticNoThrow(Method method, Object[] args) {
         if (method == null) {
             return null;
         }
@@ -854,8 +878,8 @@ public final class FoliaScheduler {
         return null;
     }
 
-    private static Boolean invokeBooleanNoThrow(Object target, String methodName, Class<?>[] parameterTypes, Object... args) {
-        Object value = invokeNoThrow(target, methodName, parameterTypes, args);
+    private static Boolean invokeBooleanDynamicNoThrow(Object target, DynamicMethod dynamic, Object... args) {
+        Object value = invokeDynamicNoThrow(target, dynamic, args);
         if (value instanceof Boolean bool) {
             return bool;
         }
@@ -863,8 +887,8 @@ public final class FoliaScheduler {
         return null;
     }
 
-    private static Boolean invokeBooleanStaticNoThrow(Class<?> owner, String methodName, Class<?>[] parameterTypes, Object... args) {
-        Object value = invokeStaticNoThrow(owner, methodName, parameterTypes, args);
+    private static Boolean invokeBooleanStaticDynamicNoThrow(Class<?> owner, DynamicMethod dynamic, Object... args) {
+        Object value = invokeStaticDynamicNoThrow(owner, dynamic, args);
         if (value instanceof Boolean bool) {
             return bool;
         }
@@ -877,7 +901,18 @@ public final class FoliaScheduler {
             return null;
         }
 
-        Method method = cachedMethod(target.getClass(), methodName, parameterTypes);
+        return invokeResolvedNoThrow(target, cachedMethod(target.getClass(), methodName, parameterTypes), args);
+    }
+
+    private static Object invokeDynamicNoThrow(Object target, DynamicMethod dynamic, Object... args) {
+        if (target == null) {
+            return null;
+        }
+
+        return invokeResolvedNoThrow(target, dynamic.resolve(target.getClass()), args);
+    }
+
+    private static Object invokeResolvedNoThrow(Object target, Method method, Object[] args) {
         if (method == null) {
             return null;
         }
@@ -943,6 +978,37 @@ public final class FoliaScheduler {
         private SchedulerHandle(Server server, Object scheduler) {
             this.server = server;
             this.scheduler = scheduler;
+        }
+    }
+
+    /**
+     * One-entry inline cache in front of {@link #METHOD_CACHE}. The owner class of a given call
+     * site does not change across a server's lifetime, so the common case is a single volatile
+     * read; the resolution pair is swapped as one immutable object so a racing reader can never
+     * see an owner paired with another owner's method.
+     */
+    private static final class DynamicMethod {
+        private final String methodName;
+        private final Class<?>[] parameterTypes;
+        private volatile Resolution resolution;
+
+        private DynamicMethod(String methodName, Class<?>[] parameterTypes) {
+            this.methodName = methodName;
+            this.parameterTypes = parameterTypes;
+        }
+
+        private Method resolve(Class<?> owner) {
+            Resolution current = resolution;
+            if (current != null && current.owner() == owner) {
+                return current.method();
+            }
+
+            Method resolved = cachedMethod(owner, methodName, parameterTypes);
+            resolution = new Resolution(owner, resolved);
+            return resolved;
+        }
+
+        private record Resolution(Class<?> owner, Method method) {
         }
     }
 

@@ -63,6 +63,13 @@ public class DirectorRuntimeEngineLocalizationTest {
                 )
         );
         assertEquals(
+                "Missing closing \"]\" for parameter text",
+                DirectorTextResolver.ENGLISH.resolve(
+                        DirectorRuntimeMessages.UNCLOSED_GROUP,
+                        MessageArgument.untrusted("key", "text")
+                )
+        );
+        assertEquals(
                 "Cannot convert \"abc\" into Integer for count",
                 DirectorTextResolver.ENGLISH.resolve(
                         DirectorRuntimeMessages.CONVERSION_FAILED,
@@ -110,6 +117,7 @@ public class DirectorRuntimeEngineLocalizationTest {
                         "director.runtime.error.invalid_origin",
                         "director.runtime.error.unknown_parameter",
                         "director.runtime.error.unexpected_argument",
+                        "director.runtime.error.unclosed_group",
                         "director.runtime.error.conversion_failed",
                         "director.runtime.error.default_parse_failed",
                         "director.runtime.error.missing_argument",
@@ -132,6 +140,7 @@ public class DirectorRuntimeEngineLocalizationTest {
         assertFailure(engine, sender, "playerOnly");
         assertFailure(engine, sender, "optional", "mystery=1");
         assertFailure(engine, sender, "optional", "loose");
+        assertFailure(engine, sender, "optional", "value=[unclosed");
         assertFailure(engine, sender, "number", "not-a-number");
         assertFailure(engine, sender, "brokenDefault");
         assertFailure(engine, sender, "required");
@@ -141,6 +150,7 @@ public class DirectorRuntimeEngineLocalizationTest {
                 DirectorRuntimeMessages.INVALID_ORIGIN.id(),
                 DirectorRuntimeMessages.UNKNOWN_PARAMETER.id(),
                 DirectorRuntimeMessages.UNEXPECTED_ARGUMENT.id(),
+                DirectorRuntimeMessages.UNCLOSED_GROUP.id(),
                 DirectorRuntimeMessages.USAGE.id(),
                 DirectorRuntimeMessages.CONVERSION_FAILED.id(),
                 DirectorRuntimeMessages.DEFAULT_PARSE_FAILED.id(),
