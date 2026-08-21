@@ -119,4 +119,21 @@ public class HudActionBarTest {
     bar.retire(playerId);
     verifyNoInteractions(player, spigot);
   }
+
+  @Test
+  public void test_retirePurpose_preservesOtherLocalSegmentsWithoutPlayerAccess() {
+    bar.publish(player, new HudSegment("iris:job", HudPriority.PROGRESS, 1500L, List.of(HudSlot.CENTER), "progress"));
+    bar.publish(player, new HudSegment("iris:notice", HudPriority.NOTICE, 1500L, List.of(HudSlot.RIGHT), "notice"));
+    clearInvocations(player, spigot);
+
+    bar.retire(playerId, "iris:job");
+    verifyNoInteractions(player, spigot);
+
+    bar.publish(player, new HudSegment("iris:status", HudPriority.STATUS, 1500L, List.of(HudSlot.LEFT), "status"));
+    List<HudStampedSegment> posted = HudSegmentCodec.decode(store.get(plugin));
+    assertEquals(2, posted.size());
+    assertTrue(posted.stream().anyMatch(segment -> segment.purpose().equals("iris:notice")));
+    assertTrue(posted.stream().anyMatch(segment -> segment.purpose().equals("iris:status")));
+    assertFalse(posted.stream().anyMatch(segment -> segment.purpose().equals("iris:job")));
+  }
 }

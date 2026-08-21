@@ -7,12 +7,15 @@ import org.junit.rules.TemporaryFolder;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 public class ConfigFileSupportTest {
     @Rule
@@ -62,6 +65,68 @@ public class ConfigFileSupportTest {
         assertTrue(canonical.exists());
         assertFalse(legacy.exists());
         assertFalse(io.infos.isEmpty());
+    }
+
+    @Test
+    public void passiveLoadDoesNotCanonicalizeExistingConfig() throws IOException {
+        File file = new File(temp.getRoot(), "config.toml");
+        String raw = "# preserve external editor bytes\nthreshold = 9.0\nname = \"custom\"\n";
+        Files.writeString(file.toPath(), raw, StandardCharsets.UTF_8);
+        RecordingIo io = new RecordingIo(temp.getRoot());
+
+        Sample loaded = ConfigFileSupport.load(
+                io,
+                file,
+                null,
+                Sample.class,
+                new Sample(),
+                false,
+                "core-config",
+                null,
+                null,
+                true
+        );
+
+        assertEquals("custom", loaded.name);
+        assertEquals(9D, loaded.threshold, 0D);
+        assertEquals(raw, Files.readString(file.toPath(), StandardCharsets.UTF_8));
+    }
+
+    @Test
+    public void passiveLoadDoesNotMigrateLegacyConfig() throws IOException {
+        File canonical = new File(temp.getRoot(), "config.toml");
+        File legacy = new File(temp.getRoot(), "config.json");
+        IO.writeAll(legacy, "{\"name\":\"custom\",\"threshold\":9.0}");
+        RecordingIo io = new RecordingIo(temp.getRoot());
+
+        Sample loaded = ConfigFileSupport.load(
+                io,
+                canonical,
+                legacy,
+                Sample.class,
+                new Sample(),
+                false,
+                "core-config",
+                null
+        );
+
+        assertEquals("custom", loaded.name);
+        assertFalse(canonical.exists());
+        assertTrue(legacy.exists());
+    }
+
+    @Test
+    public void passiveLoadDoesNotCreateMissingConfig() throws IOException {
+        File file = new File(temp.getRoot(), "config.toml");
+        RecordingIo io = new RecordingIo(temp.getRoot());
+
+        try {
+            ConfigFileSupport.load(io, file, null, Sample.class, new Sample(), false, "core-config", null);
+            fail("Expected a missing passive config load to fail");
+        } catch (IOException expected) {
+            assertTrue(expected.getMessage().contains("missing"));
+        }
+        assertFalse(file.exists());
     }
 
     public static class Sample {

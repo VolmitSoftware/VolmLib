@@ -27,10 +27,13 @@ public final class HudActionBar {
     Objects.requireNonNull(player);
     Objects.requireNonNull(segment);
     long now = System.currentTimeMillis();
-    ConcurrentHashMap<String, HudStampedSegment> mine = segments.computeIfAbsent(player.getUniqueId(), key -> new ConcurrentHashMap<>());
-    HudStampedSegment previous = mine.get(segment.purpose());
-    long sinceMillis = previous == null ? now : previous.sinceMillis();
-    mine.put(segment.purpose(), new HudStampedSegment(segment.priority(), sinceMillis, now, segment.ttlMillis(), segment.slots(), segment.purpose(), segment.text()));
+    ConcurrentHashMap<String, HudStampedSegment> mine = segments.compute(player.getUniqueId(), (key, current) -> {
+      ConcurrentHashMap<String, HudStampedSegment> updated = current == null ? new ConcurrentHashMap<>() : current;
+      HudStampedSegment previous = updated.get(segment.purpose());
+      long sinceMillis = previous == null ? now : previous.sinceMillis();
+      updated.put(segment.purpose(), new HudStampedSegment(segment.priority(), sinceMillis, now, segment.ttlMillis(), segment.slots(), segment.purpose(), segment.text()));
+      return updated;
+    });
     post(player, mine, now);
     send(player, composeLine(player, now));
   }
@@ -58,6 +61,15 @@ public final class HudActionBar {
 
   public void retire(UUID playerId) {
     segments.remove(playerId);
+  }
+
+  public void retire(UUID playerId, String purpose) {
+    Objects.requireNonNull(playerId);
+    Objects.requireNonNull(purpose);
+    segments.computeIfPresent(playerId, (key, mine) -> {
+      mine.remove(purpose);
+      return mine.isEmpty() ? null : mine;
+    });
   }
 
   public void shutdown() {

@@ -90,8 +90,8 @@ public final class ConfigFileSupport {
         ConfigIo configIo = io == null ? ConfigIo.SILENT : io;
         ConfigExposePolicy policy = exposePolicy == null ? ConfigExposePolicy.ALL : exposePolicy;
         long maxConfigBytes = maxConfigBytesForSourceTag(sourceTag);
-        boolean canonicalizeExisting = forceCanonicalizeExisting
-                || shouldCanonicalizeExisting(sourceTag, overwriteOnReadFailure);
+        boolean canonicalizeExisting = overwriteOnReadFailure
+                && (forceCanonicalizeExisting || shouldCanonicalizeExisting(sourceTag));
         if (canonicalFile != null && canonicalFile.exists()) {
             try {
                 if (canonicalFile.length() > maxConfigBytes) {
@@ -111,7 +111,9 @@ public final class ConfigFileSupport {
                         IO.writeAll(canonicalFile, canonical);
                     }
                 }
-                deleteLegacyFileIfMigrated(configIo, canonicalFile, legacyFile, sourceTag);
+                if (overwriteOnReadFailure) {
+                    deleteLegacyFileIfMigrated(configIo, canonicalFile, legacyFile, sourceTag);
+                }
                 return loaded;
             } catch (Throwable e) {
                 if (overwriteOnReadFailure) {
@@ -137,9 +139,11 @@ public final class ConfigFileSupport {
                     throw new IOException("Config parser returned null.");
                 }
 
-                IO.writeAll(canonicalFile, serialize(loaded, canonicalFile, sourceTag, policy));
-                configIo.info("Migrated legacy config [" + relativePath(configIo, legacyFile) + "] -> [" + relativePath(configIo, canonicalFile) + "].");
-                deleteLegacyFileIfMigrated(configIo, canonicalFile, legacyFile, sourceTag);
+                if (overwriteOnReadFailure) {
+                    IO.writeAll(canonicalFile, serialize(loaded, canonicalFile, sourceTag, policy));
+                    configIo.info("Migrated legacy config [" + relativePath(configIo, legacyFile) + "] -> [" + relativePath(configIo, canonicalFile) + "].");
+                    deleteLegacyFileIfMigrated(configIo, canonicalFile, legacyFile, sourceTag);
+                }
                 return loaded;
             } catch (Throwable e) {
                 if (overwriteOnReadFailure) {
@@ -151,6 +155,10 @@ public final class ConfigFileSupport {
 
                 throw new IOException("Invalid legacy config", e);
             }
+        }
+
+        if (!overwriteOnReadFailure) {
+            throw new IOException("Config file is missing");
         }
 
         T normalizedFallback = normalizeConfig(fallback, normalizeBeforeWrite);
@@ -326,12 +334,12 @@ public final class ConfigFileSupport {
         return MAX_CONFIG_BYTES_DEFAULT;
     }
 
-    private static boolean shouldCanonicalizeExisting(String sourceTag, boolean overwriteOnReadFailure) {
+    private static boolean shouldCanonicalizeExisting(String sourceTag) {
         if (sourceTag == null) {
             return true;
         }
 
-        if (overwriteOnReadFailure && (sourceTag.startsWith("skill:") || sourceTag.startsWith("adaptation:"))) {
+        if (sourceTag.startsWith("skill:") || sourceTag.startsWith("adaptation:")) {
             return false;
         }
 

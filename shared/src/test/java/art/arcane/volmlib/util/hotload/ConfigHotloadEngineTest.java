@@ -10,12 +10,14 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.attribute.FileTime;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -37,7 +39,7 @@ public class ConfigHotloadEngineTest {
         });
 
         try {
-            engine.configure(500L, List.of(), List.of(directory));
+            engine.configure(500L, 100L, List.of(), List.of(directory));
             Assume.assumeTrue(engine.isDirectoryEventWatchActive());
             assertEquals(1, supplierCalls.get());
 
@@ -67,7 +69,7 @@ public class ConfigHotloadEngineTest {
         ConfigHotloadEngine engine = createEngine(() -> knownConfigFiles(directory));
 
         try {
-            engine.configure(500L, List.of(), List.of(directory));
+            engine.configure(500L, 100L, List.of(), List.of(directory));
             Assume.assumeTrue(engine.isDirectoryEventWatchActive());
             Files.writeString(file.toPath(), "enabled = false\nlimit = 42\n", StandardCharsets.UTF_8);
 
@@ -99,7 +101,7 @@ public class ConfigHotloadEngineTest {
         });
 
         try {
-            engine.configure(500L, List.of(), List.of(directory, missingDirectory));
+            engine.configure(500L, 100L, List.of(), List.of(directory, missingDirectory));
             Assume.assumeTrue(engine.isDirectoryEventWatchActive());
             assertEquals(1, supplierCalls.get());
 
@@ -129,7 +131,7 @@ public class ConfigHotloadEngineTest {
         ConfigHotloadEngine engine = createEngine(() -> knownConfigFiles(directory));
 
         try {
-            engine.configure(500L, List.of(), List.of(directory));
+            engine.configure(500L, 100L, List.of(), List.of(directory));
             String updated = "enabled = false\n";
             Files.writeString(file.toPath(), updated, StandardCharsets.UTF_8);
             engine.noteSelfWrite(file, updated);
@@ -153,7 +155,7 @@ public class ConfigHotloadEngineTest {
         ConfigHotloadEngine engine = createEngine(() -> knownConfigFiles(directory));
 
         try {
-            engine.configure(500L, List.of(), List.of(directory));
+            engine.configure(500L, 100L, List.of(), List.of(directory));
             assertFalse(engine.isDirectoryEventWatchActive());
             Files.createDirectories(directory.toPath());
             File file = new File(directory, "feature.toml");
@@ -184,7 +186,7 @@ public class ConfigHotloadEngineTest {
         );
 
         try {
-            engine.configure(100L, List.of(), List.of(directory));
+            engine.configure(100L, 100L, List.of(), List.of(directory));
             Assume.assumeTrue(engine.isDirectoryEventWatchActive());
             engine.suppressDirectoryEventDelivery(true);
             Files.writeString(file.toPath(), "enabled = false\nlimit = 7\n", StandardCharsets.UTF_8);
@@ -212,7 +214,7 @@ public class ConfigHotloadEngineTest {
         ConfigHotloadEngine engine = createEngine(() -> knownConfigFiles(directory));
 
         try {
-            engine.configure(500L, List.of(), List.of(directory));
+            engine.configure(500L, 100L, List.of(), List.of(directory));
             Files.writeString(file.toPath(), "enabled = false\n", StandardCharsets.UTF_8);
             AtomicInteger applyCalls = new AtomicInteger();
 
@@ -230,6 +232,173 @@ public class ConfigHotloadEngineTest {
             }, null);
             assertTrue(second);
             assertEquals(2, applyCalls.get());
+        } finally {
+            engine.clear();
+        }
+    }
+
+    @Test(timeout = 8_000L)
+    public void contentReconciliationDetectsSameMetadataEdit() throws Exception {
+        File directory = temporaryFolder.newFolder("same-metadata-managed");
+        File file = new File(directory, "feature.toml");
+        Files.writeString(file.toPath(), "value = 1\n", StandardCharsets.UTF_8);
+        FileTime originalModified = Files.getLastModifiedTime(file.toPath());
+        ConfigHotloadEngine engine = new ConfigHotloadEngine(
+                watched -> watched != null && watched.getName().endsWith(".toml"),
+                () -> knownConfigFiles(directory),
+                this::readFile,
+                this::normalize,
+                200L,
+                100L
+        );
+
+        try {
+            engine.configure(100L, 100L, List.of(), List.of(directory));
+            engine.suppressDirectoryEventDelivery(true);
+            Files.writeString(file.toPath(), "value = 2\n", StandardCharsets.UTF_8);
+            Files.setLastModifiedTime(file.toPath(), originalModified);
+
+            assertTrue(awaitTouchedFile(engine, file, 5_000L).contains(file));
+        } finally {
+            engine.clear();
+        }
+    }
+
+    @Test(timeout = 8_000L)
+    public void changeDuringApplyRemainsQueuedBehindCooldown() throws Exception {
+        File directory = temporaryFolder.newFolder("apply-race-managed");
+        File file = new File(directory, "feature.toml");
+        Files.writeString(file.toPath(), "value = 1\n", StandardCharsets.UTF_8);
+        ConfigHotloadEngine engine = createEngine(() -> knownConfigFiles(directory));
+
+        try {
+            engine.configure(100L, 250L, List.of(file), List.of());
+            Files.writeString(file.toPath(), "value = 2\n", StandardCharsets.UTF_8);
+            assertTrue(awaitTouchedFile(engine, file, 5_000L).contains(file));
+
+            assertTrue(engine.processFileChange(file, changedFile -> {
+                try {
+                    Files.writeString(changedFile.toPath(), "value = 3\n", StandardCharsets.UTF_8);
+                } catch (IOException failure) {
+                    throw new UncheckedIOException(failure);
+                }
+                return true;
+            }, null));
+
+            assertTrue(engine.pollTouchedFiles().isEmpty());
+            assertTrue(awaitTouchedFile(engine, file, 5_000L).contains(file));
+            AtomicInteger applies = new AtomicInteger();
+            assertTrue(engine.processFileChange(file, changedFile -> {
+                applies.incrementAndGet();
+                return true;
+            }, null));
+            assertEquals(1, applies.get());
+        } finally {
+            engine.clear();
+        }
+    }
+
+    @Test(timeout = 8_000L)
+    public void snapshotApplyUsesStableQueuedContentWhenFileChangesBeforeApply() throws Exception {
+        File directory = temporaryFolder.newFolder("stable-snapshot-managed");
+        File file = new File(directory, "feature.toml");
+        Files.writeString(file.toPath(), "value = 1\n", StandardCharsets.UTF_8);
+        ConfigHotloadEngine engine = createEngine(() -> knownConfigFiles(directory));
+
+        try {
+            engine.configure(100L, 250L, List.of(file), List.of());
+            Files.writeString(file.toPath(), "value = 2\n", StandardCharsets.UTF_8);
+            ConfigHotloadEngine.StableContentSnapshot snapshot = awaitTouchedSnapshot(engine, file, 5_000L);
+            Files.writeString(file.toPath(), "value = 3\n", StandardCharsets.UTF_8);
+            AtomicReference<String> appliedContent = new AtomicReference<>();
+
+            assertTrue(engine.processSnapshotChange(snapshot, stable -> {
+                appliedContent.set(stable.normalizedContent());
+                return true;
+            }, null));
+
+            assertEquals("value = 2", appliedContent.get());
+            ConfigHotloadEngine.StableContentSnapshot trailing = awaitTouchedSnapshot(engine, file, 5_000L);
+            assertEquals("value = 3", trailing.normalizedContent());
+        } finally {
+            engine.clear();
+        }
+    }
+
+    @Test(timeout = 8_000L)
+    public void failedSnapshotApplyRetriesWithoutAnotherFilesystemEvent() throws Exception {
+        File directory = temporaryFolder.newFolder("snapshot-retry-managed");
+        File file = new File(directory, "feature.toml");
+        Files.writeString(file.toPath(), "value = 1\n", StandardCharsets.UTF_8);
+        ConfigHotloadEngine engine = createEngine(() -> knownConfigFiles(directory));
+
+        try {
+            engine.configure(100L, 250L, List.of(file), List.of());
+            Files.writeString(file.toPath(), "value = 2\n", StandardCharsets.UTF_8);
+            ConfigHotloadEngine.StableContentSnapshot snapshot = awaitTouchedSnapshot(engine, file, 5_000L);
+
+            assertFalse(engine.processSnapshotChange(snapshot, ignored -> false, null));
+            assertTrue(engine.pollTouchedSnapshots().isEmpty());
+
+            ConfigHotloadEngine.StableContentSnapshot retry = awaitTouchedSnapshot(engine, file, 5_000L);
+            assertEquals(snapshot.signature(), retry.signature());
+            assertEquals(snapshot.normalizedContent(), retry.normalizedContent());
+        } finally {
+            engine.clear();
+        }
+    }
+
+    @Test(timeout = 8_000L)
+    public void throwingSnapshotApplyRetriesWithoutAnotherFilesystemEvent() throws Exception {
+        File directory = temporaryFolder.newFolder("snapshot-throw-retry-managed");
+        File file = new File(directory, "feature.toml");
+        Files.writeString(file.toPath(), "value = 1\n", StandardCharsets.UTF_8);
+        ConfigHotloadEngine engine = createEngine(() -> knownConfigFiles(directory));
+
+        try {
+            engine.configure(100L, 250L, List.of(file), List.of());
+            Files.writeString(file.toPath(), "value = 2\n", StandardCharsets.UTF_8);
+            ConfigHotloadEngine.StableContentSnapshot snapshot = awaitTouchedSnapshot(engine, file, 5_000L);
+
+            try {
+                engine.processSnapshotChange(snapshot, ignored -> {
+                    throw new IllegalStateException("apply failed");
+                }, null);
+                throw new AssertionError("expected apply failure");
+            } catch (IllegalStateException expected) {
+                assertEquals("apply failed", expected.getMessage());
+            }
+
+            ConfigHotloadEngine.StableContentSnapshot retry = awaitTouchedSnapshot(engine, file, 5_000L);
+            assertEquals(snapshot.signature(), retry.signature());
+            assertEquals(snapshot.normalizedContent(), retry.normalizedContent());
+        } finally {
+            engine.clear();
+        }
+    }
+
+    @Test(timeout = 8_000L)
+    public void cooldownStartsWhenApplyCompletes() throws Exception {
+        File directory = temporaryFolder.newFolder("completion-cooldown-managed");
+        File file = new File(directory, "feature.toml");
+        Files.writeString(file.toPath(), "value = 1\n", StandardCharsets.UTF_8);
+        ConfigHotloadEngine engine = createEngine(() -> knownConfigFiles(directory));
+
+        try {
+            engine.configure(50L, 300L, List.of(file), List.of());
+            Files.writeString(file.toPath(), "value = 2\n", StandardCharsets.UTF_8);
+            ConfigHotloadEngine.StableContentSnapshot first = awaitTouchedSnapshot(engine, file, 5_000L);
+            Thread.sleep(250L);
+            assertTrue(engine.processSnapshotChange(first, ignored -> true, null));
+
+            Files.writeString(file.toPath(), "value = 3\n", StandardCharsets.UTF_8);
+            Thread.sleep(100L);
+            assertTrue(engine.pollTouchedSnapshots().isEmpty());
+            Thread.sleep(100L);
+            assertTrue(engine.pollTouchedSnapshots().isEmpty());
+
+            ConfigHotloadEngine.StableContentSnapshot trailing = awaitTouchedSnapshot(engine, file, 5_000L);
+            assertEquals("value = 3", trailing.normalizedContent());
         } finally {
             engine.clear();
         }
@@ -268,6 +437,24 @@ public class ConfigHotloadEngineTest {
             Thread.sleep(25L);
         }
         return touched;
+    }
+
+    private ConfigHotloadEngine.StableContentSnapshot awaitTouchedSnapshot(
+            ConfigHotloadEngine engine,
+            File expected,
+            long timeoutMs
+    ) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs);
+        while (System.nanoTime() < deadline) {
+            Set<ConfigHotloadEngine.StableContentSnapshot> snapshots = engine.pollTouchedSnapshots();
+            for (ConfigHotloadEngine.StableContentSnapshot snapshot : snapshots) {
+                if (snapshot.file().equals(expected.getAbsoluteFile())) {
+                    return snapshot;
+                }
+            }
+            Thread.sleep(25L);
+        }
+        throw new AssertionError("Timed out waiting for stable snapshot of " + expected);
     }
 
     private String readFile(File file) {

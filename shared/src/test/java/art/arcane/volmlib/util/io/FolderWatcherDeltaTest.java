@@ -5,9 +5,13 @@ import org.junit.Before;
 import org.junit.Test;
 
 import java.io.File;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.attribute.FileTime;
 import java.util.Comparator;
 import java.util.List;
 
@@ -118,7 +122,7 @@ public class FolderWatcherDeltaTest {
     }
 
     @Test
-    public void aNewlyCreatedDirectoryIsNotAlsoDescendedIntoOnTheSamePass() throws Exception {
+    public void aNewlyCreatedDirectoryReportsItsCompletedContentsInTheSamePass() throws Exception {
         FolderWatcher watcher = new FolderWatcher(root.toFile());
         Path nested = root.resolve("burst");
         Files.createDirectory(nested);
@@ -127,9 +131,7 @@ public class FolderWatcherDeltaTest {
 
         assertTrue(watcher.checkModified());
 
-        // Only the directory is new to this watcher; its contents were never seen before, so they
-        // are not double-reported as creations.
-        assertEquals(List.of("burst"), names(watcher.getCreated()));
+        assertEquals(List.of("burst", "one.json", "two.json"), names(watcher.getCreated()));
     }
 
     @Test
@@ -176,5 +178,74 @@ public class FolderWatcherDeltaTest {
 
         assertTrue(watcher.checkModified());
         assertFalse(watcher.wasDeleted());
+    }
+
+    @Test
+    public void sameMetadataAtomicReplacementIsDetected() throws Exception {
+        Path file = root.resolve("atomic.txt");
+        write(file, "one");
+        FileTime originalModified = Files.getLastModifiedTime(file);
+        FileWatcher watcher = new FileWatcher(file.toFile());
+        Path replacement = root.resolve("atomic.tmp");
+        write(replacement, "two");
+        Files.setLastModifiedTime(replacement, originalModified);
+
+        try {
+            Files.move(replacement, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+        } catch (AtomicMoveNotSupportedException unsupported) {
+            Files.move(replacement, file, StandardCopyOption.REPLACE_EXISTING);
+        }
+
+        assertTrue(watcher.checkModified());
+        watcher.close();
+    }
+
+    @Test
+    public void atomicReplacementIsNotReportedAsADeletion() throws Exception {
+        Path file = root.resolve("atomic.json");
+        write(file, "one");
+        FileTime originalModified = Files.getLastModifiedTime(file);
+        FolderWatcher watcher = new FolderWatcher(root.toFile());
+        Path replacement = root.resolve("atomic.tmp");
+        write(replacement, "two");
+        Files.setLastModifiedTime(replacement, originalModified);
+
+        try {
+            Files.move(replacement, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+        } catch (AtomicMoveNotSupportedException unsupported) {
+            Files.move(replacement, file, StandardCopyOption.REPLACE_EXISTING);
+        }
+
+        assertTrue(watcher.checkModified());
+        assertFalse(watcher.getDeleted().contains(file.toFile()));
+        watcher.close();
+    }
+
+    @Test
+    public void deletingRootReportsItsPreviouslyKnownContents() throws Exception {
+        Path file = root.resolve("inside.json");
+        write(file, "1");
+        FolderWatcher watcher = new FolderWatcher(root.toFile());
+
+        Files.delete(file);
+        Files.delete(root);
+
+        assertTrue(watcher.checkModified());
+        assertEquals(List.of("inside.json"), names(watcher.getDeleted()));
+        watcher.close();
+    }
+
+    @Test
+    public void directorySymlinkCycleDoesNotRecurse() throws Exception {
+        Path nested = Files.createDirectory(root.resolve("nested"));
+        try {
+            Files.createSymbolicLink(nested.resolve("back"), root);
+        } catch (UnsupportedOperationException | IOException unsupported) {
+            org.junit.Assume.assumeNoException(unsupported);
+        }
+
+        FolderWatcher watcher = new FolderWatcher(root.toFile());
+        assertFalse(watcher.checkModified());
+        watcher.close();
     }
 }
