@@ -16,8 +16,8 @@ import static org.junit.Assert.assertTrue;
 
 public class DirectorMiniMenuLayoutTest {
     @Test
-    public void rootPageFitsSeventeenEntriesWithinTheNineteenLineBudget() {
-        DirectorRuntimeEngine engine = rootEngine(18);
+    public void rootPageHoldsNineteenEntriesOnASinglePage() {
+        DirectorRuntimeEngine engine = rootEngine(19);
 
         DirectorMiniMenu.DirectorHelpPage page = DirectorMiniMenu.resolveHelp(engine, List.of()).orElseThrow();
         List<String> rendered = DirectorMiniMenu.render(
@@ -26,18 +26,28 @@ public class DirectorMiniMenuLayoutTest {
                 DirectorTextResolver.ENGLISH
         );
 
-        assertEquals(17, page.entries().size());
-        assertEquals(2, page.totalPages());
-        assertEquals(19, DirectorMiniMenu.MENU_LINE_COUNT);
-        assertEquals(DirectorMiniMenu.MENU_LINE_COUNT, rendered.size());
+        assertEquals(19, DirectorMiniMenu.MAX_ENTRIES_PER_PAGE);
+        assertEquals(19, page.entries().size());
+        assertEquals(1, page.totalPages());
+        assertEquals(21, rendered.size());
     }
 
     @Test
-    public void submenuReservesOneLineForItsBackRow() {
+    public void rootPageOnlySpillsPastNineteenEntries() {
+        DirectorRuntimeEngine engine = rootEngine(20);
+
+        DirectorMiniMenu.DirectorHelpPage page = DirectorMiniMenu.resolveHelp(engine, List.of()).orElseThrow();
+
+        assertEquals(19, page.entries().size());
+        assertEquals(2, page.totalPages());
+    }
+
+    @Test
+    public void submenuKeepsTheFullEntryBudgetAndItsBackRow() {
         DirectorRuntimeNode root = group("test", null);
         DirectorRuntimeNode tools = group("tools", root);
         root.addChild(tools);
-        addChildren(tools, 17);
+        addChildren(tools, 19);
         DirectorRuntimeEngine engine = engine(root);
 
         DirectorMiniMenu.DirectorHelpPage page = DirectorMiniMenu.resolveHelp(engine, List.of("tools")).orElseThrow();
@@ -47,9 +57,9 @@ public class DirectorMiniMenuLayoutTest {
                 DirectorTextResolver.ENGLISH
         );
 
-        assertEquals(16, page.entries().size());
-        assertEquals(2, page.totalPages());
-        assertEquals(DirectorMiniMenu.MENU_LINE_COUNT, rendered.size());
+        assertEquals(19, page.entries().size());
+        assertEquals(1, page.totalPages());
+        assertEquals(22, rendered.size());
         assertTrue(rendered.get(1).contains("〈 Back"));
     }
 
@@ -60,7 +70,7 @@ public class DirectorMiniMenuLayoutTest {
 
         List<String> rendered = DirectorMiniMenu.renderConsole(page, DirectorTextResolver.ENGLISH);
 
-        assertEquals(17, page.entries().size());
+        assertEquals(19, page.entries().size());
         assertEquals(21, rendered.size());
         assertEquals("command20 - Category of Commands", rendered.get(20));
     }
