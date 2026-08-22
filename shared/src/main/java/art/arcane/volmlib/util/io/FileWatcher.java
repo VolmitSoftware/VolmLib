@@ -66,8 +66,28 @@ public class FileWatcher implements AutoCloseable {
         return eventDetected || lastModified != m || g != size || !Objects.equals(previousFileKey, fileKey);
     }
 
+    public boolean checkModifiedEvents() {
+        if (closed) {
+            return false;
+        }
+        boolean watchActive = isEventWatchActive();
+        initializeWatchService();
+        if (!isEventWatchActive() || !watchActive) {
+            return checkModified();
+        }
+        boolean eventDetected = drainEvents();
+        if (eventDetected) {
+            readProperties();
+        }
+        return eventDetected;
+    }
+
     public boolean wasDeleted() {
         return !file.exists();
+    }
+
+    boolean isEventWatchActive() {
+        return watchService != null && watchKey != null && watchKey.isValid();
     }
 
     @Override

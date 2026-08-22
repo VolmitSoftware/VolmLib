@@ -61,6 +61,7 @@ public class ConfigHotloadEngine {
     private final Map<String, WatchKey> directoryWatchKeysByPath = new HashMap<>();
     private final Map<String, String> knownSignatures = new ConcurrentHashMap<>();
     private final Map<String, String> knownContents = new ConcurrentHashMap<>();
+    private final Map<String, String> handledNullContentSignatures = new ConcurrentHashMap<>();
     private final Map<String, FileState> pendingStates = new HashMap<>();
     private final Map<String, Long> pendingSinceNanos = new HashMap<>();
     private final Map<String, StableContentSnapshot> queuedTouchedSnapshots = new HashMap<>();
@@ -144,6 +145,10 @@ public class ConfigHotloadEngine {
 
         synchronized (watcherStateLock) {
             updateKnownSnapshot(file, normalize(rawContent));
+            String path = file.getAbsolutePath();
+            pendingStates.remove(path);
+            pendingSinceNanos.remove(path);
+            queuedTouchedSnapshots.remove(path);
         }
     }
 
@@ -173,7 +178,11 @@ public class ConfigHotloadEngine {
         String path = file.getAbsolutePath();
         String before = knownContents.get(path);
         String now = snapshot.normalizedContent();
-        if (Objects.equals(before, now)) {
+        if (now == null && Objects.equals(handledNullContentSignatures.get(path), snapshot.signature())) {
+            knownSignatures.put(path, snapshot.signature());
+            return false;
+        }
+        if (now != null && Objects.equals(before, now)) {
             updateKnownSnapshot(file, snapshot.signature(), now);
             return false;
         }
@@ -184,6 +193,7 @@ public class ConfigHotloadEngine {
         } catch (RuntimeException failure) {
             FileState afterFailure = state(file);
             synchronized (watcherStateLock) {
+                recordRejectedSnapshot(path, snapshot);
                 queueAfterSnapshotApplyLocked(snapshot, afterFailure, false);
                 recordApplyCompletionLocked();
             }
@@ -194,7 +204,7 @@ public class ConfigHotloadEngine {
             if (applied) {
                 updateKnownSnapshot(file, snapshot.signature(), now);
             } else {
-                knownSignatures.put(path, snapshot.signature());
+                recordRejectedSnapshot(path, snapshot);
             }
             queueAfterSnapshotApplyLocked(snapshot, after, applied);
             recordApplyCompletionLocked();
@@ -233,6 +243,7 @@ public class ConfigHotloadEngine {
         directoryWatchers.clear();
         knownSignatures.clear();
         knownContents.clear();
+        handledNullContentSignatures.clear();
         pendingStates.clear();
         pendingSinceNanos.clear();
         queuedTouchedSnapshots.clear();
@@ -281,6 +292,7 @@ public class ConfigHotloadEngine {
         directoryWatchers.clear();
         knownSignatures.clear();
         knownContents.clear();
+        handledNullContentSignatures.clear();
         pendingStates.clear();
         pendingSinceNanos.clear();
         queuedTouchedSnapshots.clear();
@@ -293,12 +305,6 @@ public class ConfigHotloadEngine {
 
     private Set<StableContentSnapshot> pollTouchedSnapshotsLocked() {
         Set<File> touched = new HashSet<>();
-        for (WatchedFile watchedFile : fileWatchers) {
-            if (watchedFile.watcher().checkModified()) {
-                touched.add(watchedFile.file());
-            }
-        }
-
         boolean reconciliationRequired = drainDirectoryEvents(touched);
         boolean fullWatchScan = reconciliationRequired || shouldRunFullWatchScan();
         if (fullWatchScan && directoryWatchService == null) {
@@ -306,6 +312,14 @@ public class ConfigHotloadEngine {
         }
         if (fullWatchScan && registerFallbackDirectoryWatchers()) {
             reconciliationRequired = true;
+        }
+
+        for (WatchedFile watchedFile : fileWatchers) {
+            FileWatcher watcher = watchedFile.watcher();
+            boolean changed = fullWatchScan ? watcher.checkModified() : watcher.checkModifiedEvents();
+            if (changed) {
+                touched.add(watchedFile.file());
+            }
         }
 
         for (WatchedDirectory watchedDirectory : directoryWatchers) {
@@ -657,8 +671,17 @@ public class ConfigHotloadEngine {
         knownSignatures.put(path, signature);
         if (normalizedContent == null) {
             knownContents.remove(path);
+            handledNullContentSignatures.put(path, signature);
         } else {
             knownContents.put(path, normalizedContent);
+            handledNullContentSignatures.remove(path);
+        }
+    }
+
+    private void recordRejectedSnapshot(String path, StableContentSnapshot snapshot) {
+        knownSignatures.put(path, snapshot.signature());
+        if (snapshot.normalizedContent() == null && !"missing".equals(snapshot.signature())) {
+            handledNullContentSignatures.put(path, snapshot.signature());
         }
     }
 

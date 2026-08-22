@@ -141,7 +141,7 @@ public class FolderWatcher extends FileWatcher {
         }
         mergeEvents(events);
 
-        if (rootWatcher && forceFullScan) {
+        if (rootWatcher && (forceFullScan || (!nativeEventsActive && file.isDirectory()))) {
             refreshTreeRegistrations();
         }
         return detected || events.detected() || !changed.isEmpty() || !created.isEmpty() || !deleted.isEmpty();

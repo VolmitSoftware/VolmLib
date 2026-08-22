@@ -16,6 +16,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -232,6 +233,76 @@ public class ConfigHotloadEngineTest {
             }, null);
             assertTrue(second);
             assertEquals(2, applyCalls.get());
+        } finally {
+            engine.clear();
+        }
+    }
+
+    @Test
+    public void nullContentWithReconciledSignatureReachesApplyOnce() throws Exception {
+        File file = new File(temporaryFolder.getRoot(), "unreadable.toml");
+        Files.writeString(file.toPath(), "readable", StandardCharsets.UTF_8);
+        AtomicBoolean readerUnavailable = new AtomicBoolean();
+        ConfigHotloadEngine engine = new ConfigHotloadEngine(
+                watched -> watched != null && watched.getName().endsWith(".toml"),
+                () -> List.of(file),
+                watched -> readerUnavailable.get() ? null : readFile(watched),
+                this::normalize,
+                100L,
+                100L
+        );
+
+        try {
+            engine.configure(100L, 100L, List.of(), List.of());
+            readerUnavailable.set(true);
+            Files.writeString(file.toPath(), "unreadable", StandardCharsets.UTF_8);
+            ConfigHotloadEngine.StableContentSnapshot unreadable = awaitTouchedSnapshot(engine, file, 5_000L);
+            AtomicInteger applyCalls = new AtomicInteger();
+
+            assertFalse(engine.processSnapshotChange(unreadable, snapshot -> {
+                applyCalls.incrementAndGet();
+                return false;
+            }, null));
+            assertFalse(engine.processSnapshotChange(unreadable, snapshot -> {
+                applyCalls.incrementAndGet();
+                return false;
+            }, null));
+
+            assertEquals(1, applyCalls.get());
+        } finally {
+            engine.clear();
+        }
+    }
+
+    @Test
+    public void nullContentForNewReconciledFileReachesApplyOnce() throws Exception {
+        File directory = temporaryFolder.newFolder("new-unreadable-managed");
+        File file = new File(directory, "unreadable.toml");
+        ConfigHotloadEngine engine = new ConfigHotloadEngine(
+                watched -> watched != null && watched.getName().endsWith(".toml"),
+                () -> knownConfigFiles(directory),
+                ignored -> null,
+                this::normalize,
+                100L,
+                100L
+        );
+
+        try {
+            engine.configure(100L, 100L, List.of(), List.of());
+            Files.writeString(file.toPath(), "unreadable", StandardCharsets.UTF_8);
+            ConfigHotloadEngine.StableContentSnapshot unreadable = awaitTouchedSnapshot(engine, file, 5_000L);
+            AtomicInteger applyCalls = new AtomicInteger();
+
+            assertFalse(engine.processSnapshotChange(unreadable, snapshot -> {
+                applyCalls.incrementAndGet();
+                return false;
+            }, null));
+            assertFalse(engine.processSnapshotChange(unreadable, snapshot -> {
+                applyCalls.incrementAndGet();
+                return false;
+            }, null));
+
+            assertEquals(1, applyCalls.get());
         } finally {
             engine.clear();
         }

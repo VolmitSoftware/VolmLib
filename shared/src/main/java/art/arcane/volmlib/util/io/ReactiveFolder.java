@@ -24,14 +24,19 @@ import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.function.LongSupplier;
 
 public class ReactiveFolder {
     public static final long HOTLOAD_COOLDOWN_MILLIS = 3_000L;
     public static final long STABILITY_WINDOW_MILLIS = 250L;
+    static final long FULL_SCAN_INTERVAL_MILLIS = 5_000L;
+    static final long CONTENT_RECONCILIATION_INTERVAL_MILLIS = 2_500L;
     private static final long RECONCILIATION_BYTE_BUDGET = 8L * 1024L * 1024L;
-    private static final int RECONCILIATION_FILE_BUDGET = 256;
+    private static final long RECONCILIATION_TIME_BUDGET_NANOS = TimeUnit.MILLISECONDS.toNanos(10L);
+    static final int RECONCILIATION_FILE_BUDGET = 32;
     private static final int RECONCILIATION_PATH_BUDGET = 1024;
     private static final int RECONCILIATION_BUFFER_BYTES = 8192;
 
@@ -40,6 +45,7 @@ public class ReactiveFolder {
     private final KList<String> watchedExtensions;
     private final KList<String> ignoredPathContains;
     private final KList<String> ignoredNameSuffixes;
+    private final LongSupplier clock;
     private final Set<File> pendingCreated = new LinkedHashSet<>();
     private final Set<File> pendingChanged = new LinkedHashSet<>();
     private final Set<File> pendingDeleted = new LinkedHashSet<>();
@@ -54,7 +60,8 @@ public class ReactiveFolder {
     private DirectoryStream<Path> reconciliationDirectoryStream;
     private Iterator<Path> reconciliationDirectoryIterator;
     private DigestProgress reconciliationDigest;
-    private int checkCycle = 0;
+    private long nextFullScanAtNanos;
+    private long nextReconciliationAtNanos;
     private long lastDetectedAtNanos;
     private long lastDeletionDetectedAtNanos;
     private long lastHotloadAtNanos;
@@ -62,19 +69,31 @@ public class ReactiveFolder {
     private boolean cleared;
     private boolean reconciliationPrimed;
     private boolean reconciliationCycleActive;
+    private boolean reconciliationBatchPending;
 
     public ReactiveFolder(File folder,
                           Consumer3<KList<File>, KList<File>, KList<File>> hotload,
                           KList<String> watchedExtensions,
                           KList<String> ignoredPathContains,
                           KList<String> ignoredNameSuffixes) {
+        this(folder, hotload, watchedExtensions, ignoredPathContains, ignoredNameSuffixes, System::nanoTime);
+    }
+
+    ReactiveFolder(File folder,
+                   Consumer3<KList<File>, KList<File>, KList<File>> hotload,
+                   KList<String> watchedExtensions,
+                   KList<String> ignoredPathContains,
+                   KList<String> ignoredNameSuffixes,
+                   LongSupplier clock) {
         this.folder = folder;
         this.hotload = hotload;
         this.watchedExtensions = watchedExtensions;
         this.ignoredPathContains = ignoredPathContains;
         this.ignoredNameSuffixes = ignoredNameSuffixes;
+        this.clock = Objects.requireNonNull(clock, "clock");
         this.fw = new FolderWatcher(folder);
         fw.checkModified();
+        resetMaintenanceDeadlines(this.clock.getAsLong());
     }
 
     public synchronized void checkIgnore() {
@@ -92,12 +111,13 @@ public class ReactiveFolder {
         reconciliationDigest = null;
         reconciliationPrimed = false;
         reconciliationCycleActive = false;
-        checkCycle = 0;
+        reconciliationBatchPending = false;
         lastDetectedAtNanos = 0L;
         lastDeletionDetectedAtNanos = 0L;
         lastHotloadAtNanos = 0L;
         hotloaded = false;
         cleared = false;
+        resetMaintenanceDeadlines(clock.getAsLong());
     }
 
     public synchronized boolean check() {
@@ -105,33 +125,52 @@ public class ReactiveFolder {
             return false;
         }
 
-        checkCycle++;
-        boolean detected = checkCycle % 3 == 0 ? fw.checkModified() : fw.checkModifiedFast();
+        long now = clock.getAsLong();
+        boolean fullScan = now >= nextFullScanAtNanos;
+        boolean detected = fullScan ? fw.checkModified() : fw.checkModifiedEvents();
+        if (fullScan) {
+            nextFullScanAtNanos = saturatingAdd(
+                    clock.getAsLong(),
+                    TimeUnit.MILLISECONDS.toNanos(FULL_SCAN_INTERVAL_MILLIS)
+            );
+        }
         if (detected) {
             boolean deleted = queueDeleted(fw.getDeleted());
             boolean queued = deleted;
             queued = queueMatches(fw.getChanged(), pendingChanged) || queued;
             queued = queueCreated(fw.getCreated()) || queued;
             if (queued) {
-                lastDetectedAtNanos = System.nanoTime();
+                lastDetectedAtNanos = now;
             }
             if (deleted && !pendingDeleted.isEmpty()) {
                 lastDeletionDetectedAtNanos = lastDetectedAtNanos;
             }
         }
-        if ((!reconciliationPrimed
-                || !reconciliationPriority.isEmpty()
+        boolean reconciliationDue = now >= nextReconciliationAtNanos;
+        boolean reconciliationPending = reconciliationCycleActive
                 || reconciliationDigest != null
-                || checkCycle % 3 == 0)
-                && reconcileContent()) {
-            lastDetectedAtNanos = System.nanoTime();
+                || !reconciliationPriority.isEmpty();
+        if (!reconciliationPrimed || reconciliationDue || reconciliationPending) {
+            boolean allowFullCycle = !reconciliationPrimed || reconciliationDue || reconciliationCycleActive;
+            if (reconcileContent(allowFullCycle)) {
+                lastDetectedAtNanos = now;
+                if (reconciliationCycleActive || reconciliationDigest != null) {
+                    reconciliationBatchPending = true;
+                }
+            }
+        }
+
+        if (reconciliationBatchPending) {
+            if (reconciliationCycleActive || reconciliationDigest != null) {
+                return false;
+            }
+            reconciliationBatchPending = false;
         }
 
         if (pendingCreated.isEmpty() && pendingChanged.isEmpty() && pendingDeleted.isEmpty()) {
             return false;
         }
 
-        long now = System.nanoTime();
         if (!pendingStatesStable(now)) {
             return false;
         }
@@ -160,7 +199,7 @@ public class ReactiveFolder {
             acknowledge(created, changed, deleted, emittedStates);
             return true;
         } finally {
-            lastHotloadAtNanos = System.nanoTime();
+            lastHotloadAtNanos = clock.getAsLong();
         }
     }
 
@@ -282,6 +321,7 @@ public class ReactiveFolder {
         reconciliationDigest = null;
         reconciliationPrimed = false;
         reconciliationCycleActive = false;
+        reconciliationBatchPending = false;
     }
 
     private boolean record(File file, Set<File> target) {
@@ -299,13 +339,17 @@ public class ReactiveFolder {
         return target.add(file) || !pending.equals(previous);
     }
 
-    private boolean reconcileContent() {
+    private boolean reconcileContent(boolean allowFullCycle) {
         boolean queued = false;
+        long startedAt = System.nanoTime();
         long bytes = 0L;
         int files = 0;
         while (bytes < RECONCILIATION_BYTE_BUDGET && files < RECONCILIATION_FILE_BUDGET) {
+            if (files > 0 && System.nanoTime() - startedAt >= RECONCILIATION_TIME_BUDGET_NANOS) {
+                break;
+            }
             if (reconciliationDigest == null) {
-                File file = nextReconciliationFile();
+                File file = nextReconciliationFile(allowFullCycle);
                 if (file == null) {
                     break;
                 }
@@ -330,7 +374,7 @@ public class ReactiveFolder {
         return queued;
     }
 
-    private File nextReconciliationFile() {
+    private File nextReconciliationFile(boolean allowFullCycle) {
         while (!reconciliationPriority.isEmpty()) {
             Iterator<File> iterator = reconciliationPriority.iterator();
             File prioritized = iterator.next();
@@ -348,9 +392,13 @@ public class ReactiveFolder {
                 reconciliationCycleSeen.clear();
                 return null;
             }
+            if (!allowFullCycle) {
+                return null;
+            }
             if (!folder.isDirectory()) {
                 reconciliationPrimed = true;
                 reconciliationCycleSeen.clear();
+                scheduleNextContentReconciliation();
                 return null;
             }
             reconciliationCycleActive = true;
@@ -362,8 +410,10 @@ public class ReactiveFolder {
         while (scanned < RECONCILIATION_PATH_BUDGET) {
             if (reconciliationDirectoryIterator == null) {
                 if (reconciliationDirectories.isEmpty()) {
+                    reconciliationCycleActive = false;
                     reconciliationPrimed = true;
                     reconciliationCycleSeen.clear();
+                    scheduleNextContentReconciliation();
                     return null;
                 }
                 Path directory = reconciliationDirectories.removeFirst();
@@ -600,6 +650,7 @@ public class ReactiveFolder {
                              KList<File> changed,
                              KList<File> deleted,
                              Map<File, FileState> emittedStates) {
+        long now = clock.getAsLong();
         Set<File> emittedFiles = new HashSet<>(created);
         emittedFiles.addAll(changed);
         emittedFiles.addAll(deleted);
@@ -620,12 +671,12 @@ public class ReactiveFolder {
             pendingStates.put(file, current);
             if (current.missing()) {
                 pendingDeleted.add(file);
-                lastDeletionDetectedAtNanos = System.nanoTime();
+                lastDeletionDetectedAtNanos = now;
             } else {
                 pendingChanged.add(file);
                 reconciliationPriority.add(file);
             }
-            lastDetectedAtNanos = System.nanoTime();
+            lastDetectedAtNanos = now;
         }
     }
 
@@ -651,6 +702,25 @@ public class ReactiveFolder {
         } catch (IOException | SecurityException failure) {
             return new FileState("unreadable", "unreadable", false);
         }
+    }
+
+    private void resetMaintenanceDeadlines(long now) {
+        nextFullScanAtNanos = now;
+        nextReconciliationAtNanos = now;
+    }
+
+    private void scheduleNextContentReconciliation() {
+        nextReconciliationAtNanos = saturatingAdd(
+                clock.getAsLong(),
+                TimeUnit.MILLISECONDS.toNanos(CONTENT_RECONCILIATION_INTERVAL_MILLIS)
+        );
+    }
+
+    private long saturatingAdd(long left, long right) {
+        if (right > 0L && left > Long.MAX_VALUE - right) {
+            return Long.MAX_VALUE;
+        }
+        return left + right;
     }
 
     private record FileState(String identity, String attributes, boolean contentVerified) {

@@ -97,6 +97,29 @@ public class LocalizationManagerTest {
         assertTrue(hasCode(result.validation(), LocalizationIssueCode.DUPLICATE_KEY));
     }
 
+    @Test
+    public void installsTheExactPreparedSnapshotWithoutRebuildingIt() {
+        LocalizationManager manager = new LocalizationManager(LocalizationCandidate.english(
+                CATALOG,
+                PluralSelector.oneOther()
+        ));
+        LocaleOverlay overlay = LocaleOverlay.builder("prepared")
+                .text("menu.title", "Prepared title")
+                .text("menu.body", "Prepared body {player}")
+                .build();
+        LocalizationSnapshot prepared = LocalizationSnapshot.create(new LocalizationCandidate(
+                CATALOG,
+                List.of(overlay),
+                PluralSelector.oneOther()
+        ));
+
+        LocalizationReloadResult result = manager.install(prepared);
+
+        assertTrue(result.applied());
+        assertSame(prepared, result.current());
+        assertSame(prepared, manager.snapshot());
+    }
+
     private boolean hasCode(LocalizationValidationResult result, LocalizationIssueCode code) {
         for (LocalizationIssue issue : result.issues()) {
             if (issue.code() == code) {

@@ -14,6 +14,15 @@ public final class LocalizationManager {
         return current.get();
     }
 
+    public LocalizationReloadResult install(LocalizationSnapshot preparedSnapshot) {
+        LocalizationSnapshot next = Objects.requireNonNull(
+                preparedSnapshot,
+                "Prepared localization snapshot cannot be null"
+        );
+        LocalizationSnapshot previous = current.getAndSet(next);
+        return LocalizationReloadResult.applied(previous, next);
+    }
+
     public LocalizationReloadResult reload(LocalizationCandidate candidate) {
         try {
             LocalizationSnapshot next = LocalizationSnapshot.create(

@@ -185,6 +185,113 @@ public class FolderWatcherDeltaTest {
         }
     }
 
+    @Test(timeout = 8_000L)
+    public void eventOnlyPassRegistersWhenMissingRootAppears() throws Exception {
+        Path watchedRoot = root.resolve("late-root");
+        FolderWatcher watcher = new FolderWatcher(watchedRoot.toFile());
+
+        try {
+            assertFalse(watcher.isEventWatchActive());
+            Path nested = Files.createDirectories(watchedRoot.resolve("nested"));
+            Path created = nested.resolve("created.json");
+            write(created, "1");
+
+            assertTrue(awaitEventChange(
+                    watcher,
+                    candidate -> names(candidate.getCreated()).contains("created.json"),
+                    5_000L
+            ));
+            Assume.assumeTrue(watcher.isEventWatchActive());
+
+            write(created, "22");
+            assertTrue(awaitEventChange(
+                    watcher,
+                    candidate -> names(candidate.getChanged()).contains("created.json"),
+                    5_000L
+            ));
+        } finally {
+            watcher.close();
+        }
+    }
+
+    @Test(timeout = 8_000L)
+    public void eventOnlyPassRegistersWhenMissingRootAppearsEmpty() throws Exception {
+        Path watchedRoot = root.resolve("late-empty-root");
+        FolderWatcher watcher = new FolderWatcher(watchedRoot.toFile());
+
+        try {
+            assertFalse(watcher.isEventWatchActive());
+            Files.createDirectories(watchedRoot);
+
+            assertFalse(watcher.checkModifiedEvents());
+            Assume.assumeTrue(watcher.isEventWatchActive());
+
+            Path created = watchedRoot.resolve("created.json");
+            write(created, "1");
+            assertTrue(awaitEventChange(
+                    watcher,
+                    candidate -> names(candidate.getCreated()).contains("created.json"),
+                    5_000L
+            ));
+        } finally {
+            watcher.close();
+        }
+    }
+
+    @Test
+    public void eventOnlyFilePassDoesNotRestatAnIdleFile() throws Exception {
+        Path file = root.resolve("event-file.json");
+        write(file, "1");
+        CountingFileWatcher watcher = new CountingFileWatcher(file.toFile());
+
+        try {
+            Assume.assumeTrue(watcher.isEventWatchActive());
+            assertFalse(watcher.checkModifiedEvents());
+            assertFalse(watcher.checkModifiedEvents());
+            assertEquals(0, watcher.propertiesReadCount());
+
+            write(file, "22");
+            assertTrue(awaitFileEventChange(watcher, 5_000L));
+            assertTrue(watcher.propertiesReadCount() > 0);
+            assertFalse(watcher.checkModified());
+        } finally {
+            watcher.close();
+        }
+    }
+
+    @Test
+    public void eventOnlyFilePassFallsBackWhenNativeWatchingIsDisabled() throws Exception {
+        Path file = root.resolve("fallback-file.json");
+        write(file, "1");
+        FileWatcher watcher = new FileWatcher(file.toFile(), false);
+
+        try {
+            assertFalse(watcher.checkModifiedEvents());
+            write(file, "22");
+            assertTrue(watcher.checkModifiedEvents());
+        } finally {
+            watcher.close();
+        }
+    }
+
+    @Test
+    public void eventOnlyFilePassReconcilesWhenMissingParentAppears() throws Exception {
+        Path parent = root.resolve("late-parent");
+        Path file = parent.resolve("config.json");
+        FileWatcher watcher = new FileWatcher(file.toFile());
+
+        try {
+            assertFalse(watcher.isEventWatchActive());
+            Files.createDirectories(parent);
+            write(file, "1");
+
+            assertTrue(watcher.checkModifiedEvents());
+            assertTrue(watcher.isEventWatchActive());
+        } finally {
+            watcher.close();
+        }
+    }
+
     @Test
     public void fileWatcherTracksSizeAndAbsence() throws Exception {
         Path file = root.resolve("plain.txt");
@@ -299,5 +406,36 @@ public class FolderWatcherDeltaTest {
             Thread.sleep(25L);
         }
         return false;
+    }
+
+    private boolean awaitFileEventChange(FileWatcher watcher, long timeoutMs) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs);
+        while (System.nanoTime() < deadline) {
+            if (watcher.checkModifiedEvents()) {
+                return true;
+            }
+            Thread.sleep(25L);
+        }
+        return false;
+    }
+
+    private static final class CountingFileWatcher extends FileWatcher {
+        private int propertiesReadCount;
+
+        private CountingFileWatcher(File file) {
+            super(file, true, false);
+            checkModified();
+            propertiesReadCount = 0;
+        }
+
+        @Override
+        protected void readProperties() {
+            propertiesReadCount++;
+            super.readProperties();
+        }
+
+        private int propertiesReadCount() {
+            return propertiesReadCount;
+        }
     }
 }
