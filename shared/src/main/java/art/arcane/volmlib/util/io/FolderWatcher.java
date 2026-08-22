@@ -35,6 +35,7 @@ public class FolderWatcher extends FileWatcher {
     private KList<File> pendingDeleted;
     private boolean deltaTracking;
     private WatchService treeWatchService;
+    private boolean nativeRegistrationComplete;
     private boolean cleared;
 
     public FolderWatcher(File file) {
@@ -110,23 +111,31 @@ public class FolderWatcher extends FileWatcher {
 
     @Override
     public boolean checkModified() {
-        return checkModified(true);
+        return checkModified(true, false);
     }
 
     public boolean checkModifiedFast() {
-        return checkModified(false);
+        return checkModified(false, false);
     }
 
-    private boolean checkModified(boolean fullScan) {
+    public boolean checkModifiedEvents() {
+        return checkModified(false, true);
+    }
+
+    private boolean checkModified(boolean fullScan, boolean eventOnly) {
         if (cleared) {
             return false;
         }
 
         EventDelta events = rootWatcher ? drainTreeEvents() : EventDelta.empty();
         boolean forceFullScan = fullScan || events.reconciliationRequired();
+        boolean nativeEventsActive = isEventWatchActive();
         boolean detected;
         if (forceFullScan) {
             detected = scanFull();
+        } else if (eventOnly && nativeEventsActive) {
+            resetDeltas();
+            detected = false;
         } else {
             detected = scanFast();
         }
@@ -204,6 +213,13 @@ public class FolderWatcher extends FileWatcher {
         pendingDeleted.clear();
     }
 
+    boolean isEventWatchActive() {
+        return rootWatcher
+                && treeWatchService != null
+                && nativeRegistrationComplete
+                && !watchedDirectoryPaths.isEmpty();
+    }
+
     private void mergeEvents(EventDelta events) {
         addUnique(created, events.created());
         addUnique(changed, events.changed());
@@ -257,7 +273,10 @@ public class FolderWatcher extends FileWatcher {
                             }
                             eventCreated.add(affectedFile);
                             if (Files.isDirectory(affected)) {
-                                registerTree(affected);
+                                if (!registerTree(affected)) {
+                                    nativeRegistrationComplete = false;
+                                    reconciliationRequired = true;
+                                }
                                 collectCurrentFiles(affected, eventCreated);
                             }
                         } else if (event.kind() == StandardWatchEventKinds.ENTRY_DELETE) {
@@ -295,7 +314,7 @@ public class FolderWatcher extends FileWatcher {
         }
         try {
             treeWatchService = FileSystems.getDefault().newWatchService();
-            registerTree(file.toPath());
+            nativeRegistrationComplete = registerTree(file.toPath());
         } catch (IOException | UnsupportedOperationException | SecurityException ignored) {
             closeTreeWatchService();
         }
@@ -306,13 +325,13 @@ public class FolderWatcher extends FileWatcher {
         if (treeWatchService == null || !file.isDirectory()) {
             return;
         }
-        registerTree(file.toPath());
+        nativeRegistrationComplete = registerTree(file.toPath());
     }
 
-    private void registerTree(Path root) {
+    private boolean registerTree(Path root) {
         WatchService service = treeWatchService;
         if (service == null || root == null || !Files.isDirectory(root)) {
-            return;
+            return false;
         }
         try {
             Files.walkFileTree(root, new SimpleFileVisitor<>() {
@@ -322,7 +341,9 @@ public class FolderWatcher extends FileWatcher {
                     return FileVisitResult.CONTINUE;
                 }
             });
+            return true;
         } catch (IOException | SecurityException ignored) {
+            return false;
         }
     }
 
@@ -429,6 +450,7 @@ public class FolderWatcher extends FileWatcher {
         }
         watchedDirectoryPaths.clear();
         watchedDirectoryKeys.clear();
+        nativeRegistrationComplete = false;
         WatchService service = treeWatchService;
         treeWatchService = null;
         if (service == null) {

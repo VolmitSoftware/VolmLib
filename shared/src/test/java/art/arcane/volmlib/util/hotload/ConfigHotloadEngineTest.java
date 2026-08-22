@@ -265,6 +265,57 @@ public class ConfigHotloadEngineTest {
     }
 
     @Test(timeout = 8_000L)
+    public void contentReconciliationSlicesAndFindsALateSilentEditWithoutWatchers() throws Exception {
+        File directory = temporaryFolder.newFolder("sliced-reconciliation-managed");
+        List<File> files = new ArrayList<>();
+        for (int i = 0; i < 96; i++) {
+            File file = new File(directory, String.format("feature-%03d.toml", i));
+            Files.writeString(file.toPath(), "value = " + i + "\n", StandardCharsets.UTF_8);
+            files.add(file);
+        }
+        AtomicInteger readerCalls = new AtomicInteger();
+        ConfigHotloadEngine engine = new ConfigHotloadEngine(
+                watched -> watched != null && watched.getName().endsWith(".toml"),
+                () -> files,
+                file -> {
+                    readerCalls.incrementAndGet();
+                    return readFile(file);
+                },
+                this::normalize,
+                200L,
+                100L
+        );
+
+        try {
+            engine.configure(100L, 100L, List.of(), List.of());
+            assertFalse(engine.isDirectoryEventWatchActive());
+            readerCalls.set(0);
+            File changedFile = files.get(files.size() - 1);
+            FileTime originalModified = Files.getLastModifiedTime(changedFile.toPath());
+            Files.writeString(changedFile.toPath(), "value = 96\n", StandardCharsets.UTF_8);
+            Files.setLastModifiedTime(changedFile.toPath(), originalModified);
+
+            assertTrue(engine.pollTouchedFiles().isEmpty());
+            int firstSliceReads = readerCalls.get();
+            assertTrue(firstSliceReads > 0);
+            assertTrue(firstSliceReads <= ConfigHotloadEngine.RECONCILIATION_FILE_BUDGET);
+
+            Set<File> touched = Set.of();
+            int polls = 1;
+            while (!touched.contains(changedFile) && polls < 12) {
+                touched = engine.pollTouchedFiles();
+                polls++;
+            }
+
+            assertTrue(touched.contains(changedFile));
+            assertTrue(readerCalls.get() > ConfigHotloadEngine.RECONCILIATION_FILE_BUDGET);
+            assertTrue(polls > 2);
+        } finally {
+            engine.clear();
+        }
+    }
+
+    @Test(timeout = 8_000L)
     public void changeDuringApplyRemainsQueuedBehindCooldown() throws Exception {
         File directory = temporaryFolder.newFolder("apply-race-managed");
         File file = new File(directory, "feature.toml");

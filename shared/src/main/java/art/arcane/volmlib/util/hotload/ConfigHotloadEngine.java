@@ -44,7 +44,8 @@ public class ConfigHotloadEngine {
     public static final long DEFAULT_HOTLOAD_COOLDOWN_MS = 3_000L;
     private static final long MAX_RECONCILIATION_FILE_BYTES = 2L * 1024L * 1024L;
     private static final long RECONCILIATION_BYTE_BUDGET = 8L * 1024L * 1024L;
-    private static final int RECONCILIATION_FILE_BUDGET = 256;
+    private static final long RECONCILIATION_TIME_BUDGET_NANOS = TimeUnit.MILLISECONDS.toNanos(10L);
+    static final int RECONCILIATION_FILE_BUDGET = 32;
 
     private final Predicate<File> managedConfigFilePredicate;
     private final Supplier<? extends Collection<File>> knownFilesSupplier;
@@ -309,7 +310,7 @@ public class ConfigHotloadEngine {
 
         for (WatchedDirectory watchedDirectory : directoryWatchers) {
             FolderWatcher watcher = watchedDirectory.watcher();
-            boolean changed = fullWatchScan ? watcher.checkModified() : watcher.checkModifiedFast();
+            boolean changed = fullWatchScan ? watcher.checkModified() : watcher.checkModifiedEvents();
             if (!changed) {
                 continue;
             }
@@ -409,10 +410,14 @@ public class ConfigHotloadEngine {
 
     private Set<File> scanForMissedChanges() {
         Set<File> changed = new HashSet<>();
+        long startedAt = System.nanoTime();
         long bytes = 0L;
         int files = 0;
         while (signatureReconciliationIndex < signatureReconciliationFiles.size()
                 && files < RECONCILIATION_FILE_BUDGET) {
+            if (files > 0 && System.nanoTime() - startedAt >= RECONCILIATION_TIME_BUDGET_NANOS) {
+                break;
+            }
             File file = signatureReconciliationFiles.get(signatureReconciliationIndex);
             long size = reconciliationSize(file);
             if (files > 0 && bytes + size > RECONCILIATION_BYTE_BUDGET) {

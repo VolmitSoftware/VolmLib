@@ -1,6 +1,7 @@
 package art.arcane.volmlib.util.io;
 
 import org.junit.After;
+import org.junit.Assume;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -14,6 +15,8 @@ import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.FileTime;
 import java.util.Comparator;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
+import java.util.function.Predicate;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -147,6 +150,41 @@ public class FolderWatcherDeltaTest {
         assertEquals(List.of("edited.json"), names(watcher.getChanged()));
     }
 
+    @Test(timeout = 8_000L)
+    public void eventOnlyPassReportsNestedCreateModifyAndDelete() throws Exception {
+        Path nested = Files.createDirectory(root.resolve("nested-events"));
+        Path existing = nested.resolve("existing.json");
+        write(existing, "1");
+        FolderWatcher watcher = new FolderWatcher(root.toFile());
+
+        try {
+            Assume.assumeTrue(watcher.isEventWatchActive());
+            Path created = nested.resolve("created.json");
+            write(created, "1");
+            assertTrue(awaitEventChange(
+                    watcher,
+                    candidate -> names(candidate.getCreated()).contains("created.json"),
+                    5_000L
+            ));
+
+            write(existing, "22");
+            assertTrue(awaitEventChange(
+                    watcher,
+                    candidate -> names(candidate.getChanged()).contains("existing.json"),
+                    5_000L
+            ));
+
+            Files.delete(existing);
+            assertTrue(awaitEventChange(
+                    watcher,
+                    candidate -> names(candidate.getDeleted()).contains("existing.json"),
+                    5_000L
+            ));
+        } finally {
+            watcher.close();
+        }
+    }
+
     @Test
     public void fileWatcherTracksSizeAndAbsence() throws Exception {
         Path file = root.resolve("plain.txt");
@@ -247,5 +285,19 @@ public class FolderWatcherDeltaTest {
         FolderWatcher watcher = new FolderWatcher(root.toFile());
         assertFalse(watcher.checkModified());
         watcher.close();
+    }
+
+    private boolean awaitEventChange(FolderWatcher watcher,
+                                     Predicate<FolderWatcher> expected,
+                                     long timeoutMs) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs);
+        while (System.nanoTime() < deadline) {
+            watcher.checkModifiedEvents();
+            if (expected.test(watcher)) {
+                return true;
+            }
+            Thread.sleep(25L);
+        }
+        return false;
     }
 }
