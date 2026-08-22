@@ -224,6 +224,11 @@ public class FolderWatcher extends FileWatcher {
         addUnique(created, events.created());
         addUnique(changed, events.changed());
         addUnique(deleted, events.deleted());
+        // Writing a file's first bytes raises ENTRY_CREATE and ENTRY_MODIFY together on Windows,
+        // and a removal can arrive the same way, so the same file would otherwise be reported as
+        // created and changed in one poll. The stronger event wins.
+        changed.removeIf(created::contains);
+        changed.removeIf(deleted::contains);
     }
 
     private void addUnique(KList<File> target, Set<File> values) {

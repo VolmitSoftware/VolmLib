@@ -97,7 +97,11 @@ public final class CharacterizationBoardRenderHarness implements AutoCloseable {
             if (entry.isBlank()) {
                 continue;
             }
-            String normalized = entry.replace('\\', '/');
+            // java.class.path can arrive with doubled separators on Windows, which turns the
+            // exclusions below into a silent no-op and leaks the stub Player into the isolated
+            // loader. Collapse the repeats before matching; each URL is still built from the
+            // untouched entry, so a UNC prefix is unaffected.
+            String normalized = entry.replace('\\', '/').replaceAll("/{2,}", "/");
             if (normalized.contains("build/classes/java/test") || normalized.contains("build/resources/test")) {
                 continue;
             }

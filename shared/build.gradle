@@ -134,7 +134,7 @@ dependencies {
 publishing {
     publications {
         create('mavenJava', MavenPublication) {
-            artifactId = 'volmlib-shared'
+            artifactId = providers.gradleProperty('volmLibArtifactId').orElse('volmlib-shared').get()
             from(components.java)
         }
     }
