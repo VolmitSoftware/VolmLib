@@ -56,12 +56,12 @@ public class DelegateStream {
         }
 
         @Override
-        public int read(byte @NotNull [] b, int off, int len) throws IOException {
+        public int read(@NotNull byte[] b, int off, int len) throws IOException {
             return delegate.read(b, off, len);
         }
 
         @Override
-        public byte @NotNull [] readAllBytes() throws IOException {
+        public @NotNull byte[] readAllBytes() throws IOException {
             return delegate.readAllBytes();
         }
 
@@ -71,7 +71,7 @@ public class DelegateStream {
         }
 
         @Override
-        public byte @NotNull [] readNBytes(int len) throws IOException {
+        public @NotNull byte[] readNBytes(int len) throws IOException {
             return delegate.readNBytes(len);
         }
 
@@ -106,7 +106,7 @@ public class DelegateStream {
         }
 
         @Override
-        public void write(byte @NotNull [] b, int off, int len) throws IOException {
+        public void write(@NotNull byte[] b, int off, int len) throws IOException {
             delegate.write(b, off, len);
         }
 
