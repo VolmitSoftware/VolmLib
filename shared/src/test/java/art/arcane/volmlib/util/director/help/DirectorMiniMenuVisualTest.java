@@ -109,6 +109,37 @@ public class DirectorMiniMenuVisualTest {
     }
 
     @Test
+    public void contentPagesUseTheSameBannerAndBidirectionalFooter() {
+        DirectorMiniMenu.ContentPage page = DirectorMiniMenu.paginate(40, 2, 15);
+        DirectorMiniMenu.Theme theme = DirectorMiniMenu.Theme.irisGreen();
+        String header = DirectorMiniMenu.banner("/iris examples", page, theme);
+        String footer = DirectorMiniMenu.paginationBar(
+                page,
+                "/iris examples",
+                theme,
+                DirectorTextResolver.ENGLISH
+        );
+
+        assertTrue(header.contains("/iris examples {2/3}"));
+        assertTrue(footer.contains("〈 Page 1"));
+        assertTrue(footer.contains("<click:run_command:/iris examples page=1>"));
+        assertTrue(footer.contains("Page 3 ❭"));
+        assertTrue(footer.contains("<click:run_command:/iris examples page=3>"));
+    }
+
+    @Test
+    public void contentPagesClampRequestsAndExposeTheirSlice() {
+        assertEquals(
+                new DirectorMiniMenu.ContentPage(2, 2, 15, 25, 25),
+                DirectorMiniMenu.paginate(25, 3, 15)
+        );
+        assertEquals(
+                new DirectorMiniMenu.ContentPage(1, 1, 0, 0, 0),
+                DirectorMiniMenu.paginate(0, 0, 15)
+        );
+    }
+
+    @Test
     public void backslashesInAuthorTextStayLiteralInsideHovers() {
         DirectorRuntimeEngine localEngine = DirectorEngineFactory.create(new BackslashCommands());
         DirectorMiniMenu.DirectorHelpPage page = DirectorMiniMenu.resolveHelp(localEngine, List.of(), 10).orElseThrow();

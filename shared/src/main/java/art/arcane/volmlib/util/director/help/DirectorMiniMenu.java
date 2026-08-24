@@ -366,6 +366,14 @@ public final class DirectorMiniMenu {
                 + spaces(pad) + "]</gradient></strikethrough></font>";
     }
 
+    public static String banner(String title, ContentPage page, Theme theme) {
+        if (page == null) {
+            return banner(title, theme);
+        }
+
+        return banner(page.title(title), theme);
+    }
+
     public static String bar(Theme theme) {
         return "<font:minecraft:uniform><strikethrough><gradient:" + theme.borderRight() + ":" + theme.borderLeft() + ">"
                 + spaces(FOOTER_WIDTH) + "</gradient></strikethrough></font>";
@@ -528,22 +536,82 @@ public final class DirectorMiniMenu {
     }
 
     private static String renderFooter(DirectorHelpPage page, Theme theme, DirectorTextResolver resolver) {
+        return renderPaginationBar(
+                page.hasPrevious(),
+                page.hasNext(),
+                page.page() - 1,
+                page.page() + 1,
+                page.previousCommand(),
+                page.nextCommand(),
+                theme,
+                resolver
+        );
+    }
+
+    public static String paginationBar(
+            ContentPage page,
+            String command,
+            Theme theme,
+            DirectorTextResolver resolver
+    ) {
+        if (page == null || theme == null) {
+            return "";
+        }
+
+        DirectorTextResolver activeResolver = resolver == null ? DirectorTextResolver.ENGLISH : resolver;
+        return renderPaginationBar(
+                page.hasPrevious(),
+                page.hasNext(),
+                page.page() - 1,
+                page.page() + 1,
+                page.previousCommand(command),
+                page.nextCommand(command),
+                theme,
+                activeResolver
+        );
+    }
+
+    public static ContentPage paginate(int itemCount, int requestedPage, int pageSize) {
+        if (itemCount < 0) {
+            throw new IllegalArgumentException("item count must not be negative");
+        }
+        if (pageSize < 1) {
+            throw new IllegalArgumentException("page size must be positive");
+        }
+
+        int totalPages = itemCount == 0 ? 1 : ((itemCount - 1) / pageSize) + 1;
+        int page = Math.max(1, Math.min(requestedPage, totalPages));
+        int startIndex = (page - 1) * pageSize;
+        int endIndex = Math.min(startIndex + pageSize, itemCount);
+        return new ContentPage(page, totalPages, startIndex, endIndex, itemCount);
+    }
+
+    private static String renderPaginationBar(
+            boolean hasPrevious,
+            boolean hasNext,
+            int previousPage,
+            int nextPage,
+            String previousCommand,
+            String nextCommand,
+            Theme theme,
+            DirectorTextResolver resolver
+    ) {
         StringBuilder line = new StringBuilder();
         int fill = FOOTER_WIDTH;
 
-        if (page.hasPrevious()) {
+        if (hasPrevious) {
             fill -= FOOTER_BUTTON_WIDTH;
             line.append("<hover:show_text:'")
                     .append(escapeAttr(escapeText(resolve(resolver, DirectorHelpMessages.PREVIOUS_PAGE))))
                     .append("'><click:run_command:")
-                    .append(page.previousCommand())
+                    .append(previousCommand)
                     .append("><").append(theme.primaryLeft()).append(">〈 ")
                     .append(escapeText(resolve(resolver, DirectorHelpMessages.PAGE))).append(" ")
-                    .append(page.page() - 1)
+                    .append(previousPage)
                     .append("</").append(theme.primaryLeft()).append("></click></hover> ");
         }
 
-        if (page.hasNext()) {
+        if (hasNext) {
             fill -= FOOTER_BUTTON_WIDTH;
         }
 
@@ -552,14 +620,14 @@ public final class DirectorMiniMenu {
                 .append(spaces(fill))
                 .append("</gradient></strikethrough></font>");
 
-        if (page.hasNext()) {
+        if (hasNext) {
             line.append(" <hover:show_text:'")
                     .append(escapeAttr(escapeText(resolve(resolver, DirectorHelpMessages.NEXT_PAGE))))
                     .append("'><click:run_command:")
-                    .append(page.nextCommand())
+                    .append(nextCommand)
                     .append("><").append(theme.primaryRight()).append(">")
                     .append(escapeText(resolve(resolver, DirectorHelpMessages.PAGE))).append(" ")
-                    .append(page.page() + 1)
+                    .append(nextPage)
                     .append(" ❭</").append(theme.primaryRight()).append("></click></hover>");
         }
 
@@ -803,6 +871,32 @@ public final class DirectorMiniMenu {
             }
 
             return node.getParent().path() + " help=1";
+        }
+    }
+
+    public record ContentPage(int page, int pages, int startIndex, int endIndex, int total) {
+        public String title(String title) {
+            if (pages <= 1) {
+                return title;
+            }
+
+            return title + " {" + page + "/" + pages + "}";
+        }
+
+        public boolean hasPrevious() {
+            return page > 1;
+        }
+
+        public boolean hasNext() {
+            return page < pages;
+        }
+
+        public String previousCommand(String command) {
+            return command + " page=" + (page - 1);
+        }
+
+        public String nextCommand(String command) {
+            return command + " page=" + (page + 1);
         }
     }
 }
