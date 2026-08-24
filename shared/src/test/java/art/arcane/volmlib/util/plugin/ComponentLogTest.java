@@ -16,8 +16,10 @@ import java.util.logging.Logger;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotSame;
 import static org.junit.Assert.assertSame;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -28,13 +30,18 @@ public class ComponentLogTest {
         Plugin plugin = mock(Plugin.class);
         ComponentLogger componentLogger = mock(ComponentLogger.class);
         Logger fallback = logger(new ArrayList<LogRecord>());
-        when(plugin.getComponentLogger()).thenReturn(componentLogger);
+        ComponentText message = ComponentText.legacy("\u00a7eWarning");
 
-        ComponentLog.logLegacy(plugin, fallback, "[Test] ", Level.WARNING, "\u00a7eWarning", null);
+        try (org.mockito.MockedStatic<ComponentLogger> loggerFactory = mockStatic(ComponentLogger.class)) {
+            loggerFactory.when(ComponentLogger::logger).thenReturn(componentLogger);
+            ComponentLog.log(plugin, fallback, "\u00a78[\u00a7dTest\u00a78]\u00a7r ", Level.WARNING, message, null);
+        }
 
         org.mockito.ArgumentCaptor<Component> component = org.mockito.ArgumentCaptor.forClass(Component.class);
         verify(componentLogger).warn(component.capture());
-        assertEquals("\u00a7eWarning", LegacyComponentSerializer.legacySection().serialize(component.getValue()));
+        assertNotSame(message.component(), component.getValue());
+        assertEquals("\u00a78[\u00a7dTest\u00a78]\u00a7r \u00a7eWarning",
+                LegacyComponentSerializer.legacySection().serialize(component.getValue()));
     }
 
     @Test
@@ -48,7 +55,10 @@ public class ComponentLogTest {
         when(plugin.getComponentLogger()).thenReturn(null);
         when(plugin.getLogger()).thenReturn(logger);
 
-        ComponentLog.logLegacy(plugin, fallback, "[Test] ", Level.SEVERE, "\u00a7cFailure", failure);
+        try (org.mockito.MockedStatic<ComponentLogger> loggerFactory = mockStatic(ComponentLogger.class)) {
+            loggerFactory.when(ComponentLogger::logger).thenReturn(null);
+            ComponentLog.logLegacy(plugin, fallback, "[Test] ", Level.SEVERE, "\u00a7cFailure", failure);
+        }
 
         assertEquals(1, records.size());
         assertEquals(Level.SEVERE, records.get(0).getLevel());
@@ -68,6 +78,23 @@ public class ComponentLogTest {
         assertEquals(1, records.size());
         assertEquals(Level.INFO, records.get(0).getLevel());
         assertEquals("[Test] ", records.get(0).getMessage());
+    }
+
+    @Test
+    public void pluginLoggerFallbackDoesNotDuplicateThePlatformPrefix() {
+        List<LogRecord> records = new ArrayList<>();
+        Logger logger = logger(records);
+        Plugin plugin = mock(Plugin.class);
+        when(plugin.getComponentLogger()).thenReturn(null);
+        when(plugin.getLogger()).thenReturn(logger);
+
+        try (org.mockito.MockedStatic<ComponentLogger> loggerFactory = mockStatic(ComponentLogger.class)) {
+            loggerFactory.when(ComponentLogger::logger).thenReturn(null);
+            ComponentLog.logLegacy(plugin, logger, "[Test] ", Level.INFO, "Message", null);
+        }
+
+        assertEquals(1, records.size());
+        assertEquals("Message", records.get(0).getMessage());
     }
 
     private static Logger logger(List<LogRecord> records) {

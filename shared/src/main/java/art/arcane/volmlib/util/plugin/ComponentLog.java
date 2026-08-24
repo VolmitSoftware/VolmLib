@@ -45,14 +45,19 @@ public final class ComponentLog {
         Logger requiredFallback = Objects.requireNonNull(fallbackLogger, "fallbackLogger");
         ComponentText requiredMessage = Objects.requireNonNull(message, "message");
         Level targetLevel = level == null ? Level.INFO : level;
-        if (plugin != null && logComponent(plugin, targetLevel, requiredMessage, failure)) {
+        ComponentText prefix = ComponentText.legacy(fallbackPrefix);
+        ComponentText componentMessage = fallbackPrefix == null || fallbackPrefix.isEmpty()
+                ? requiredMessage
+                : prefix.append(requiredMessage);
+        if (plugin != null && logComponent(plugin, targetLevel, componentMessage, failure)) {
             return;
         }
 
-        Logger targetLogger = resolveLogger(plugin, requiredFallback);
+        Logger pluginLogger = resolvePluginLogger(plugin);
+        Logger targetLogger = pluginLogger == null ? requiredFallback : pluginLogger;
         String plainMessage = requiredMessage.plain();
-        if (targetLogger == requiredFallback && fallbackPrefix != null) {
-            plainMessage = fallbackPrefix + plainMessage;
+        if (pluginLogger == null && fallbackPrefix != null) {
+            plainMessage = prefix.plain() + plainMessage;
         }
         if (failure == null) {
             targetLogger.log(targetLevel, plainMessage);
@@ -63,19 +68,19 @@ public final class ComponentLog {
 
     private static boolean logComponent(Plugin plugin, Level level, ComponentText message, Throwable failure) {
         try {
-            Method componentLoggerAccessor = Plugin.class.getMethod("getComponentLogger");
-            Object componentLogger = componentLoggerAccessor.invoke(plugin);
+            Plugin.class.getMethod("getComponentLogger");
+            ClassLoader classLoader = Plugin.class.getClassLoader();
+            Class<?> componentLoggerType = Class.forName(COMPONENT_LOGGER_CLASS, true, classLoader);
+            Object componentLogger = componentLoggerType.getMethod("logger").invoke(null);
             if (componentLogger == null) {
                 return false;
             }
 
-            ClassLoader classLoader = Plugin.class.getClassLoader();
             Class<?> miniMessageType = Class.forName(MINI_MESSAGE_CLASS, true, classLoader);
             Object parser = miniMessageType.getMethod("miniMessage").invoke(null);
-            Object component = miniMessageType.getMethod("deserialize", String.class)
+            Object component = miniMessageType.getMethod("deserialize", Object.class)
                     .invoke(parser, message.miniMessage());
             Class<?> componentType = Class.forName(COMPONENT_CLASS, true, classLoader);
-            Class<?> componentLoggerType = Class.forName(COMPONENT_LOGGER_CLASS, true, classLoader);
             invokeComponentLogger(componentLoggerType, componentLogger, componentType, component, level, failure);
             return true;
         } catch (ReflectiveOperationException | LinkageError | SecurityException ignored) {
@@ -89,12 +94,14 @@ public final class ComponentLog {
             ComponentText message,
             Throwable failure) {
         try {
-            Object componentLogger = Plugin.class.getMethod("getComponentLogger").invoke(plugin);
+            Plugin.class.getMethod("getComponentLogger");
+            Class<?> componentLoggerType = Class.forName(COMPONENT_LOGGER_CLASS, true, Plugin.class.getClassLoader());
+            Object componentLogger = componentLoggerType.getMethod("logger").invoke(null);
             if (componentLogger == null) {
                 return false;
             }
             Object component = message.component();
-            for (Method method : componentLogger.getClass().getMethods()) {
+            for (Method method : componentLoggerType.getMethods()) {
                 if (!method.getName().equals(componentMethod(level))) {
                     continue;
                 }
@@ -133,15 +140,14 @@ public final class ComponentLog {
         }
     }
 
-    private static Logger resolveLogger(Plugin plugin, Logger fallbackLogger) {
+    private static Logger resolvePluginLogger(Plugin plugin) {
         if (plugin == null) {
-            return fallbackLogger;
+            return null;
         }
         try {
-            Logger pluginLogger = plugin.getLogger();
-            return pluginLogger == null ? fallbackLogger : pluginLogger;
+            return plugin.getLogger();
         } catch (RuntimeException | LinkageError ignored) {
-            return fallbackLogger;
+            return null;
         }
     }
 
