@@ -344,7 +344,8 @@ public final class TomlCodec {
                     continue;
                 }
 
-                writeSectionHeader(childPath, ConfigDocumentation.buildSectionComments(sourceTag, childPath));
+                writeSectionHeader(childPath,
+                        ConfigDocumentation.buildSectionComments(sourceTag, childPath, field, value));
                 writePojoSection(childPath, value);
             }
         }

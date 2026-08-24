@@ -2,6 +2,7 @@ package art.arcane.volmlib.util.hotload;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import art.arcane.volmlib.util.VolmLog;
 import art.arcane.volmlib.util.io.FileWatcher;
 import art.arcane.volmlib.util.io.FolderWatcher;
 
@@ -619,7 +620,7 @@ public class ConfigHotloadEngine {
         try {
             service.close();
         } catch (IOException e) {
-            e.printStackTrace();
+            VolmLog.warning("Hotload", "Could not close the configuration directory watcher", e);
         }
     }
 

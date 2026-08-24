@@ -20,6 +20,7 @@
 package art.arcane.volmlib.util.data;
 
 
+import art.arcane.volmlib.util.VolmLog;
 import art.arcane.volmlib.util.collection.KList;
 import art.arcane.volmlib.util.collection.KMap;
 import it.unimi.dsi.fastutil.ints.*;
@@ -58,7 +59,7 @@ public abstract class BSupport<P> {
     private final UnresolvedKeyLog unresolved = new UnresolvedKeyLog("Block resolution", 30_000L);
 
     protected void warn(String message) {
-        System.err.println(message);
+        VolmLog.warning("BlockData", message);
     }
 
     protected void debug(String message) {
@@ -66,7 +67,7 @@ public abstract class BSupport<P> {
     }
 
     protected void reportError(Throwable throwable) {
-        throwable.printStackTrace();
+        VolmLog.warning("BlockData", "Block-data resolution failed", throwable);
     }
 
     protected void error(String message) {
@@ -531,7 +532,7 @@ public abstract class BSupport<P> {
 
             return bdx;
         } catch (Throwable e) {
-            e.printStackTrace();
+            reportError(e);
             if (warn) {
                 warnUnresolved(bdxf, "Unknown Block Data '" + bdxf + "'");
             }
@@ -563,7 +564,7 @@ public abstract class BSupport<P> {
 
             return bdx;
         } catch (Throwable e) {
-            e.printStackTrace();
+            reportError(e);
             if (warn) {
                 warnUnresolved(bdxf, "Unknown Block Data '" + bdxf + "'");
             }
@@ -648,7 +649,7 @@ public abstract class BSupport<P> {
                 try {
                     bx = createBlockData(ix.toLowerCase(), warn);
                 } catch (Throwable e) {
-                    e.printStackTrace();
+                    reportError(e);
                 }
             }
 

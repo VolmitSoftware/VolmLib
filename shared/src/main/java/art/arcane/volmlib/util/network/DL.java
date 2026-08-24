@@ -18,6 +18,7 @@
 
 package art.arcane.volmlib.util.network;
 
+import art.arcane.volmlib.util.VolmLog;
 import art.arcane.volmlib.util.collection.KSet;
 import art.arcane.volmlib.util.scheduling.ChronoLatch;
 
@@ -258,7 +259,8 @@ public abstract class DL {
                 try {
                     Thread.sleep(40);
                 } catch (InterruptedException e) {
-                    e.printStackTrace();
+                    Thread.currentThread().interrupt();
+                    VolmLog.fine("Download", "Throttled download sleep was interrupted", e);
                 }
 
                 return transfer(in, o, 8192, mbps / 20);

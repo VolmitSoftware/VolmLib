@@ -1,5 +1,7 @@
 package art.arcane.volmlib.util.scheduling;
 
+import art.arcane.volmlib.util.VolmLog;
+
 import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
@@ -14,7 +16,8 @@ public final class SchedulerBridge {
     private static volatile BiFunction<Runnable, Integer, Integer> asyncRepeatingScheduler = (r, i) -> -1;
     private static volatile IntConsumer cancelScheduler = (taskId) -> {
     };
-    private static volatile Consumer<Throwable> errorHandler = Throwable::printStackTrace;
+    private static volatile Consumer<Throwable> errorHandler =
+            failure -> VolmLog.severe("Scheduler", "Scheduled task failed", failure);
     private static volatile Consumer<String> infoLogger = (message) -> {
     };
     private static volatile Consumer<Thread> threadRegistrar = (thread) -> {

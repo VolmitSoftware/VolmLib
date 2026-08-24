@@ -1,5 +1,7 @@
 package art.arcane.volmlib.util.scheduling;
 
+import art.arcane.volmlib.util.VolmLog;
+
 import java.util.concurrent.locks.ReentrantLock;
 
 public class IrisLock {
@@ -45,7 +47,7 @@ public class IrisLock {
         try {
             lock.unlock();
         } catch (Throwable e) {
-            e.printStackTrace();
+            VolmLog.warning("Lock", "Could not release lock " + name, e);
         }
     }
 }

@@ -18,6 +18,7 @@
 
 package art.arcane.volmlib.util.collection;
 
+import art.arcane.volmlib.util.VolmLog;
 import art.arcane.volmlib.util.collection.KeyPair;
 
 import art.arcane.volmlib.util.function.Consumer2;
@@ -34,7 +35,7 @@ public class KMap<K, V> extends ConcurrentHashMap<K, V> {
     private static final long serialVersionUID = 7288942695300448163L;
 
     private static void reportError(Throwable e) {
-        e.printStackTrace();
+        VolmLog.warning("Collection", "Map operation failed", e);
     }
 
     public KMap() {

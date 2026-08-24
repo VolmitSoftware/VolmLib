@@ -1,5 +1,6 @@
 package art.arcane.volmlib.util.parallel;
 
+import art.arcane.volmlib.util.VolmLog;
 import art.arcane.volmlib.util.collection.KList;
 import lombok.Getter;
 import lombok.Setter;
@@ -26,7 +27,8 @@ public class BurstExecutorSupport {
     private boolean multicore = true;
 
     public BurstExecutorSupport(ExecutorService executor, int burstSizeEstimate) {
-        this(executor, burstSizeEstimate, Throwable::printStackTrace);
+        this(executor, burstSizeEstimate,
+                failure -> VolmLog.severe("BurstExecutor", "Burst task failed", failure));
     }
 
     public BurstExecutorSupport(ExecutorService executor, int burstSizeEstimate, Consumer<Throwable> errorHandler) {
@@ -40,7 +42,9 @@ public class BurstExecutorSupport {
      */
     public BurstExecutorSupport(Supplier<ExecutorService> executorSource, int burstSizeEstimate, Consumer<Throwable> errorHandler) {
         this.executorSource = executorSource;
-        this.errorHandler = errorHandler == null ? Throwable::printStackTrace : errorHandler;
+        this.errorHandler = errorHandler == null
+                ? failure -> VolmLog.severe("BurstExecutor", "Burst task failed", failure)
+                : errorHandler;
         futures = new KList<Future<?>>(burstSizeEstimate);
     }
 

@@ -1,5 +1,6 @@
 package art.arcane.volmlib.util.io;
 
+import art.arcane.volmlib.util.VolmLog;
 import art.arcane.volmlib.util.math.RNG;
 
 import java.io.File;
@@ -12,7 +13,7 @@ public class InstanceState {
         try {
             return Integer.parseInt(Files.readString(instanceFile().toPath(), StandardCharsets.UTF_8).trim());
         } catch (Throwable e) {
-            e.printStackTrace();
+            VolmLog.warning("InstanceState", "Could not read the cached Iris instance identifier", e);
         }
 
         return -1;
@@ -23,7 +24,7 @@ public class InstanceState {
             File f = instanceFile();
             Files.writeString(f.toPath(), Integer.toString(RNG.r.imax()), StandardCharsets.UTF_8);
         } catch (IOException e) {
-            e.printStackTrace();
+            VolmLog.warning("InstanceState", "Could not update the cached Iris instance identifier", e);
         }
     }
 

@@ -18,12 +18,11 @@
 
 package art.arcane.volmlib.util.nbt.mca.palette;
 
+import art.arcane.volmlib.util.VolmLog;
+
 import java.util.Arrays;
-import java.util.logging.Level;
-import java.util.logging.Logger;
 
 public class MCAChunkBiomeContainer<T> {
-    private static final Logger LOGGER = Logger.getLogger(MCAChunkBiomeContainer.class.getName());
     private static final int WIDTH_BITS = MCAMth.ceillog2(16) - 2;
     private static final int HORIZONTAL_MASK = (1 << WIDTH_BITS) - 1;
     private static final int PACKED_X_LENGTH = 1 + MCAMth.log2(MCAMth.smallestEncompassingPowerOfTwo(30000000));
@@ -65,8 +64,8 @@ public class MCAChunkBiomeContainer<T> {
             }
         }
         if (i != -1)
-            LOGGER.log(Level.WARNING, "Invalid biome data received, starting from {0}: {1}",
-                    new Object[]{Integer.valueOf(i), Arrays.toString(aint)});
+            VolmLog.warning("MCA", "Invalid biome data received, starting from " + i + ": "
+                    + Arrays.toString(aint));
     }
 
     private static int ceilDiv(int i, int j) {

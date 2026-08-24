@@ -18,6 +18,7 @@
 
 package art.arcane.volmlib.util.reflect;
 
+import art.arcane.volmlib.util.VolmLog;
 import art.arcane.volmlib.util.collection.KList;
 
 import java.lang.annotation.Annotation;
@@ -53,7 +54,7 @@ public class V {
             return local ? Violator.getDeclaredAnnotation(o.getClass(), t) : Violator.getAnnotation(o.getClass(), t);
         } catch (Throwable e) {
             if (!suppress) {
-                e.printStackTrace();
+                VolmLog.fine("Reflection", "Could not read annotation " + t.getName(), e);
             }
         }
 
@@ -65,7 +66,7 @@ public class V {
             return local ? Violator.getDeclaredAnnotation(Violator.getDeclaredMethod(o.getClass(), mn, pars), t) : Violator.getAnnotation(Violator.getMethod(o.getClass(), mn, pars), t);
         } catch (Throwable e) {
             if (!suppress) {
-                e.printStackTrace();
+                VolmLog.fine("Reflection", "Could not read annotation " + t.getName() + " from method " + mn, e);
             }
         }
 
@@ -77,7 +78,7 @@ public class V {
             return local ? Violator.getDeclaredAnnotation(Violator.getDeclaredField(o.getClass(), mn), t) : Violator.getAnnotation(Violator.getField(o.getClass(), mn), t);
         } catch (Throwable e) {
             if (!suppress) {
-                e.printStackTrace();
+                VolmLog.fine("Reflection", "Could not read annotation " + t.getName() + " from field " + mn, e);
             }
         }
 
@@ -90,7 +91,7 @@ public class V {
             return (T) (local ? Violator.getDeclaredField(o.getClass(), field) : Violator.getField(o.getClass(), field)).get(o);
         } catch (Throwable e) {
             if (!suppress) {
-                e.printStackTrace();
+                VolmLog.fine("Reflection", "Could not read field " + field, e);
             }
         }
 
@@ -112,7 +113,7 @@ public class V {
             return (local ? Violator.getDeclaredMethod(o.getClass(), method, par.toArray(new Class<?>[0])) : Violator.getMethod(o.getClass(), method, par.toArray(new Class<?>[0]))).invoke(o, parameters);
         } catch (Throwable e) {
             if (!suppress) {
-                e.printStackTrace();
+                VolmLog.fine("Reflection", "Could not invoke method " + method, e);
             }
         }
 
@@ -125,7 +126,7 @@ public class V {
             (local ? Violator.getDeclaredField(o.getClass(), field) : Violator.getField(o.getClass(), field)).set(o, value);
         } catch (Throwable e) {
             if (!suppress) {
-                e.printStackTrace();
+                VolmLog.fine("Reflection", "Could not write field " + field, e);
             }
         }
     }

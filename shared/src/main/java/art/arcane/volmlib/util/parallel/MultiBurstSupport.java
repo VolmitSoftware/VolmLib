@@ -1,5 +1,6 @@
 package art.arcane.volmlib.util.parallel;
 
+import art.arcane.volmlib.util.VolmLog;
 import art.arcane.volmlib.util.collection.KList;
 
 import java.util.Collection;
@@ -53,7 +54,9 @@ public class MultiBurstSupport implements ExecutorService {
         this.parallelism = parallelism;
         this.threadCountResolver = threadCountResolver;
         this.millis = millis;
-        this.errorHandler = errorHandler == null ? Throwable::printStackTrace : errorHandler;
+        this.errorHandler = errorHandler == null
+                ? failure -> VolmLog.severe("MultiBurst", "Worker failed in " + name, failure)
+                : errorHandler;
         this.infoHandler = infoHandler;
         this.warnHandler = warnHandler;
         this.shutdownTimeoutMillis = shutdownTimeoutMillis;
@@ -367,7 +370,7 @@ public class MultiBurstSupport implements ExecutorService {
             if (errorHandler != null) {
                 errorHandler.accept(e);
             } else {
-                e.printStackTrace();
+                VolmLog.severe("MultiBurst", "Executor shutdown failed", e);
             }
         }
     }

@@ -1,5 +1,6 @@
 package art.arcane.volmlib.util.director;
 
+import art.arcane.volmlib.util.VolmLog;
 import art.arcane.volmlib.util.collection.KList;
 import art.arcane.volmlib.util.director.annotations.Param;
 import art.arcane.volmlib.util.director.exceptions.DirectorParsingException;
@@ -28,7 +29,7 @@ public abstract class DirectorParameterBase {
     protected abstract DirectorParameterHandler<?> getSystemHandler(Class<?> type);
 
     protected void onHandlerFailure(Throwable throwable) {
-        throwable.printStackTrace();
+        VolmLog.warning("Director", "Could not resolve a command parameter handler", throwable);
     }
 
     public DirectorParameterHandler<?> getHandler() {

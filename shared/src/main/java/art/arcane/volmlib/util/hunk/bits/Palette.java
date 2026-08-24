@@ -18,6 +18,7 @@
 
 package art.arcane.volmlib.util.hunk.bits;
 
+import art.arcane.volmlib.util.VolmLog;
 import art.arcane.volmlib.util.collection.KList;
 import art.arcane.volmlib.util.function.Consumer2;
 import art.arcane.volmlib.util.function.Consumer2IO;
@@ -45,7 +46,7 @@ public interface Palette<T> {
             try {
                 c.accept(a, b);
             } catch (IOException e) {
-                e.printStackTrace();
+                VolmLog.warning("Palette", "Palette iteration failed", e);
             }
         });
     }

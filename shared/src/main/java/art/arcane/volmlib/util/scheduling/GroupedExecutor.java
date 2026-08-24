@@ -1,5 +1,6 @@
 package art.arcane.volmlib.util.scheduling;
 
+import art.arcane.volmlib.util.VolmLog;
 import art.arcane.volmlib.util.collection.KMap;
 import art.arcane.volmlib.util.function.NastyRunnable;
 
@@ -66,7 +67,7 @@ public class GroupedExecutor {
             try {
                 runnable.run();
             } catch (Throwable e) {
-                e.printStackTrace();
+                VolmLog.severe("GroupedExecutor", "Task failed in group " + group, e);
             }
 
             mirror.computeIfPresent(group, (k, v) -> v - 1);

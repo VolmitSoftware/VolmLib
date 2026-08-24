@@ -1,5 +1,7 @@
 package art.arcane.volmlib.util.director.context;
 
+import art.arcane.volmlib.util.VolmLog;
+
 import java.util.HashMap;
 import java.util.Map;
 import java.util.function.Consumer;
@@ -33,7 +35,7 @@ public final class DirectorContextHandlers {
             if (errorReporter != null) {
                 errorReporter.accept(e);
             } else {
-                e.printStackTrace();
+                VolmLog.warning("Director", "Could not build command context handlers", e);
             }
             return new HashMap<>();
         }

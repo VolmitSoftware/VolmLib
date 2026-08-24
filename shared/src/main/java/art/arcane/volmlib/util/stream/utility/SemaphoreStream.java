@@ -18,6 +18,7 @@
 
 package art.arcane.volmlib.util.stream.utility;
 
+import art.arcane.volmlib.util.VolmLog;
 import art.arcane.volmlib.util.stream.BasicStream;
 import art.arcane.volmlib.util.stream.ProceduralStream;
 
@@ -49,7 +50,8 @@ public class SemaphoreStream<T> extends BasicStream<T> {
             semaphore.release();
             return t;
         } catch (InterruptedException e) {
-            e.printStackTrace();
+            Thread.currentThread().interrupt();
+            VolmLog.fine("Stream", "Two-dimensional stream acquisition was interrupted", e);
         }
 
         return null;
@@ -63,7 +65,8 @@ public class SemaphoreStream<T> extends BasicStream<T> {
             semaphore.release();
             return t;
         } catch (InterruptedException e) {
-            e.printStackTrace();
+            Thread.currentThread().interrupt();
+            VolmLog.fine("Stream", "Three-dimensional stream acquisition was interrupted", e);
         }
 
         return null;

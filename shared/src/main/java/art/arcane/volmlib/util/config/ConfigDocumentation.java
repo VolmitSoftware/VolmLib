@@ -90,6 +90,18 @@ public final class ConfigDocumentation {
         return List.of("Settings for " + humanLeaf + ".");
     }
 
+    public static List<String> buildSectionComments(
+            String sourceTag,
+            String path,
+            Field field,
+            Object value
+    ) {
+        if (field != null && field.getAnnotation(ConfigDoc.class) != null) {
+            return buildFieldComments(sourceTag, path, field, value);
+        }
+        return buildSectionComments(sourceTag, path);
+    }
+
     private static String defaultSummary(String sourceTag, String path, Field field) {
         String key = field.getName();
         String lower = key.toLowerCase(Locale.ROOT);

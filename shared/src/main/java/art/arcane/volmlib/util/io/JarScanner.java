@@ -18,6 +18,7 @@
 
 package art.arcane.volmlib.util.io;
 
+import art.arcane.volmlib.util.VolmLog;
 import art.arcane.volmlib.util.collection.KSet;
 
 import java.io.File;
@@ -71,7 +72,9 @@ public class JarScanner {
                         Class<?> clazz = Class.forName(c);
                         classes.add(clazz);
                     } catch (Throwable e) {
-                        if (!report) continue;                        e.printStackTrace();
+                        if (report) {
+                            VolmLog.warning("JarScanner", "Could not load class " + c + " from " + jar, e);
+                        }
                     }
                 }
             }
@@ -93,7 +96,9 @@ public class JarScanner {
                         Class<?> clazz = Class.forName(c);
                         classes.add(clazz);
                     } catch (Throwable e) {
-                        if (!report) continue;                        e.printStackTrace();
+                        if (report) {
+                            VolmLog.warning("JarScanner", "Could not load class " + c + " from " + jar, e);
+                        }
                     }
                 }
             }

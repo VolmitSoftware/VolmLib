@@ -1,5 +1,6 @@
 package art.arcane.volmlib.util.bukkit;
 
+import art.arcane.volmlib.util.VolmLog;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 
@@ -7,8 +8,6 @@ import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
 import java.lang.reflect.Method;
-import java.util.logging.Level;
-import java.util.logging.Logger;
 
 public final class Placeholders {
     private static final String PLACEHOLDER_API_PLUGIN = "PlaceholderAPI";
@@ -16,7 +15,6 @@ public final class Placeholders {
     private static final String SETTER_METHOD = "setPlaceholders";
     private static final long PROBE_INTERVAL_MS = 1000L;
     private static final MethodType SETTER_TYPE = MethodType.methodType(String.class, Player.class, String.class);
-    private static final Logger LOGGER = Logger.getLogger(Placeholders.class.getName());
 
     private static volatile Setter placeholderSetter;
     private static volatile long nextProbeAtMs;
@@ -46,7 +44,7 @@ public final class Placeholders {
         } catch (Throwable throwable) {
             if (!invokeFailureLogged) {
                 invokeFailureLogged = true;
-                LOGGER.log(Level.WARNING, "PlaceholderAPI resolution failed; text is served unresolved", throwable);
+                VolmLog.warning("Placeholders", "PlaceholderAPI resolution failed; text is served unresolved", throwable);
             }
         }
 
@@ -91,7 +89,7 @@ public final class Placeholders {
         } catch (Throwable throwable) {
             if (!lookupFailureLogged) {
                 lookupFailureLogged = true;
-                LOGGER.log(Level.WARNING, "PlaceholderAPI is enabled but " + PLACEHOLDER_API_CLASS + "#" + SETTER_METHOD + " is missing", throwable);
+                VolmLog.warning("Placeholders", "PlaceholderAPI is enabled but " + PLACEHOLDER_API_CLASS + "#" + SETTER_METHOD + " is missing", throwable);
             }
 
             return null;

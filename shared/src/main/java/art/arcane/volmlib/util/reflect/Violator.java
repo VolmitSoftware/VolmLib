@@ -18,6 +18,7 @@
 
 package art.arcane.volmlib.util.reflect;
 
+import art.arcane.volmlib.util.VolmLog;
 import art.arcane.volmlib.util.collection.KList;
 
 import java.lang.annotation.Annotation;
@@ -179,7 +180,7 @@ public class Violator {
             Constructor<?> co = getConstructor(c, cv.toArray(new Class<?>[0]));
             return (T) co.newInstance(parameters);
         } catch (Exception e) {
-            e.printStackTrace();
+            VolmLog.warning("Reflection", "Could not construct " + c.getName(), e);
         }
 
         return null;

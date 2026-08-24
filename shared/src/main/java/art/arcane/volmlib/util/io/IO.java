@@ -39,6 +39,8 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.*;
 import java.util.function.Consumer;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import java.util.stream.Stream;
 import java.util.zip.CRC32;
 import java.util.zip.CheckedInputStream;
@@ -47,6 +49,11 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
 public class IO {
+    private static final Logger LOGGER = Logger.getLogger("VolmLib");
+    private static final long FILE_LOCK_WARNING_MILLIS = 5000L;
+    private static final long FILE_LOCK_TIMEOUT_MILLIS = 60000L;
+    private static final long FILE_LOCK_RETRY_MILLIS = 2L;
+
     @FunctionalInterface
     public interface IOBuilder<T extends Closeable> {
         T apply(FileOutputStream stream) throws IOException;
@@ -129,7 +136,7 @@ public class IO {
             MessageDigest d = MessageDigest.getInstance("SHA-256");
             return bytesToHex(d.digest(b.getBytes(StandardCharsets.UTF_8)));
         } catch (NoSuchAlgorithmException e) {
-            e.printStackTrace();
+            LOGGER.log(Level.SEVERE, "[VolmLib/IO] SHA-256 is unavailable while hashing text", e);
         }
 
         return "¯\\_(ツ)_/¯";
@@ -163,13 +170,13 @@ public class IO {
                 try (var din = new CheckedInputStream(readDeterministic(file), crc)) {
                     fullTransfer(din, new VoidOutputStream(), 8192);
                 } catch (IOException e) {
-                    e.printStackTrace();
+                    LOGGER.log(Level.WARNING, "[VolmLib/IO] Could not include " + file + " in recursive hash", e);
                 }
             }
 
             return crc.getValue();
         } catch (Throwable e) {
-            e.printStackTrace();
+            LOGGER.log(Level.WARNING, "[VolmLib/IO] Recursive hash failed", e);
         }
 
         return 0;
@@ -206,7 +213,7 @@ public class IO {
 
             return crc.getValue();
         } catch (Throwable e) {
-            e.printStackTrace();
+            LOGGER.log(Level.WARNING, "[VolmLib/IO] Recursive metadata hash failed", e);
         }
 
         return 0;
@@ -263,7 +270,7 @@ public class IO {
             din.close();
             return bytesToHex(din.getMessageDigest().digest());
         } catch (Throwable e) {
-            e.printStackTrace();
+            LOGGER.log(Level.WARNING, "[VolmLib/IO] Could not hash " + b, e);
         }
 
         return "¯\\_(ツ)_/¯";
@@ -1860,8 +1867,12 @@ public class IO {
     }
 
     public static FileLock lock(FileChannel channel) throws IOException {
+        return lock(channel, FILE_LOCK_WARNING_MILLIS, FILE_LOCK_TIMEOUT_MILLIS, FILE_LOCK_RETRY_MILLIS);
+    }
+
+    static FileLock lock(FileChannel channel, long warningMillis, long timeoutMillis, long retryMillis) throws IOException {
         long started = System.currentTimeMillis();
-        long warnedAt = 0L;
+        boolean warned = false;
         while (true) {
             try {
                 FileLock fileLock = channel.tryLock();
@@ -1872,17 +1883,17 @@ public class IO {
             }
 
             long waited = System.currentTimeMillis() - started;
-            if (waited - warnedAt >= 5000L) {
-                warnedAt = waited;
-                System.err.println("IO.lock waiting for channel lock: waitedMs=" + waited
-                        + " thread=" + Thread.currentThread().getName());
+            if (!warned && waited >= warningMillis) {
+                warned = true;
+                LOGGER.warning("[VolmLib/IO] File-channel lock is still blocked after " + waited
+                        + " ms on thread " + Thread.currentThread().getName() + "; timeout is " + timeoutMillis + " ms");
             }
-            if (waited >= 60000L) {
+            if (waited >= timeoutMillis) {
                 throw new IOException("Timed out waiting for file lock after " + waited + "ms");
             }
 
             try {
-                Thread.sleep(2L);
+                Thread.sleep(retryMillis);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 throw new IOException("Interrupted while waiting for file lock", e);

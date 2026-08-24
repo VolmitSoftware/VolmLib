@@ -38,8 +38,9 @@ public class TomlConfigRoundTripTest {
         assertTrue(toml.contains("advancedKnob = 3"));
         assertTrue(toml.contains("aliases = [\"&7one\", \"two\"]"));
         assertTrue(toml.contains("mode = \"FANCY\""));
-        assertTrue(toml.contains("# Settings for Rendering."));
+        assertTrue(toml.contains("# Rendering controls shared by every output surface."));
         assertTrue(toml.contains("[rendering]"));
+        assertTrue(toml.contains("# Named multipliers applied during rendering."));
         assertTrue(toml.contains("# Maximum render distance in blocks."));
         assertTrue(toml.contains("maxDistance = 32.5"));
         assertTrue(toml.contains("ticks = [1, 2, 3]"));
@@ -59,6 +60,13 @@ public class TomlConfigRoundTripTest {
         assertTrue(curated.contains("prefix = \"&7[Gloss]\""));
     }
 
+    @Test
+    public void pojoSectionWithoutExplicitDocumentationUsesGenericFallback() {
+        String toml = TomlCodec.toToml(new FallbackRoot(), "round-trip", ConfigExposePolicy.ALL);
+
+        assertTrue(toml.contains("# Settings for Rendering.\n[rendering]"));
+    }
+
     public enum Mode {
         SIMPLE,
         FANCY
@@ -73,7 +81,9 @@ public class TomlConfigRoundTripTest {
         private int advancedKnob = 3;
         private List<String> aliases = new ArrayList<>(List.of("&7one", "two"));
         private Mode mode = Mode.FANCY;
+        @ConfigDoc("Rendering controls shared by every output surface.")
         private Section rendering = new Section();
+        @ConfigDoc("Named multipliers applied during rendering.")
         private Map<String, Double> multipliers = defaultMultipliers();
 
         private static Map<String, Double> defaultMultipliers() {
@@ -130,5 +140,9 @@ public class TomlConfigRoundTripTest {
         public int hashCode() {
             return Objects.hash(maxDistance, ticks, unicode);
         }
+    }
+
+    public static class FallbackRoot {
+        private Section rendering = new Section();
     }
 }

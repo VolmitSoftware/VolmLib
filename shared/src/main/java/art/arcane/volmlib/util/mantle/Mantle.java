@@ -1,5 +1,6 @@
 package art.arcane.volmlib.util.mantle;
 
+import art.arcane.volmlib.util.VolmLog;
 import art.arcane.volmlib.util.cache.CacheKey;
 import art.arcane.volmlib.util.collection.KMap;
 import art.arcane.volmlib.util.collection.KSet;
@@ -737,11 +738,11 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
     }
 
     protected void onWarn(String message) {
-        System.err.println(message);
+        VolmLog.warning("Mantle", message);
     }
 
     protected void onError(Throwable throwable) {
-        throwable.printStackTrace();
+        VolmLog.severe("Mantle", "Persistent world-data operation failed", throwable);
     }
 
     protected boolean shouldRetainSlice(Class<?> sliceType) {

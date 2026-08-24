@@ -9,9 +9,17 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.channels.FileChannel;
+import java.nio.channels.FileLock;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.logging.Handler;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 import java.util.stream.Stream;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
@@ -26,6 +34,47 @@ import static org.mockito.Mockito.mockStatic;
 public class IoSafetyTest {
     @Rule
     public TemporaryFolder temporaryFolder = new TemporaryFolder();
+
+    @Test
+    public void blockedFileLockEmitsOneBrandedWarningBeforeTimeout() throws Exception {
+        File file = temporaryFolder.newFile("locked.bin");
+        List<LogRecord> records = new ArrayList<LogRecord>();
+        Logger logger = Logger.getLogger("VolmLib");
+        Handler handler = new Handler() {
+            @Override
+            public void publish(LogRecord record) {
+                records.add(record);
+            }
+
+            @Override
+            public void flush() {
+            }
+
+            @Override
+            public void close() {
+            }
+        };
+        boolean parentHandlers = logger.getUseParentHandlers();
+        logger.setUseParentHandlers(false);
+        logger.addHandler(handler);
+        try (FileChannel owner = FileChannel.open(file.toPath(), StandardOpenOption.READ, StandardOpenOption.WRITE);
+             FileChannel contender = FileChannel.open(file.toPath(), StandardOpenOption.READ, StandardOpenOption.WRITE);
+             FileLock ignored = owner.lock()) {
+            try {
+                IO.lock(contender, 0L, 20L, 1L);
+                fail("Expected file-lock timeout");
+            } catch (IOException expected) {
+                assertTrue(expected.getMessage().contains("Timed out waiting for file lock"));
+            }
+        } finally {
+            logger.removeHandler(handler);
+            logger.setUseParentHandlers(parentHandlers);
+        }
+
+        assertEquals(1L, records.stream()
+                .filter(record -> record.getMessage().startsWith("[VolmLib/IO]"))
+                .count());
+    }
 
     @Test
     public void recursiveDeleteDoesNotFollowDirectorySymlinks() throws Exception {

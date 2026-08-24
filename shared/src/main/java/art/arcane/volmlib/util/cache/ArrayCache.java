@@ -53,12 +53,7 @@ public interface ArrayCache<T> extends Writable<T> {
     }
 
     default T get(int x, int y) {
-        try {
-            return get((zigZag(y, getHeight()) * getWidth()) + zigZag(x, getWidth()));
-        } catch (Throwable e) {
-            e.printStackTrace();
-            throw e;
-        }
+        return get((zigZag(y, getHeight()) * getWidth()) + zigZag(x, getWidth()));
     }
 
     default void iset(int x, int y, int v) {

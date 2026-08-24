@@ -1,5 +1,6 @@
 package art.arcane.volmlib.util.mantle.runtime;
 
+import art.arcane.volmlib.util.VolmLog;
 import art.arcane.volmlib.util.io.CountingDataInputStream;
 
 import java.io.IOException;
@@ -35,10 +36,10 @@ public interface MantleHooks {
     }
 
     default void onWarn(String message) {
-        System.err.println(message);
+        VolmLog.warning("Mantle", message);
     }
 
     default void onError(Throwable throwable) {
-        throwable.printStackTrace();
+        VolmLog.severe("Mantle", "Persistent world-data operation failed", throwable);
     }
 }

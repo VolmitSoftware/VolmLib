@@ -1,5 +1,6 @@
 package art.arcane.volmlib.util.inventorygui;
 
+import art.arcane.volmlib.util.VolmLog;
 import art.arcane.volmlib.util.collection.KList;
 import art.arcane.volmlib.util.data.MaterialBlock;
 import art.arcane.volmlib.util.scheduling.Callback;
@@ -39,7 +40,7 @@ public class UIElement implements Element {
     }
 
     protected void reportError(Throwable e) {
-        e.printStackTrace();
+        VolmLog.warning("InventoryUI", "Could not build an inventory element", e);
     }
 
     @Override
