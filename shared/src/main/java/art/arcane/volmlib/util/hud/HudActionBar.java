@@ -1,7 +1,6 @@
 package art.arcane.volmlib.util.hud;
 
-import net.md_5.bungee.api.ChatMessageType;
-import net.md_5.bungee.api.chat.TextComponent;
+import art.arcane.volmlib.util.plugin.ComponentMessenger;
 import org.bukkit.entity.Player;
 import org.bukkit.metadata.FixedMetadataValue;
 import org.bukkit.metadata.MetadataValue;
@@ -101,7 +100,7 @@ public final class HudActionBar {
 
   private static void send(Player player, String line) {
     try {
-      player.spigot().sendMessage(ChatMessageType.ACTION_BAR, TextComponent.fromLegacyText(line.isEmpty() ? " " : line));
+      ComponentMessenger.sendActionBarSection(player, line.isEmpty() ? " " : line);
     } catch (Throwable ignored) {
     }
   }

@@ -22,6 +22,9 @@ public final class ColorFormatter {
         if (textToTranslate == null) {
             return null;
         }
+        if (textToTranslate.indexOf(altColorChar) < 0) {
+            return textToTranslate;
+        }
 
         char[] chars = textToTranslate.toCharArray();
         StringBuilder translated = new StringBuilder(chars.length + 16);
@@ -70,6 +73,31 @@ public final class ColorFormatter {
         }
 
         return translated.toString();
+    }
+
+    public static String translateColors(String input) {
+        if (input == null || input.indexOf('&') < 0 && input.indexOf('[') < 0) {
+            return input;
+        }
+        String translated = translateAlternateColorCodes('&', input);
+        if (translated.length() < 8 || translated.indexOf('[') < 0) {
+            return translated;
+        }
+
+        StringBuilder target = new StringBuilder(translated.length() + 16);
+        for (int index = 0; index < translated.length(); index++) {
+            if (translated.charAt(index) == '[' && index + 7 < translated.length()
+                    && translated.charAt(index + 7) == ']') {
+                String hex = translated.substring(index + 1, index + 7);
+                if (isHex(hex)) {
+                    appendHexColor(target, hex);
+                    index += 7;
+                    continue;
+                }
+            }
+            target.append(translated.charAt(index));
+        }
+        return target.toString();
     }
 
     public static String getLastColors(String input) {
