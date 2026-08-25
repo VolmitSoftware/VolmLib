@@ -15,6 +15,12 @@ public final class ComponentLog {
     private ComponentLog() {
     }
 
+    public static String discriminator(String pluginName, String legacyAccent) {
+        String requiredName = Objects.requireNonNull(pluginName, "pluginName");
+        String requiredAccent = Objects.requireNonNull(legacyAccent, "legacyAccent");
+        return "\u00a78[" + requiredAccent + requiredName + "\u00a78]\u00a7r ";
+    }
+
     public static void logLegacy(
             Plugin plugin,
             Logger fallbackLogger,

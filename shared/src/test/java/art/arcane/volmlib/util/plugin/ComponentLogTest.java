@@ -34,7 +34,8 @@ public class ComponentLogTest {
 
         try (org.mockito.MockedStatic<ComponentLogger> loggerFactory = mockStatic(ComponentLogger.class)) {
             loggerFactory.when(ComponentLogger::logger).thenReturn(componentLogger);
-            ComponentLog.log(plugin, fallback, "\u00a78[\u00a7dTest\u00a78]\u00a7r ", Level.WARNING, message, null);
+            ComponentLog.log(plugin, fallback, ComponentLog.discriminator("Test", "&d"),
+                    Level.WARNING, message, null);
         }
 
         org.mockito.ArgumentCaptor<Component> component = org.mockito.ArgumentCaptor.forClass(Component.class);
@@ -42,6 +43,15 @@ public class ComponentLogTest {
         assertNotSame(message.component(), component.getValue());
         assertEquals("\u00a78[\u00a7dTest\u00a78]\u00a7r \u00a7eWarning",
                 LegacyComponentSerializer.legacySection().serialize(component.getValue()));
+    }
+
+    @Test
+    public void discriminatorUsesDarkBracketsAndResetsItsAccent() {
+        ComponentText discriminator = ComponentText.legacy(ComponentLog.discriminator("Test", "&d"));
+
+        assertEquals("\u00a78[\u00a7dTest\u00a78]\u00a7r ",
+                discriminator.legacy());
+        assertEquals("[Test] ", discriminator.plain());
     }
 
     @Test
