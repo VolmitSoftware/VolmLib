@@ -65,7 +65,7 @@ public class ReactiveFolder {
     private long lastDetectedAtNanos;
     private long lastDeletionDetectedAtNanos;
     private long lastHotloadAtNanos;
-    private boolean hotloaded;
+    private boolean hotloadFailed;
     private boolean cleared;
     private boolean reconciliationPrimed;
     private boolean reconciliationCycleActive;
@@ -115,7 +115,7 @@ public class ReactiveFolder {
         lastDetectedAtNanos = 0L;
         lastDeletionDetectedAtNanos = 0L;
         lastHotloadAtNanos = 0L;
-        hotloaded = false;
+        hotloadFailed = false;
         cleared = false;
         resetMaintenanceDeadlines(clock.getAsLong());
     }
@@ -185,7 +185,7 @@ public class ReactiveFolder {
                 && now - lastDeletionDetectedAtNanos < TimeUnit.MILLISECONDS.toNanos(HOTLOAD_COOLDOWN_MILLIS)) {
             return false;
         }
-        if (hotloaded && now - lastHotloadAtNanos < TimeUnit.MILLISECONDS.toNanos(HOTLOAD_COOLDOWN_MILLIS)) {
+        if (hotloadFailed && now - lastHotloadAtNanos < TimeUnit.MILLISECONDS.toNanos(HOTLOAD_COOLDOWN_MILLIS)) {
             return false;
         }
 
@@ -193,10 +193,11 @@ public class ReactiveFolder {
         KList<File> changed = new KList<>(pendingChanged);
         KList<File> deleted = new KList<>(pendingDeleted);
         Map<File, FileState> emittedStates = emittedStates(created, changed, deleted);
-        hotloaded = true;
+        hotloadFailed = true;
         try {
             hotload.accept(created, changed, deleted);
             acknowledge(created, changed, deleted, emittedStates);
+            hotloadFailed = false;
             return true;
         } finally {
             lastHotloadAtNanos = clock.getAsLong();

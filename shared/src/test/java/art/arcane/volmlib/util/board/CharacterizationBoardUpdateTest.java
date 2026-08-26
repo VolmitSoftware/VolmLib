@@ -94,7 +94,7 @@ public class CharacterizationBoardUpdateTest {
     }
 
     @Test
-    public void longLineSplitsAcrossPrefixAndSuffixWithColorCarry() {
+    public void longLineUsesCompleteModernPrefix() {
         CharacterizationBoardRenderHarness h = harness();
         CharacterizationBoardRenderHarness.PlayerHandle player = h.newPlayer();
         Object board = h.newBoard(player, h.settings(h.provider("T", List.of("§a123456789012345678")), "DOWN"));
@@ -102,17 +102,12 @@ public class CharacterizationBoardUpdateTest {
         h.update(board);
 
         CharacterizationBoardRenderHarness.TeamState team = h.ownedScoreboard().teams.get(T0);
-        assertEquals("§a12345678901234", team.prefix);
-        assertEquals("§a5678", team.suffix);
+        assertEquals("§a123456789012345678", team.prefix);
+        assertEquals("", team.suffix);
     }
 
     @Test
-    public void ampersandLinesAreColorTranslatedBeforeTheSplit() {
-        // Board.update() runs translateAlternateColorCodes over every provider line before the
-        // 16-char split. Fleet providers already deliver section-code text, making this a second
-        // (normally redundant) translation — pinned here AS-IS. A lane that removes the update-time
-        // translation must consciously flip this assertion with a note (provider '&' text would
-        // then reach the client untranslated).
+    public void ampersandLinesAreColorTranslatedWithoutTruncation() {
         CharacterizationBoardRenderHarness h = harness();
         CharacterizationBoardRenderHarness.PlayerHandle player = h.newPlayer();
         Object board = h.newBoard(player, h.settings(h.provider("T", List.of("&aHello", "&a123456789012345678")), "DOWN"));
@@ -121,9 +116,8 @@ public class CharacterizationBoardUpdateTest {
 
         CharacterizationBoardRenderHarness.ScoreboardModel model = h.ownedScoreboard();
         assertEquals("§aHello", model.teams.get(T0).prefix);
-        // The translated form (18 visible chars) is what gets split, not the raw '&' form.
-        assertEquals("§a12345678901234", model.teams.get(T1).prefix);
-        assertEquals("§a5678", model.teams.get(T1).suffix);
+        assertEquals("§a123456789012345678", model.teams.get(T1).prefix);
+        assertEquals("", model.teams.get(T1).suffix);
     }
 
     @Test
@@ -241,15 +235,15 @@ public class CharacterizationBoardUpdateTest {
     }
 
     @Test
-    public void titleLongerThanThirtyTwoIsClippedAfterColorTranslation() {
+    public void titleIsNotClippedAfterColorTranslation() {
         CharacterizationBoardRenderHarness h = harness();
         CharacterizationBoardRenderHarness.PlayerHandle player = h.newPlayer();
-        String rawTitle = "&6" + "1234567890123456789012345678901234"; // 2 + 34 = 36 raw chars
+        String rawTitle = "&6" + "1234567890123456789012345678901234";
         Object board = h.newBoard(player, h.settings(h.provider(rawTitle, List.of("Line")), "DOWN"));
 
         h.update(board);
 
-        assertEquals("§6" + "123456789012345678901234567890", h.ownedScoreboard().objectiveDisplayName);
+        assertEquals("§6" + "1234567890123456789012345678901234", h.ownedScoreboard().objectiveDisplayName);
     }
 
     @Test
@@ -274,13 +268,13 @@ public class CharacterizationBoardUpdateTest {
     }
 
     @Test
-    public void titleLimitNeverSplitsACharacterOrFormattingPair() {
+    public void titlePreservesCharactersAndFormattingPairs() {
         CharacterizationBoardRenderHarness h = harness();
         CharacterizationBoardRenderHarness.PlayerHandle player = h.newPlayer();
         String prefix = "1234567890123456789012345678901";
         h.newBoard(player, h.settings(h.provider(prefix + "😀§a", List.of("Line")), "DOWN"));
 
-        assertEquals(prefix, h.ownedScoreboard().objectiveInitialDisplayName);
+        assertEquals(prefix + "😀§a", h.ownedScoreboard().objectiveInitialDisplayName);
     }
 
     @Test

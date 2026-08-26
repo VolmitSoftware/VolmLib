@@ -98,7 +98,7 @@ public class ReactiveFolderTest {
     }
 
     @Test(timeout = 8_000L)
-    public void burstDuringCooldownAppliesLatestContentOnce() throws Exception {
+    public void consecutiveStableChangesApplyWithoutSuccessCooldown() throws Exception {
         Path directory = Files.createTempDirectory("reactive-folder-burst-test");
         Path watchedFile = directory.resolve("dimension.json");
         Files.writeString(watchedFile, "{\"v\":1}", StandardCharsets.UTF_8);
@@ -139,16 +139,9 @@ public class ReactiveFolderTest {
             clock.incrementAndGet();
             assertFalse(folder.check());
             clock.addAndGet(TimeUnit.MILLISECONDS.toNanos(ReactiveFolder.STABILITY_WINDOW_MILLIS + 1L));
-            assertFalse(folder.check());
-            Files.writeString(watchedFile, "{\"v\":4}", StandardCharsets.UTF_8);
-            prioritize(folder, watchedFile);
-            clock.incrementAndGet();
-            assertFalse(folder.check());
-            clock.addAndGet(TimeUnit.MILLISECONDS.toNanos(ReactiveFolder.HOTLOAD_COOLDOWN_MILLIS + 1L));
-
             assertTrue(folder.check());
             assertEquals(2, hotloads.get());
-            assertEquals("{\"v\":4}", applied.get());
+            assertEquals("{\"v\":3}", applied.get());
             assertFalse(folder.check());
         } finally {
             if (folder != null) {

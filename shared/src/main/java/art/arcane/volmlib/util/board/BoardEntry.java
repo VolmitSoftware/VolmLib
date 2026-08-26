@@ -3,9 +3,6 @@ package art.arcane.volmlib.util.board;
 import org.bukkit.ChatColor;
 
 public class BoardEntry {
-    static final int MAX_LINE_LENGTH = 32;
-    private static final int MAX_PART_LENGTH = 16;
-
     private final String prefix;
     private final String suffix;
 
@@ -23,20 +20,11 @@ public class BoardEntry {
     }
 
     public static BoardEntry translateToEntry(String input) {
-        String normalized = normalizeSingleLine(input, MAX_LINE_LENGTH);
-        if (normalized.isEmpty()) {
-            return new BoardEntry("", "");
-        }
+        return new BoardEntry(normalizeSingleLine(input), "");
+    }
 
-        if (normalized.length() <= MAX_PART_LENGTH) {
-            return new BoardEntry(normalized, "");
-        }
-
-        int prefixEnd = safeEnd(normalized, MAX_PART_LENGTH);
-        String prefix = normalized.substring(0, prefixEnd);
-        String suffixInput = ChatColor.getLastColors(prefix) + normalized.substring(prefixEnd);
-        String suffix = normalizeSingleLine(suffixInput, MAX_PART_LENGTH);
-        return new BoardEntry(prefix, suffix);
+    static String normalizeSingleLine(String input) {
+        return normalizeSingleLine(input, Integer.MAX_VALUE);
     }
 
     static String normalizeSingleLine(String input, int maxLength) {

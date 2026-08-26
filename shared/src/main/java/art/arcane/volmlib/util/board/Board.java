@@ -30,7 +30,6 @@ import java.util.stream.IntStream;
 
 public class Board {
     private static final int MAX_LINES = 15;
-    private static final int MAX_TITLE_LENGTH = 32;
     private static final int UNSET_SCORE = Integer.MIN_VALUE;
     private static final String[] CACHED_ENTRIES = new String[ChatColor.values().length];
     private static final boolean CANVAS_RUNTIME = detectCanvasRuntime();
@@ -226,11 +225,11 @@ public class Board {
     }
 
     private static String normalizeTitle(String value) {
-        return BoardEntry.normalizeSingleLine(translateColors(value), MAX_TITLE_LENGTH);
+        return BoardEntry.normalizeSingleLine(translateColors(value));
     }
 
     private static String normalizeLine(String value) {
-        return BoardEntry.normalizeSingleLine(translateColors(value), BoardEntry.MAX_LINE_LENGTH);
+        return BoardEntry.normalizeSingleLine(translateColors(value));
     }
 
     private static String translateColors(String value) {
@@ -463,7 +462,7 @@ public class Board {
         private final Player player;
         private final boolean supported;
         private final Object scoreboard;
-        private final Object objective;
+        private Object objective;
         private final String objectiveName;
         private final String[] teamNames;
         private final String ownershipToken;
@@ -493,12 +492,10 @@ public class Board {
 
             boolean setupSupported = BRIDGE.supported;
             Object builtScoreboard = null;
-            Object builtObjective = null;
             Throwable setupFailure = null;
             if (setupSupported) {
                 try {
                     builtScoreboard = BRIDGE.newScoreboard();
-                    builtObjective = BRIDGE.newObjective(builtScoreboard, this.objectiveName, "");
                 } catch (Throwable throwable) {
                     setupSupported = false;
                     setupFailure = throwable;
@@ -507,7 +504,7 @@ public class Board {
 
             this.supported = setupSupported;
             this.scoreboard = builtScoreboard;
-            this.objective = builtObjective;
+            this.objective = null;
             this.createdObjective = false;
             this.displayedObjective = false;
             this.visibleLines = 0;
@@ -539,24 +536,21 @@ public class Board {
             boolean effectiveHideScores = effectiveHideScoreNumbers(hideScores, BRIDGE.supportsNumberFormats());
             try {
                 if (!createdObjective) {
-                    BRIDGE.setObjectiveDisplayName(objective, title);
-                    BRIDGE.setObjectiveNumberFormat(objective, effectiveHideScores);
+                    objective = BRIDGE.newObjective(scoreboard, objectiveName, title, effectiveHideScores);
                     BRIDGE.sendObjectivePacket(player, objective, BRIDGE.objectiveMethodAdd);
                     createdObjective = true;
                     forgetApplied();
                     appliedTitle = title;
                     appliedHideScores = effectiveHideScores;
-                } else if (!Objects.equals(appliedHideScores, effectiveHideScores)) {
-                    BRIDGE.setObjectiveNumberFormat(objective, effectiveHideScores);
-                    BRIDGE.sendObjectivePacket(player, objective, BRIDGE.objectiveMethodChange);
-                    appliedHideScores = effectiveHideScores;
-                    Arrays.fill(appliedScores, UNSET_SCORE);
-                }
-
-                if (!title.equals(appliedTitle)) {
-                    BRIDGE.setObjectiveDisplayName(objective, title);
+                } else if (!title.equals(appliedTitle) || !Objects.equals(appliedHideScores, effectiveHideScores)) {
+                    boolean numberFormatChanged = !Objects.equals(appliedHideScores, effectiveHideScores);
+                    objective = BRIDGE.newObjective(scoreboard, objectiveName, title, effectiveHideScores);
                     BRIDGE.sendObjectivePacket(player, objective, BRIDGE.objectiveMethodChange);
                     appliedTitle = title;
+                    appliedHideScores = effectiveHideScores;
+                    if (numberFormatChanged) {
+                        Arrays.fill(appliedScores, UNSET_SCORE);
+                    }
                 }
 
                 int size = Math.min(lines.length, MAX_LINES);
@@ -724,10 +718,8 @@ public class Board {
         private final Field serverPlayerConnection;
         private final Method connectionSendPacket;
         private final Constructor<?> scoreboardConstructor;
-        private final Method scoreboardAddObjective;
         private final Method scoreboardAddPlayerToTeam;
-        private final Method objectiveSetDisplayName;
-        private final Method objectiveSetNumberFormat;
+        private final Constructor<?> objectiveConstructor;
         private final Constructor<?> objectivePacketConstructor;
         private final Constructor<?> displayObjectivePacketConstructor;
         private final Constructor<?> playerTeamConstructor;
@@ -755,10 +747,8 @@ public class Board {
             Field foundServerPlayerConnection = null;
             Method foundConnectionSendPacket = null;
             Constructor<?> foundScoreboardConstructor = null;
-            Method foundScoreboardAddObjective = null;
             Method foundScoreboardAddPlayerToTeam = null;
-            Method foundObjectiveSetDisplayName = null;
-            Method foundObjectiveSetNumberFormat = null;
+            Constructor<?> foundObjectiveConstructor = null;
             Constructor<?> foundObjectivePacketConstructor = null;
             Constructor<?> foundDisplayObjectivePacketConstructor = null;
             Constructor<?> foundPlayerTeamConstructor = null;
@@ -803,23 +793,21 @@ public class Board {
                 foundRenderTypeInteger = Enum.valueOf((Class<Enum>) objectiveRenderTypeClass, "INTEGER");
                 foundSidebarDisplaySlot = Enum.valueOf((Class<Enum>) displaySlotClass, "SIDEBAR");
 
-                foundScoreboardAddObjective = findAddObjectiveMethod(
+                foundObjectiveConstructor = findObjectiveConstructor(
                         nmsScoreboardClass,
+                        objectiveClass,
                         objectiveCriteriaClass,
                         nmsComponentClass,
                         objectiveRenderTypeClass,
                         numberFormatClass
                 );
                 foundScoreboardAddPlayerToTeam = nmsScoreboardClass.getMethod("addPlayerToTeam", String.class, playerTeamClass);
-                foundObjectiveSetDisplayName = objectiveClass.getMethod("setDisplayName", nmsComponentClass);
 
                 if (numberFormatClass != null) {
                     try {
                         Class<?> blankFormatClass = Class.forName("net.minecraft.network.chat.numbers.BlankFormat");
-                        foundObjectiveSetNumberFormat = objectiveClass.getMethod("setNumberFormat", numberFormatClass);
                         foundBlankNumberFormat = blankFormatClass.getField("INSTANCE").get(null);
                     } catch (ReflectiveOperationException ignored) {
-                        foundObjectiveSetNumberFormat = null;
                         foundBlankNumberFormat = null;
                     }
                 }
@@ -878,10 +866,8 @@ public class Board {
             this.serverPlayerConnection = foundServerPlayerConnection;
             this.connectionSendPacket = foundConnectionSendPacket;
             this.scoreboardConstructor = foundScoreboardConstructor;
-            this.scoreboardAddObjective = foundScoreboardAddObjective;
             this.scoreboardAddPlayerToTeam = foundScoreboardAddPlayerToTeam;
-            this.objectiveSetDisplayName = foundObjectiveSetDisplayName;
-            this.objectiveSetNumberFormat = foundObjectiveSetNumberFormat;
+            this.objectiveConstructor = foundObjectiveConstructor;
             this.objectivePacketConstructor = foundObjectivePacketConstructor;
             this.displayObjectivePacketConstructor = foundDisplayObjectivePacketConstructor;
             this.playerTeamConstructor = foundPlayerTeamConstructor;
@@ -907,42 +893,22 @@ public class Board {
             return scoreboardConstructor.newInstance();
         }
 
-        private Object newObjective(Object scoreboard, String name, String displayName) throws Exception {
+        private Object newObjective(Object scoreboard, String name, String displayName, boolean hideScores) throws Exception {
             Object component = toVanillaComponent(displayName);
-            if (scoreboardAddObjective.getParameterCount() == 4) {
-                return scoreboardAddObjective.invoke(
-                        scoreboard,
-                        name,
-                        objectiveCriteriaDummy,
-                        component,
-                        renderTypeInteger
-                );
-            }
-            return scoreboardAddObjective.invoke(
+            Object numberFormat = hideScores && supportsNumberFormats() ? blankNumberFormat : null;
+            return objectiveConstructor.newInstance(objectiveConstructorArguments(
+                    objectiveConstructor.getParameterCount(),
                     scoreboard,
                     name,
                     objectiveCriteriaDummy,
                     component,
                     renderTypeInteger,
-                    Boolean.TRUE,
-                    null
-            );
-        }
-
-        private void setObjectiveDisplayName(Object objective, String displayName) throws Exception {
-            Object component = toVanillaComponent(displayName);
-            objectiveSetDisplayName.invoke(objective, component);
-        }
-
-        private void setObjectiveNumberFormat(Object objective, boolean hideScores) throws Exception {
-            if (!supportsNumberFormats()) {
-                return;
-            }
-            objectiveSetNumberFormat.invoke(objective, new Object[]{hideScores ? blankNumberFormat : null});
+                    numberFormat
+            ));
         }
 
         private boolean supportsNumberFormats() {
-            return modernScorePackets && objectiveSetNumberFormat != null && blankNumberFormat != null;
+            return modernScorePackets && objectiveConstructor.getParameterCount() == 7 && blankNumberFormat != null;
         }
 
         private void sendObjectivePacket(Player player, Object objective, int method) throws Exception {
@@ -1033,13 +999,14 @@ public class Board {
             }
         }
 
-        private static Method findAddObjectiveMethod(Class<?> scoreboardClass, Class<?> criteriaClass,
-                                                     Class<?> componentClass, Class<?> renderTypeClass,
-                                                     Class<?> numberFormatClass) throws NoSuchMethodException {
+        private static Constructor<?> findObjectiveConstructor(Class<?> scoreboardClass, Class<?> objectiveClass,
+                                                               Class<?> criteriaClass, Class<?> componentClass,
+                                                               Class<?> renderTypeClass, Class<?> numberFormatClass)
+                throws NoSuchMethodException {
             if (numberFormatClass != null) {
                 try {
-                    return scoreboardClass.getMethod(
-                            "addObjective",
+                    return objectiveClass.getConstructor(
+                            scoreboardClass,
                             String.class,
                             criteriaClass,
                             componentClass,
@@ -1050,13 +1017,22 @@ public class Board {
                 } catch (NoSuchMethodException ignored) {
                 }
             }
-            return scoreboardClass.getMethod(
-                    "addObjective",
+            return objectiveClass.getConstructor(
+                    scoreboardClass,
                     String.class,
                     criteriaClass,
                     componentClass,
                     renderTypeClass
             );
+        }
+
+        private static Object[] objectiveConstructorArguments(int parameterCount, Object scoreboard, String name,
+                                                              Object criteria, Object component, Object renderType,
+                                                              Object numberFormat) {
+            if (parameterCount == 5) {
+                return new Object[]{scoreboard, name, criteria, component, renderType};
+            }
+            return new Object[]{scoreboard, name, criteria, component, renderType, Boolean.TRUE, numberFormat};
         }
     }
 }
