@@ -32,8 +32,6 @@ import java.lang.reflect.Method;
 
 @Sliced
 public class BlockMatter extends RawMatter<BlockData> {
-    public static final BlockData AIR = Material.AIR.createBlockData();
-
     public BlockMatter() {
         this(1, 1, 1);
     }
@@ -49,7 +47,7 @@ public class BlockMatter extends RawMatter<BlockData> {
 
     private static BlockData unwrapCustomData(BlockData data) {
         if (data == null) {
-            return AIR;
+            return air();
         }
 
         try {
@@ -84,14 +82,18 @@ public class BlockMatter extends RawMatter<BlockData> {
         } catch (Throwable ignored) {
             Material material = Material.matchMaterial(serialized, false);
             if (material == null) {
-                return AIR;
+                return air();
             }
 
             try {
                 return material.createBlockData();
             } catch (Throwable ignoredToo) {
-                return AIR;
+                return air();
             }
         }
+    }
+
+    private static BlockData air() {
+        return Material.AIR.createBlockData();
     }
 }
