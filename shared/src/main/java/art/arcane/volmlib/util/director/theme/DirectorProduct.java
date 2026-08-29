@@ -7,5 +7,6 @@ public enum DirectorProduct {
     BILE,
     HIDDENORE,
     WORMHOLES,
-    GLOSS
+    GLOSS,
+    SHAPEDPORTALS
 }

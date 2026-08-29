@@ -1,12 +1,15 @@
 package art.arcane.volmlib.util.config;
 
 import com.google.gson.JsonElement;
+import com.google.gson.JsonPrimitive;
 import com.moandjiezana.toml.Toml;
 
 import java.io.IOException;
 import java.lang.reflect.Array;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
+import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;
@@ -46,8 +49,43 @@ public final class TomlCodec {
     }
 
     public static String toToml(JsonElement element) {
-        Object data = ConfigJson.NORMAL.fromJson(element, Object.class);
-        return new GenericTomlWriter().write(data);
+        return new GenericTomlWriter().write(toGenericValue(element));
+    }
+
+    private static Object toGenericValue(JsonElement element) {
+        if (element == null || element.isJsonNull()) {
+            return null;
+        }
+        if (element.isJsonObject()) {
+            Map<String, Object> values = new LinkedHashMap<>();
+            for (Map.Entry<String, JsonElement> entry : element.getAsJsonObject().entrySet()) {
+                values.put(entry.getKey(), toGenericValue(entry.getValue()));
+            }
+            return values;
+        }
+        if (element.isJsonArray()) {
+            List<Object> values = new ArrayList<>(element.getAsJsonArray().size());
+            for (JsonElement entry : element.getAsJsonArray()) {
+                values.add(toGenericValue(entry));
+            }
+            return values;
+        }
+        JsonPrimitive primitive = element.getAsJsonPrimitive();
+        if (primitive.isBoolean()) {
+            return primitive.getAsBoolean();
+        }
+        if (primitive.isString()) {
+            return primitive.getAsString();
+        }
+        String number = primitive.getAsString();
+        if (number.matches("[+-]?\\d+")) {
+            try {
+                return Long.parseLong(number);
+            } catch (NumberFormatException exception) {
+                return new BigInteger(number);
+            }
+        }
+        return new BigDecimal(number);
     }
 
     private static Object parseToml(String raw) {
@@ -457,11 +495,10 @@ public final class TomlCodec {
 
     private static final class GenericTomlWriter {
         private final StringBuilder out = new StringBuilder();
-        private String lastTopLevelSection;
 
         private String write(Object root) {
             if (root instanceof Map<?, ?> map) {
-                writeMapSection("", map, 0);
+                writeMapSection("", map);
                 return normalize(out.toString());
             }
 
@@ -469,13 +506,13 @@ public final class TomlCodec {
             return normalize(out.toString());
         }
 
-        private void writeMapSection(String path, Map<?, ?> map, int depth) {
-            if (!path.isBlank()) {
-                writeSectionHeader(path, depth);
+        private void writeMapSection(String path, Map<?, ?> map) {
+            boolean hasInlineValues = hasInlineValues(map);
+            if (!path.isBlank() && (hasInlineValues || map.isEmpty())) {
+                writeSectionHeader(path);
             }
 
             List<Map.Entry<?, ?>> deferred = new ArrayList<>();
-            String valueIndent = "  ".repeat(Math.max(0, depth));
             for (Map.Entry<?, ?> entry : map.entrySet()) {
                 if (entry == null || entry.getKey() == null || entry.getValue() == null) {
                     continue;
@@ -483,8 +520,7 @@ public final class TomlCodec {
 
                 Object value = entry.getValue();
                 if (isInlineValue(value)) {
-                    out.append(valueIndent)
-                            .append(formatKey(String.valueOf(entry.getKey())))
+                    out.append(formatKey(String.valueOf(entry.getKey())))
                             .append(" = ")
                             .append(formatInlineValue(value))
                             .append('\n');
@@ -497,40 +533,31 @@ public final class TomlCodec {
                 String childPath = joinPath(path, String.valueOf(entry.getKey()));
                 Object value = entry.getValue();
                 if (value instanceof Map<?, ?> nested) {
-                    writeMapSection(childPath, nested, depth + 1);
+                    writeMapSection(childPath, nested);
                 } else {
                     Map<String, Object> wrapper = new LinkedHashMap<>();
                     wrapper.put("value", value);
-                    writeMapSection(childPath, wrapper, depth + 1);
+                    writeMapSection(childPath, wrapper);
                 }
             }
         }
 
-        private void writeSectionHeader(String path, int depth) {
-            String topLevel = topLevelSegment(path);
-            if (depth == 1 && (lastTopLevelSection == null || !lastTopLevelSection.equals(topLevel))) {
-                if (!out.isEmpty()) {
-                    out.append('\n');
+        private boolean hasInlineValues(Map<?, ?> map) {
+            for (Map.Entry<?, ?> entry : map.entrySet()) {
+                if (entry != null && entry.getKey() != null && entry.getValue() != null
+                        && isInlineValue(entry.getValue())) {
+                    return true;
                 }
-                out.append("# ").append(topLevel).append('\n');
-                lastTopLevelSection = topLevel;
-            } else if (!out.isEmpty()) {
+            }
+            return false;
+        }
+
+        private void writeSectionHeader(String path) {
+            if (!out.isEmpty()) {
                 out.append('\n');
             }
 
             out.append('[').append(renderPath(path)).append(']').append('\n');
-        }
-
-        private String topLevelSegment(String path) {
-            if (path == null || path.isBlank()) {
-                return "";
-            }
-
-            int dot = path.indexOf('.');
-            if (dot == -1) {
-                return path;
-            }
-            return path.substring(0, dot);
         }
     }
 }

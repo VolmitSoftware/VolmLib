@@ -14,15 +14,17 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.Optional;
 
 public final class DirectorMiniMenu {
     public static final int MENU_LINE_COUNT = 19;
     public static final int MAX_ENTRIES_PER_PAGE = 19;
 
-    private static final int HEADER_WIDTH = 44;
     private static final int FOOTER_WIDTH = 75;
     private static final int FOOTER_BUTTON_WIDTH = 10;
+    private static final int FONT_SPACE_WIDTH = 4;
+    private static final int HEADER_ORNAMENT_WIDTH = 28;
 
     private DirectorMiniMenu() {
     }
@@ -38,6 +40,21 @@ public final class DirectorMiniMenu {
         }
 
         for (String line : renderConsole(page, resolver)) {
+            deliverPlainLine(sender, line);
+        }
+    }
+
+    public static void deliverContent(Object sender, ContentMenu menu, Theme theme, DirectorTextResolver resolver) {
+        if (sender == null || menu == null) {
+            return;
+        }
+
+        if (isPlayer(sender)) {
+            deliver(sender, renderContent(menu, theme, resolver));
+            return;
+        }
+
+        for (String line : renderContentConsole(menu)) {
             deliverPlainLine(sender, line);
         }
     }
@@ -291,6 +308,26 @@ public final class DirectorMiniMenu {
         return lines;
     }
 
+    public static List<String> renderContent(ContentMenu menu, Theme theme, DirectorTextResolver resolver) {
+        if (menu == null || theme == null) {
+            return List.of();
+        }
+
+        DirectorTextResolver activeResolver = resolver == null ? DirectorTextResolver.ENGLISH : resolver;
+        ContentPage page = menu.page();
+        ArrayList<String> lines = new ArrayList<>();
+        lines.add(banner(menu.title(), theme));
+        if (menu.entries().isEmpty()) {
+            if (!menu.emptyLine().isBlank()) {
+                lines.add(menu.emptyLine());
+            }
+        } else {
+            lines.addAll(menu.entries().subList(page.startIndex(), page.endIndex()));
+        }
+        lines.add(paginationBar(page, menu.command(), theme, activeResolver));
+        return List.copyOf(lines);
+    }
+
     public static List<String> renderConsole(DirectorHelpPage page, DirectorTextResolver resolver) {
         if (page == null) {
             return List.of();
@@ -311,6 +348,25 @@ public final class DirectorMiniMenu {
         }
 
         return lines;
+    }
+
+    public static List<String> renderContentConsole(ContentMenu menu) {
+        if (menu == null) {
+            return List.of();
+        }
+
+        ArrayList<String> lines = new ArrayList<>();
+        lines.add("--- " + stripMiniMessage(menu.title()) + " ---");
+        if (menu.entries().isEmpty()) {
+            if (!menu.emptyLine().isBlank()) {
+                lines.add(stripMiniMessage(menu.emptyLine()));
+            }
+            return List.copyOf(lines);
+        }
+        for (String entry : menu.entries()) {
+            lines.add(stripMiniMessage(entry));
+        }
+        return List.copyOf(lines);
     }
 
     private static String renderConsoleNodeLine(DirectorRuntimeNode node, DirectorTextResolver resolver) {
@@ -358,12 +414,14 @@ public final class DirectorMiniMenu {
     }
 
     public static String banner(String title, Theme theme) {
-        int pad = Math.max(1, HEADER_WIDTH - (title.length() + 2) - 4);
+        String activeTitle = title == null ? "" : title;
+        int remainingWidth = (FOOTER_WIDTH * FONT_SPACE_WIDTH) - textWidth(activeTitle) - HEADER_ORNAMENT_WIDTH;
+        int padding = Math.max(1, (remainingWidth + FONT_SPACE_WIDTH) / (FONT_SPACE_WIDTH * 2));
         return "<font:minecraft:uniform><strikethrough><gradient:" + theme.borderLeft() + ":" + theme.borderRight() + ">["
-                + spaces(pad) + "(((</gradient></strikethrough></font>"
-                + " <gradient:" + theme.primaryLeft() + ":" + theme.primaryRight() + ">" + escapeText(title) + "</gradient> "
+                + spaces(padding) + "(((</gradient></strikethrough></font>"
+                + " <gradient:" + theme.primaryLeft() + ":" + theme.primaryRight() + ">" + escapeText(activeTitle) + "</gradient> "
                 + "<font:minecraft:uniform><strikethrough><gradient:" + theme.borderRight() + ":" + theme.borderLeft() + ">)))"
-                + spaces(pad) + "]</gradient></strikethrough></font>";
+                + spaces(padding) + "]</gradient></strikethrough></font>";
     }
 
     public static String banner(String title, ContentPage page, Theme theme) {
@@ -664,6 +722,26 @@ public final class DirectorMiniMenu {
         return " ".repeat(length);
     }
 
+    private static int textWidth(String value) {
+        int width = 0;
+        for (int index = 0; index < value.length(); index++) {
+            width += characterWidth(value.charAt(index));
+        }
+        return width;
+    }
+
+    private static int characterWidth(char character) {
+        return switch (character) {
+            case ' ', '[', ']', 'I', 't' -> 4;
+            case '!', ',', '.', ':', ';', 'i', '|' -> 2;
+            case 'l' -> 2;
+            case '\'', '`' -> 3;
+            case '"', '(', ')', '*', '<', '>', 'f', 'k', '{', '}' -> 5;
+            case '@', '~' -> 7;
+            default -> 6;
+        };
+    }
+
     private static List<String> stripHelpTokens(List<String> args) {
         List<String> clean = new ArrayList<>();
         for (String arg : args) {
@@ -838,11 +916,7 @@ public final class DirectorMiniMenu {
 
     public record DirectorHelpPage(DirectorRuntimeNode node, List<DirectorRuntimeNode> entries, int pageIndex, int totalPages) {
         public String title() {
-            if (totalPages <= 1) {
-                return node.path();
-            }
-
-            return node.path() + " {" + page() + "/" + totalPages + "}";
+            return node.path();
         }
 
         public int page() {
@@ -871,6 +945,33 @@ public final class DirectorMiniMenu {
             }
 
             return node.getParent().path() + " help=1";
+        }
+    }
+
+    public record ContentMenu(
+            String title,
+            String command,
+            List<String> entries,
+            String emptyLine,
+            int requestedPage,
+            int pageSize
+    ) {
+        public ContentMenu {
+            if (title == null || title.isBlank()) {
+                throw new IllegalArgumentException("content menu title must not be blank");
+            }
+            if (command == null || command.isBlank()) {
+                throw new IllegalArgumentException("content menu command must not be blank");
+            }
+            entries = List.copyOf(Objects.requireNonNull(entries, "entries"));
+            emptyLine = emptyLine == null ? "" : emptyLine;
+            if (pageSize < 1) {
+                throw new IllegalArgumentException("content menu page size must be positive");
+            }
+        }
+
+        public ContentPage page() {
+            return paginate(entries.size(), requestedPage, pageSize);
         }
     }
 

@@ -5,7 +5,11 @@ import org.bukkit.entity.Player;
 import org.junit.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.net.URI;
+
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertThrows;
+import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
@@ -42,5 +46,55 @@ public class ComponentMessengerTest {
         ComponentMessenger.sendLegacy(sender, "&eWarning");
 
         verify(sender).sendMessage("Warning");
+    }
+
+    @Test
+    public void runCommandDeliveryRetainsTheInteractiveAction() {
+        CommandSender sender = mock(CommandSender.class, withSettings().extraInterfaces(Player.class));
+        Player player = (Player) sender;
+
+        ComponentMessenger.sendRunCommand(
+                player,
+                ComponentText.markup("&aEnglish"),
+                "/plugin language en_US",
+                ComponentText.literal("Select English")
+        );
+
+        ArgumentCaptor<String> markup = ArgumentCaptor.forClass(String.class);
+        verify(sender).sendRichMessage(markup.capture());
+        assertEquals("English", ComponentText.markup(markup.getValue()).plain());
+        assertTrue(markup.getValue().contains("click:run_command"));
+        assertTrue(markup.getValue().contains("hover:show_text"));
+        assertTrue(markup.getValue().contains("/plugin language en_US"));
+    }
+
+    @Test
+    public void runCommandDeliveryRejectsChatText() {
+        assertThrows(IllegalArgumentException.class, () -> ComponentMessenger.sendRunCommand(
+                mock(Player.class),
+                ComponentText.literal("Option"),
+                "not-a-command",
+                ComponentText.literal("Hover")
+        ));
+    }
+
+    @Test
+    public void openUrlDeliveryRetainsTheInteractiveAction() {
+        CommandSender sender = mock(CommandSender.class, withSettings().extraInterfaces(Player.class));
+        Player player = (Player) sender;
+
+        ComponentMessenger.sendOpenUrl(
+                player,
+                ComponentText.markup("&aOpen report"),
+                URI.create("https://mclo.gs/Ab12"),
+                ComponentText.literal("Open the public report")
+        );
+
+        ArgumentCaptor<String> markup = ArgumentCaptor.forClass(String.class);
+        verify(sender).sendRichMessage(markup.capture());
+        assertEquals("Open report", ComponentText.markup(markup.getValue()).plain());
+        assertTrue(markup.getValue().contains("click:open_url"));
+        assertTrue(markup.getValue().contains("hover:show_text"));
+        assertTrue(markup.getValue().contains("https://mclo.gs/Ab12"));
     }
 }

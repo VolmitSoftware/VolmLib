@@ -82,6 +82,23 @@ public class MessageCatalogTest {
     }
 
     @Test
+    public void permitsOnlyDeclaredOptionalPlaceholdersToBeRemovedFromOverlays() {
+        TextKey key = TextKey.ofOptional("runtime.saved", "{prefix}Saved {setting}", "prefix");
+        MessageCatalog catalog = MessageCatalog.of("en_US", key);
+        LocaleOverlay withoutPrefix = LocaleOverlay.builder("override", "en_US")
+                .text(key.id(), "Saved {setting}")
+                .build();
+        LocaleOverlay withoutRequiredSetting = LocaleOverlay.builder("broken", "en_US")
+                .text(key.id(), "{prefix}Saved")
+                .build();
+
+        assertTrue(LocalizationValidator.validate(catalog, List.of(withoutPrefix)).isValid());
+        assertFalse(LocalizationValidator.validate(catalog, List.of(withoutRequiredSetting)).isValid());
+        assertThrows(IllegalArgumentException.class,
+                () -> TextKey.ofOptional("runtime.invalid", "Saved", "prefix"));
+    }
+
+    @Test
     public void rejectsDuplicateLocaleOverlayKeys() {
         LocaleOverlay.Builder builder = LocaleOverlay.builder("translations", "en_US")
                 .text("menu.title", "First")

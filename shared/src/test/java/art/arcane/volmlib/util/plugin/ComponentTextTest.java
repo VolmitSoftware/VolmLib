@@ -7,6 +7,7 @@ import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.minimessage.MiniMessage;
 import org.junit.Test;
 
+import java.net.URI;
 import java.util.List;
 
 import static org.junit.Assert.assertEquals;
@@ -51,6 +52,15 @@ public class ComponentTextTest {
     }
 
     @Test
+    public void escapedLegacyPrefixesRemainVisibleText() {
+        ComponentText message = ComponentText.markup("\\&cNot red \\[12ABef]Not hex");
+
+        assertEquals("&cNot red [12ABef]Not hex", message.plain());
+        assertFalse(message.legacy().contains("\u00a7cNot red"));
+        assertFalse(message.legacy().contains("\u00a7x"));
+    }
+
+    @Test
     public void legacyOnlyStripsMiniMessageWhileRetainingLegacyColors() {
         ComponentText message = ComponentText.legacyOnly("<gradient:red:blue>Title</gradient> &aGreen");
 
@@ -91,6 +101,25 @@ public class ComponentTextTest {
 
         assertEquals(source, MiniMessage.miniMessage().deserialize(message.miniMessage()));
         assertEquals("Run", message.plain());
+    }
+
+    @Test
+    public void hoverAttachesRichTextWithoutExposingAdventureTypes() {
+        ComponentText message = ComponentText.literal("Status").hover(ComponentText.literal("Details"));
+
+        assertTrue(message.miniMessage().contains("hover:show_text"));
+        assertTrue(message.miniMessage().contains("Details"));
+    }
+
+    @Test
+    public void openUrlAttachesAValidatedWebLink() {
+        ComponentText message = ComponentText.literal("Report")
+                .clickOpenUrl(URI.create("https://mclo.gs/Ab12"));
+
+        assertTrue(message.miniMessage().contains("click:open_url"));
+        assertTrue(message.miniMessage().contains("https://mclo.gs/Ab12"));
+        assertThrows(IllegalArgumentException.class,
+                () -> ComponentText.literal("Unsafe").clickOpenUrl(URI.create("file:///tmp/report")));
     }
 
     @Test

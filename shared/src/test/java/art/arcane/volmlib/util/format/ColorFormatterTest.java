@@ -19,4 +19,10 @@ public class ColorFormatterTest {
     public void malformedColorsRemainLiteral() {
         assertEquals("[12ZZef]Text &x12ZZef", ColorFormatter.translateColors("[12ZZef]Text &x12ZZef"));
     }
+
+    @Test
+    public void escapedColorPrefixesRemainLiteral() {
+        assertEquals("&cRed [12ABef]Hex", ColorFormatter.translateColors("\\&cRed \\[12ABef]Hex"));
+        assertEquals("C:\\temp &cRed", ColorFormatter.translateColors("C:\\temp \\&cRed"));
+    }
 }

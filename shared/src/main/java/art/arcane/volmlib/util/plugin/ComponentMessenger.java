@@ -1,11 +1,15 @@
 package art.arcane.volmlib.util.plugin;
 
 import net.md_5.bungee.api.ChatMessageType;
+import net.md_5.bungee.api.chat.BaseComponent;
+import net.md_5.bungee.api.chat.ClickEvent;
+import net.md_5.bungee.api.chat.HoverEvent;
 import net.md_5.bungee.api.chat.TextComponent;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 
 import java.lang.reflect.Method;
+import java.net.URI;
 import java.time.Duration;
 import java.util.Objects;
 import java.util.Optional;
@@ -39,6 +43,67 @@ public final class ComponentMessenger {
 
     public static void sendLiteral(CommandSender sender, String plainText) {
         send(sender, ComponentText.literal(plainText));
+    }
+
+    public static void sendRunCommand(
+            Player player,
+            ComponentText message,
+            String command,
+            ComponentText hover
+    ) {
+        Player requiredPlayer = Objects.requireNonNull(player, "player");
+        ComponentText requiredMessage = Objects.requireNonNull(message, "message");
+        String requiredCommand = Objects.requireNonNull(command, "command");
+        ComponentText requiredHover = Objects.requireNonNull(hover, "hover");
+        if (!requiredCommand.startsWith("/")) {
+            throw new IllegalArgumentException("Run-command text must start with /");
+        }
+        ComponentText interactive = requiredMessage.clickRunCommand(requiredCommand).hover(requiredHover);
+        if (sendRichMessage(requiredPlayer, interactive.miniMessage())) {
+            return;
+        }
+        BaseComponent[] components = TextComponent.fromLegacyText(requiredMessage.legacy());
+        ClickEvent clickEvent = new ClickEvent(ClickEvent.Action.RUN_COMMAND, requiredCommand);
+        HoverEvent hoverEvent = new HoverEvent(
+                HoverEvent.Action.SHOW_TEXT,
+                TextComponent.fromLegacyText(requiredHover.legacy())
+        );
+        for (BaseComponent component : components) {
+            component.setClickEvent(clickEvent);
+            component.setHoverEvent(hoverEvent);
+        }
+        if (!sendSpigotComponents(requiredPlayer, components)) {
+            requiredPlayer.sendMessage(requiredMessage.legacy());
+        }
+    }
+
+    public static void sendOpenUrl(
+            Player player,
+            ComponentText message,
+            URI url,
+            ComponentText hover
+    ) {
+        Player requiredPlayer = Objects.requireNonNull(player, "player");
+        ComponentText requiredMessage = Objects.requireNonNull(message, "message");
+        URI requiredUrl = Objects.requireNonNull(url, "url");
+        ComponentText requiredHover = Objects.requireNonNull(hover, "hover");
+        ComponentText interactive = requiredMessage.clickOpenUrl(requiredUrl).hover(requiredHover);
+        if (sendRichMessage(requiredPlayer, interactive.miniMessage())) {
+            return;
+        }
+        BaseComponent[] components = TextComponent.fromLegacyText(requiredMessage.legacy());
+        ClickEvent clickEvent = new ClickEvent(ClickEvent.Action.OPEN_URL, requiredUrl.toString());
+        HoverEvent hoverEvent = new HoverEvent(
+                HoverEvent.Action.SHOW_TEXT,
+                TextComponent.fromLegacyText(requiredHover.legacy())
+        );
+        for (BaseComponent component : components) {
+            component.setClickEvent(clickEvent);
+            component.setHoverEvent(hoverEvent);
+        }
+        if (!sendSpigotComponents(requiredPlayer, components)) {
+            requiredPlayer.sendMessage(requiredMessage.legacy());
+        }
     }
 
     public static void send(CommandSender sender, ComponentText message) {
@@ -113,6 +178,17 @@ public final class ComponentMessenger {
                 return false;
             }
             method.invoke(sender, miniMessage);
+            return true;
+        } catch (ReflectiveOperationException | LinkageError ignored) {
+            return false;
+        }
+    }
+
+    private static boolean sendSpigotComponents(Player player, BaseComponent[] components) {
+        try {
+            Object spigot = player.spigot();
+            Method method = spigot.getClass().getMethod("sendMessage", BaseComponent[].class);
+            method.invoke(spigot, (Object) components);
             return true;
         } catch (ReflectiveOperationException | LinkageError ignored) {
             return false;

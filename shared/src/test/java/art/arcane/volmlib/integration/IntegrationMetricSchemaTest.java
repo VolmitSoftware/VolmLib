@@ -96,6 +96,33 @@ public class IntegrationMetricSchemaTest {
     }
 
     @Test
+    public void exposesShapedPortalsSchema() {
+        Set<String> keys = IntegrationMetricSchema.shapedPortalsKeys();
+
+        assertEquals(6, keys.size());
+        assertTrue(IntegrationMetricSchema.allKeys().containsAll(keys));
+        for (String key : keys) {
+            IntegrationMetricDescriptor descriptor = IntegrationMetricSchema.descriptor(key);
+            assertTrue(key.startsWith("shapedportals."));
+            assertEquals("shapedportals", descriptor.tags().get("plugin"));
+        }
+
+        IntegrationMetricDescriptor managed = IntegrationMetricSchema.descriptor(
+                IntegrationMetricSchema.SHAPEDPORTALS_MANAGED_PORTALS
+        );
+        assertEquals(IntegrationMetricType.INTEGER, managed.type());
+        assertEquals("portals", managed.unit());
+        assertEquals("portals", managed.tags().get("domain"));
+
+        IntegrationMetricDescriptor success = IntegrationMetricSchema.descriptor(
+                IntegrationMetricSchema.SHAPEDPORTALS_CREATION_SUCCESS_PERCENT
+        );
+        assertEquals(IntegrationMetricType.DOUBLE, success.type());
+        assertEquals("percent", success.unit());
+        assertEquals("creation", success.tags().get("domain"));
+    }
+
+    @Test
     public void metricGroupsAreImmutableAndRejectDescriptorMismatches() {
         long now = System.currentTimeMillis();
         String key = IntegrationMetricSchema.IRIS_LOADED_CHUNKS;
