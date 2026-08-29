@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -43,7 +44,7 @@ public final class RemoteLanguageCatalog implements AutoCloseable {
     private static final int MAXIMUM_DOWNLOAD_BYTES = 2 * 1024 * 1024;
     private static final long FAILURE_RETRY_COOLDOWN_NANOS = TimeUnit.SECONDS.toNanos(30L);
     private static final long SHUTDOWN_TIMEOUT_MILLIS = 2_000L;
-    private static final Pattern REVISION_PATTERN = Pattern.compile("[0-9a-f]{40}");
+    private static final Pattern SOURCE_REFERENCE_PATTERN = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._-]{0,127}");
     private static final Pattern SHA256_PATTERN = Pattern.compile("[0-9a-f]{64}");
     private static final Pattern LOCALE_PATTERN = Pattern.compile("[A-Za-z0-9_-]{2,32}");
 
@@ -77,7 +78,7 @@ public final class RemoteLanguageCatalog implements AutoCloseable {
     }
 
     public Set<String> availableLocales() {
-        return source.hashes().keySet();
+        return source.locales();
     }
 
     public Path cacheFile(String locale) {
@@ -98,7 +99,7 @@ public final class RemoteLanguageCatalog implements AutoCloseable {
 
     public CacheResult read(String locale, ContentValidator validator) {
         Objects.requireNonNull(validator, "validator");
-        if (!source.hashes().containsKey(locale)) {
+        if (!source.locales().contains(locale)) {
             return new CacheResult(CacheState.UNSUPPORTED, locale, null, null, null);
         }
         Path target = cacheFile(locale);
@@ -123,7 +124,7 @@ public final class RemoteLanguageCatalog implements AutoCloseable {
         Objects.requireNonNull(validator, "validator");
         Objects.requireNonNull(completion, "completion");
         synchronized (requestLock) {
-            if (!source.hashes().containsKey(locale)) {
+            if (!source.locales().contains(locale)) {
                 return RequestState.UNSUPPORTED;
             }
             if (executor.isShutdown()) {
@@ -167,7 +168,7 @@ public final class RemoteLanguageCatalog implements AutoCloseable {
         Objects.requireNonNull(completion, "completion");
         Path target = Objects.requireNonNull(destination, "destination").toAbsolutePath().normalize();
         synchronized (requestLock) {
-            if (!source.hashes().containsKey(locale)) {
+            if (!source.locales().contains(locale)) {
                 return RequestState.UNSUPPORTED;
             }
             String requiredLocale = locale;
@@ -381,6 +382,9 @@ public final class RemoteLanguageCatalog implements AutoCloseable {
 
     private void verifyHash(String locale, byte[] bytes) throws NoSuchAlgorithmException {
         String expected = source.hashes().get(locale);
+        if (expected == null) {
+            return;
+        }
         String actual = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
         if (!MessageDigest.isEqual(
                 expected.getBytes(StandardCharsets.US_ASCII),
@@ -473,7 +477,7 @@ public final class RemoteLanguageCatalog implements AutoCloseable {
     }
 
     private String requireSupportedLocale(String locale) {
-        if (locale == null || !source.hashes().containsKey(locale)) {
+        if (locale == null || !source.locales().contains(locale)) {
             throw new IllegalArgumentException("Unsupported locale: " + locale);
         }
         return locale;
@@ -489,26 +493,34 @@ public final class RemoteLanguageCatalog implements AutoCloseable {
         } catch (IOException failure) {
             throw new IllegalStateException("Failed to read " + options.manifestResource(), failure);
         }
-        String revision = properties.getProperty("revision", "").trim().toLowerCase(Locale.ROOT);
-        if (!REVISION_PATTERN.matcher(revision).matches()) {
-            throw new IllegalStateException("Invalid language source revision");
+        String revision = properties.getProperty("revision", "").trim();
+        if (!SOURCE_REFERENCE_PATTERN.matcher(revision).matches()) {
+            throw new IllegalStateException("Invalid language source reference");
         }
+        LinkedHashSet<String> availableLocales = new LinkedHashSet<>();
         LinkedHashMap<String, String> hashes = new LinkedHashMap<>();
         String[] locales = properties.getProperty("locales", "").split(",");
         for (String rawLocale : locales) {
             String locale = rawLocale.trim();
             String hash = properties.getProperty("sha256." + locale, "").trim().toLowerCase(Locale.ROOT);
-            if (!LOCALE_PATTERN.matcher(locale).matches() || !SHA256_PATTERN.matcher(hash).matches()) {
+            if (!LOCALE_PATTERN.matcher(locale).matches() || (!hash.isEmpty() && !SHA256_PATTERN.matcher(hash).matches())) {
                 throw new IllegalStateException("Invalid language source entry: " + locale);
             }
-            if (hashes.put(locale, hash) != null) {
+            if (!availableLocales.add(locale)) {
                 throw new IllegalStateException("Duplicate language source entry: " + locale);
             }
+            if (!hash.isEmpty()) {
+                hashes.put(locale, hash);
+            }
         }
-        if (hashes.isEmpty()) {
+        if (availableLocales.isEmpty()) {
             throw new IllegalStateException("Language source manifest contains no locales");
         }
-        return new Source(revision, Collections.unmodifiableMap(hashes));
+        return new Source(
+                revision,
+                Collections.unmodifiableSet(availableLocales),
+                Collections.unmodifiableMap(hashes)
+        );
     }
 
     private static String normalizedSourcePath(String path) {
@@ -584,6 +596,6 @@ public final class RemoteLanguageCatalog implements AutoCloseable {
     private record InstallRequest(String locale, Path destination) {
     }
 
-    private record Source(String revision, Map<String, String> hashes) {
+    private record Source(String revision, Set<String> locales, Map<String, String> hashes) {
     }
 }

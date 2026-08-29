@@ -233,11 +233,37 @@ public class RemoteLanguageCatalogTest {
         }
     }
 
+    @Test
+    public void downloadsFromMutableReferenceWithoutChecksum() throws Exception {
+        byte[] content = "[runtime]\nprefix = \"&6Latest\"\n".getBytes(StandardCharsets.UTF_8);
+        HttpServer server = server(content);
+        try (URLClassLoader resources = resources("main", null);
+             RemoteLanguageCatalog catalog = catalog(server, resources)) {
+            Path target = temporaryFolder.newFolder("mutable-language").toPath().resolve("fr_FR.toml");
+            CountDownLatch completed = new CountDownLatch(1);
+            AtomicReference<RemoteLanguageCatalog.DownloadResult> result = new AtomicReference<>();
+
+            assertEquals("main", catalog.revision());
+            assertEquals("main/languages/fr_FR.yml", catalog.sourceUri("fr_FR").getPath().substring(1));
+            assertEquals(RemoteLanguageCatalog.RequestState.SCHEDULED,
+                    catalog.requestInstallIfMissing("fr_FR", target, (locale, raw) -> {
+                    }, value -> {
+                        result.set(value);
+                        completed.countDown();
+                    }));
+
+            assertTrue(completed.await(5L, TimeUnit.SECONDS));
+            assertTrue(result.get().successful());
+            assertArrayEquals(content, Files.readAllBytes(target));
+        } finally {
+            server.stop(0);
+        }
+    }
+
     @Test(expected = IllegalStateException.class)
-    public void rejectsManifestWithoutPinnedRevision() throws Exception {
+    public void rejectsInvalidSourceReference() throws Exception {
         Path resources = temporaryFolder.newFolder("invalid-resources").toPath();
-        Files.writeString(resources.resolve("source.properties"), "revision=main\nlocales=fr_FR\nsha256.fr_FR="
-                + "0".repeat(64) + "\n");
+        Files.writeString(resources.resolve("source.properties"), "revision=../main\nlocales=fr_FR\n");
         URL[] urls = {resources.toUri().toURL()};
         try (URLClassLoader loader = new URLClassLoader(urls, null)) {
             RemoteLanguageCatalog.load(new RemoteLanguageCatalog.Options(
@@ -266,9 +292,14 @@ public class RemoteLanguageCatalogTest {
     }
 
     private URLClassLoader resources(String hash) throws Exception {
+        return resources(REVISION, hash);
+    }
+
+    private URLClassLoader resources(String revision, String hash) throws Exception {
         Path resources = temporaryFolder.newFolder("resources-" + System.nanoTime()).toPath();
-        Files.writeString(resources.resolve("source.properties"), "revision=" + REVISION
-                + "\nlocales=fr_FR\nsha256.fr_FR=" + hash + "\n");
+        String checksum = hash == null ? "" : "sha256.fr_FR=" + hash + "\n";
+        Files.writeString(resources.resolve("source.properties"), "revision=" + revision
+                + "\nlocales=fr_FR\n" + checksum);
         return new URLClassLoader(new URL[]{resources.toUri().toURL()}, null);
     }
 
