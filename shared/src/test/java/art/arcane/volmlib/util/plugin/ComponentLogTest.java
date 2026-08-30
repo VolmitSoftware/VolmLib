@@ -20,6 +20,7 @@ import static org.junit.Assert.assertNotSame;
 import static org.junit.Assert.assertSame;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -33,9 +34,11 @@ public class ComponentLogTest {
         ComponentText message = ComponentText.legacy("\u00a7eWarning");
 
         try (org.mockito.MockedStatic<ComponentLogger> loggerFactory = mockStatic(ComponentLogger.class)) {
-            loggerFactory.when(ComponentLogger::logger).thenReturn(componentLogger);
+            loggerFactory.when(() -> ComponentLogger.logger("")).thenReturn(componentLogger);
             ComponentLog.log(plugin, fallback, ComponentLog.discriminator("Test", "&d"),
                     Level.WARNING, message, null);
+            loggerFactory.verify(() -> ComponentLogger.logger(""));
+            loggerFactory.verify(ComponentLogger::logger, never());
         }
 
         org.mockito.ArgumentCaptor<Component> component = org.mockito.ArgumentCaptor.forClass(Component.class);
@@ -66,7 +69,7 @@ public class ComponentLogTest {
         when(plugin.getLogger()).thenReturn(logger);
 
         try (org.mockito.MockedStatic<ComponentLogger> loggerFactory = mockStatic(ComponentLogger.class)) {
-            loggerFactory.when(ComponentLogger::logger).thenReturn(null);
+            loggerFactory.when(() -> ComponentLogger.logger("")).thenReturn(null);
             ComponentLog.logLegacy(plugin, fallback, "[Test] ", Level.SEVERE, "\u00a7cFailure", failure);
         }
 
@@ -99,7 +102,7 @@ public class ComponentLogTest {
         when(plugin.getLogger()).thenReturn(logger);
 
         try (org.mockito.MockedStatic<ComponentLogger> loggerFactory = mockStatic(ComponentLogger.class)) {
-            loggerFactory.when(ComponentLogger::logger).thenReturn(null);
+            loggerFactory.when(() -> ComponentLogger.logger("")).thenReturn(null);
             ComponentLog.logLegacy(plugin, logger, "[Test] ", Level.INFO, "Message", null);
         }
 

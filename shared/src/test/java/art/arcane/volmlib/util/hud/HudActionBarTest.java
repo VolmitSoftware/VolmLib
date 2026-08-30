@@ -15,6 +15,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -36,6 +37,8 @@ public class HudActionBarTest {
   private Player player;
   private Player.Spigot spigot;
   private HudActionBar bar;
+  private AtomicLong now;
+  private List<ScheduledLifecycle> scheduledLifecycles;
 
   @Before
   public void setUp() {
@@ -59,7 +62,12 @@ public class HudActionBarTest {
       store.forEach((owner, encoded) -> values.add(new FixedMetadataValue(owner, encoded)));
       return values;
     });
-    bar = new HudActionBar(plugin);
+    now = new AtomicLong(1_000L);
+    scheduledLifecycles = new ArrayList<>();
+    bar = new HudActionBar(plugin, now::get, (scheduledPlayer, runnable, delayTicks, retired) -> {
+      scheduledLifecycles.add(new ScheduledLifecycle(scheduledPlayer, runnable, delayTicks, retired));
+      return true;
+    });
   }
 
   private String lastSentPlainText() {
@@ -83,8 +91,8 @@ public class HudActionBarTest {
   public void test_publish_composesForeignSegmentsIntoOneLine() {
     Plugin react = mock(Plugin.class);
     when(react.getName()).thenReturn("React");
-    long now = System.currentTimeMillis();
-    store.put(react, HudSegmentCodec.encode(List.of(new HudStampedSegment(HudPriority.PINNED, now - 100L, now, 5000L, List.of(HudSlot.CENTER), "react:monitor", "monitor"))));
+    long currentTime = now.get();
+    store.put(react, HudSegmentCodec.encode(List.of(new HudStampedSegment(HudPriority.PINNED, currentTime - 100L, currentTime, 5000L, List.of(HudSlot.CENTER), "react:monitor", "monitor"))));
     bar.publish(player, new HudSegment("adapt:xp", HudPriority.AMBIENT, 1500L, List.of(HudSlot.LEFT), "+12XP"));
     assertEquals("+12XP  monitor", lastSentPlainText());
   }
@@ -135,5 +143,47 @@ public class HudActionBarTest {
     assertTrue(posted.stream().anyMatch(segment -> segment.purpose().equals("iris:notice")));
     assertTrue(posted.stream().anyMatch(segment -> segment.purpose().equals("iris:status")));
     assertFalse(posted.stream().anyMatch(segment -> segment.purpose().equals("iris:job")));
+  }
+
+  @Test
+  public void test_lifecycle_refreshesLongNoticesAndClearsAtExpiry() {
+    bar.publish(player, new HudSegment("adapt:notice", HudPriority.NOTICE, 5_000L, List.of(HudSlot.CENTER), "Level up"));
+    assertEquals(1, scheduledLifecycles.size());
+    assertEquals(40L, scheduledLifecycles.get(0).delayTicks());
+
+    clearInvocations(spigot);
+    now.set(3_000L);
+    scheduledLifecycles.remove(0).runnable().run();
+
+    assertTrue(store.containsKey(plugin));
+    assertEquals("Level up", lastSentPlainText());
+    assertEquals(1, scheduledLifecycles.size());
+    assertEquals(40L, scheduledLifecycles.get(0).delayTicks());
+
+    clearInvocations(spigot);
+    now.set(6_001L);
+    scheduledLifecycles.remove(0).runnable().run();
+
+    assertFalse(store.containsKey(plugin));
+    assertEquals(" ", lastSentPlainText());
+    assertTrue(scheduledLifecycles.isEmpty());
+  }
+
+  @Test
+  public void test_republishedPurposeMakesPreviousLifecycleStale() {
+    bar.publish(player, new HudSegment("adapt:xp", HudPriority.AMBIENT, 1_500L, List.of(HudSlot.LEFT), "+5XP"));
+    ScheduledLifecycle stale = scheduledLifecycles.get(0);
+    now.set(1_100L);
+    bar.publish(player, new HudSegment("adapt:xp", HudPriority.AMBIENT, 5_000L, List.of(HudSlot.LEFT), "+12XP"));
+
+    stale.runnable().run();
+
+    List<HudStampedSegment> posted = HudSegmentCodec.decode(store.get(plugin));
+    assertEquals(1, posted.size());
+    assertEquals("+12XP", posted.get(0).text());
+    assertEquals(2, scheduledLifecycles.size());
+  }
+
+  private record ScheduledLifecycle(Player player, Runnable runnable, long delayTicks, Runnable retired) {
   }
 }
