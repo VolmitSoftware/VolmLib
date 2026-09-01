@@ -86,7 +86,13 @@ public class ChunkCache2DAtomic<T> {
 
             byte state = (byte) STATE_HANDLE.getAcquire(states, key);
             if (state == STATE_EMPTY && STATE_HANDLE.compareAndSet(states, key, STATE_EMPTY, STATE_COMPUTING)) {
-                T resolved = resolver.apply(x, z);
+                T resolved;
+                try {
+                    resolved = resolver.apply(x, z);
+                } catch (Throwable failure) {
+                    STATE_HANDLE.setRelease(states, key, STATE_EMPTY);
+                    throw failure;
+                }
                 if (resolved != null) {
                     VALUE_HANDLE.setRelease(values, key, resolved);
                     STATE_HANDLE.setRelease(states, key, STATE_READY);

@@ -6,6 +6,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertThrows;
 
 public class WorldCache2DTest {
     @Test
@@ -44,6 +45,21 @@ public class WorldCache2DTest {
 
         assertNull(cache.get(1, 2));
         assertNull(cache.get(1, 2));
+        assertEquals(2, calls.get());
+    }
+
+    @Test(timeout = 2_000L)
+    public void resolverFailureDoesNotPoisonTheCoordinate() {
+        AtomicInteger calls = new AtomicInteger();
+        WorldCache2D<Integer> cache = new WorldCache2D<>((x, z) -> {
+            if (calls.incrementAndGet() == 1) {
+                throw new IllegalStateException("first attempt failed");
+            }
+            return 42;
+        }, 4, () -> new ChunkCache2D<>("iris"));
+
+        assertThrows(IllegalStateException.class, () -> cache.get(1, 2));
+        assertEquals(42, cache.get(1, 2).intValue());
         assertEquals(2, calls.get());
     }
 
