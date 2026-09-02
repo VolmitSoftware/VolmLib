@@ -18,8 +18,7 @@ public enum ReservedFlag implements MantleFlag {
     DISCOVERED,
     CUSTOM_ACTIVE,
     SCRIPT,
-    FLOATING_OBJECT,
-    RIVER_HYDROLOGY;
+    FLOATING_OBJECT;
 
     @Override
     public boolean isCustom() {

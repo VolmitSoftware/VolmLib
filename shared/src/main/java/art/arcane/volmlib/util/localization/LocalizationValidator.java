@@ -53,13 +53,17 @@ public final class LocalizationValidator {
             validateValueStructure(definition, value, overlay, issues);
 
             Set<String> actualPlaceholders = overlayPlaceholders(definition, value);
-            if (!definition.placeholders().equals(actualPlaceholders)) {
+            Set<String> requiredPlaceholders = new LinkedHashSet<>(definition.placeholders());
+            requiredPlaceholders.removeAll(definition.optionalPlaceholders());
+            if (!definition.placeholders().containsAll(actualPlaceholders)
+                    || !actualPlaceholders.containsAll(requiredPlaceholders)) {
                 issues.add(new LocalizationIssue(
                         LocalizationSeverity.ERROR,
                         LocalizationIssueCode.PLACEHOLDER_MISMATCH,
                         overlay.source(),
                         id,
-                        "Expected " + definition.placeholders() + " but found " + actualPlaceholders
+                        "Required " + requiredPlaceholders + ", optional "
+                                + definition.optionalPlaceholders() + " but found " + actualPlaceholders
                 ));
             }
         }

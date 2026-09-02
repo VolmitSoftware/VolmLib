@@ -164,6 +164,13 @@ public final class IntegrationMetricSchema {
     public static final String BILETOOLS_LAST_RELOAD_MS = "biletools.last-reload-ms";
     public static final String BILETOOLS_REMOTE_SLAVE_ONLINE = "biletools.remote-slave-online";
 
+    public static final String SHAPEDPORTALS_MANAGED_PORTALS = "shapedportals.managed-portals";
+    public static final String SHAPEDPORTALS_INTERIOR_CELLS = "shapedportals.interior-cells";
+    public static final String SHAPEDPORTALS_CREATION_ATTEMPTS_TOTAL = "shapedportals.creation-attempts-total";
+    public static final String SHAPEDPORTALS_CREATED_PORTALS_TOTAL = "shapedportals.created-portals-total";
+    public static final String SHAPEDPORTALS_REJECTED_ATTEMPTS_TOTAL = "shapedportals.rejected-attempts-total";
+    public static final String SHAPEDPORTALS_CREATION_SUCCESS_PERCENT = "shapedportals.creation-success-percent";
+
     private static final Map<String, IntegrationMetricDescriptor> DESCRIPTORS = buildDescriptors();
     private static final Set<String> IRIS_KEYS = buildIrisKeys();
     private static final Set<String> IRIS_WORLD_KEYS = buildIrisWorldKeys();
@@ -337,6 +344,17 @@ public final class IntegrationMetricSchema {
         );
     }
 
+    public static Set<String> shapedPortalsKeys() {
+        return Set.of(
+                SHAPEDPORTALS_MANAGED_PORTALS,
+                SHAPEDPORTALS_INTERIOR_CELLS,
+                SHAPEDPORTALS_CREATION_ATTEMPTS_TOTAL,
+                SHAPEDPORTALS_CREATED_PORTALS_TOTAL,
+                SHAPEDPORTALS_REJECTED_ATTEMPTS_TOTAL,
+                SHAPEDPORTALS_CREATION_SUCCESS_PERCENT
+        );
+    }
+
     private static Map<String, IntegrationMetricDescriptor> buildDescriptors() {
         Map<String, IntegrationMetricDescriptor> descriptors = new LinkedHashMap<>();
 
@@ -491,6 +509,13 @@ public final class IntegrationMetricSchema {
         putMetric(descriptors, BILETOOLS_RELOADS_TOTAL, IntegrationMetricType.LONG, "reloads", "biletools", "reload");
         putMetric(descriptors, BILETOOLS_LAST_RELOAD_MS, IntegrationMetricType.LONG, "ms", "biletools", "reload");
         putMetric(descriptors, BILETOOLS_REMOTE_SLAVE_ONLINE, IntegrationMetricType.INTEGER, "boolean", "biletools", "remote");
+
+        putMetric(descriptors, SHAPEDPORTALS_MANAGED_PORTALS, IntegrationMetricType.INTEGER, "portals", "shapedportals", "portals");
+        putMetric(descriptors, SHAPEDPORTALS_INTERIOR_CELLS, IntegrationMetricType.INTEGER, "blocks", "shapedportals", "portals");
+        putMetric(descriptors, SHAPEDPORTALS_CREATION_ATTEMPTS_TOTAL, IntegrationMetricType.LONG, "attempts", "shapedportals", "creation");
+        putMetric(descriptors, SHAPEDPORTALS_CREATED_PORTALS_TOTAL, IntegrationMetricType.LONG, "portals", "shapedportals", "creation");
+        putMetric(descriptors, SHAPEDPORTALS_REJECTED_ATTEMPTS_TOTAL, IntegrationMetricType.LONG, "attempts", "shapedportals", "creation");
+        putMetric(descriptors, SHAPEDPORTALS_CREATION_SUCCESS_PERCENT, IntegrationMetricType.DOUBLE, "percent", "shapedportals", "creation");
 
         return Map.copyOf(descriptors);
     }

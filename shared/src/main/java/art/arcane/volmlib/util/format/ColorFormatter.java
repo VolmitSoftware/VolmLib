@@ -31,6 +31,11 @@ public final class ColorFormatter {
         int length = chars.length;
         for (int i = 0; i < length; i++) {
             char current = chars[i];
+            if (current == '\\' && i + 1 < length && chars[i + 1] == altColorChar) {
+                translated.append(altColorChar);
+                i++;
+                continue;
+            }
             if (current == altColorChar && i + 1 < length) {
                 char next = chars[i + 1];
                 if (isLegacyColorCode(next)) {
@@ -86,6 +91,12 @@ public final class ColorFormatter {
 
         StringBuilder target = new StringBuilder(translated.length() + 16);
         for (int index = 0; index < translated.length(); index++) {
+            if (translated.charAt(index) == '\\' && index + 1 < translated.length()
+                    && translated.charAt(index + 1) == '[') {
+                target.append('[');
+                index++;
+                continue;
+            }
             if (translated.charAt(index) == '[' && index + 7 < translated.length()
                     && translated.charAt(index + 7) == ']') {
                 String hex = translated.substring(index + 1, index + 7);

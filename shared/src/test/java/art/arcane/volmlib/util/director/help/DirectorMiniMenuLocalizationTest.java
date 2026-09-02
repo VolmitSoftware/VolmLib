@@ -105,7 +105,7 @@ public class DirectorMiniMenuLocalizationTest {
         assertTrue(rendered.contains("This parameter is required."));
         assertTrue(rendered.contains("Defaults to \"overworld\" if undefined."));
         assertTrue(rendered.contains("This parameter is of type String."));
-        assertFalse(rendered.contains("{1/1}"));
+        assertFalse(rendered.contains("1/1"));
     }
 
     @Test
@@ -120,7 +120,7 @@ public class DirectorMiniMenuLocalizationTest {
         assertTrue(rendered.contains("Vorherige Seite"));
         assertTrue(rendered.contains("Nächste Seite"));
         assertTrue(rendered.contains("〈 Seite 1"));
-        assertTrue(rendered.contains("{2/4}"));
+        assertFalse(rendered.contains("2/4"));
         assertTrue(rendered.contains("Seite 3 ❭"));
     }
 

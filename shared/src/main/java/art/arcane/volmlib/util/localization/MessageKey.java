@@ -10,4 +10,8 @@ public sealed interface MessageKey permits TextKey, LinesKey, PluralKey {
     MessageValue englishValue();
 
     Set<String> placeholders();
+
+    default Set<String> optionalPlaceholders() {
+        return Set.of();
+    }
 }

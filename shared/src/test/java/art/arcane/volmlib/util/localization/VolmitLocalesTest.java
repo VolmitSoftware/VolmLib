@@ -22,6 +22,18 @@ public class VolmitLocalesTest {
     }
 
     @Test
+    public void exposesFullNamesForEveryBundledLocale() {
+        for (String locale : VolmitLocales.all()) {
+            assertTrue(VolmitLocales.displayName(locale).isPresent());
+        }
+        assertEquals("English (United States)", VolmitLocales.displayName(" en_US ").orElseThrow());
+        assertEquals("Vietnamese (Vietnam)", VolmitLocales.displayName("vi_VI").orElseThrow());
+        assertEquals("Traditional Chinese (Taiwan)", VolmitLocales.displayName("zh_TW").orElseThrow());
+        assertTrue(VolmitLocales.displayName("pirate").isEmpty());
+        assertTrue(VolmitLocales.displayName(null).isEmpty());
+    }
+
+    @Test
     public void convertsBundledLocalesToMinecraftResourceCodes() {
         assertEquals("en_us", VolmitLocales.minecraftCode("en_US"));
         assertEquals("ja_jp", VolmitLocales.minecraftCode("ja-JP"));

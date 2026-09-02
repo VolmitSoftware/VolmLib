@@ -77,7 +77,7 @@ public final class ComponentLog {
             Plugin.class.getMethod("getComponentLogger");
             ClassLoader classLoader = Plugin.class.getClassLoader();
             Class<?> componentLoggerType = Class.forName(COMPONENT_LOGGER_CLASS, true, classLoader);
-            Object componentLogger = componentLoggerType.getMethod("logger").invoke(null);
+            Object componentLogger = componentLoggerType.getMethod("logger", String.class).invoke(null, "");
             if (componentLogger == null) {
                 return false;
             }
@@ -102,7 +102,7 @@ public final class ComponentLog {
         try {
             Plugin.class.getMethod("getComponentLogger");
             Class<?> componentLoggerType = Class.forName(COMPONENT_LOGGER_CLASS, true, Plugin.class.getClassLoader());
-            Object componentLogger = componentLoggerType.getMethod("logger").invoke(null);
+            Object componentLogger = componentLoggerType.getMethod("logger", String.class).invoke(null, "");
             if (componentLogger == null) {
                 return false;
             }

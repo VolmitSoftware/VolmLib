@@ -6,6 +6,7 @@ import com.google.gson.JsonElement;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiFunction;
@@ -169,6 +170,31 @@ public final class ConfigFileSupport {
 
     public static void recordMissingConfigCreated() {
         CREATED_MISSING_CONFIGS.incrementAndGet();
+    }
+
+    public static <T> T parseSnapshot(
+            String raw,
+            File sourceFile,
+            Class<T> type,
+            Consumer<T> normalizeAfterRead
+    ) throws IOException {
+        if (sourceFile == null) {
+            throw new IOException("Config snapshot source file is required");
+        }
+        if (type == null) {
+            throw new IOException("Config snapshot type is required");
+        }
+        String content = raw == null ? "" : raw;
+        long size = content.getBytes(StandardCharsets.UTF_8).length;
+        long maximum = maxConfigBytesForSourceTag(sourceFile.getName());
+        if (size > maximum) {
+            throw new IOException("Config snapshot is too large (" + size + " bytes)");
+        }
+        T parsed = deserialize(content, sourceFile, type);
+        if (parsed == null) {
+            throw new IOException("Config parser returned null");
+        }
+        return normalizeConfig(parsed, normalizeAfterRead);
     }
 
     public static void flushCreatedConfigSummary(ConfigIo io) {

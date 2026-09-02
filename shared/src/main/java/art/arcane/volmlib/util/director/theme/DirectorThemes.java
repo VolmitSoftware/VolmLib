@@ -64,6 +64,15 @@ public final class DirectorThemes {
             "minecraft:block.respawn_anchor.deplete"
     );
 
+    public static final DirectorTheme SHAPEDPORTALS = new DirectorTheme(
+            DirectorProduct.SHAPEDPORTALS,
+            "#6f35c5",
+            "#35135f",
+            "#c778ff",
+            "minecraft:block.amethyst_cluster.break",
+            "minecraft:block.respawn_anchor.deplete"
+    );
+
     private DirectorThemes() {
     }
 
@@ -80,6 +89,7 @@ public final class DirectorThemes {
             case HIDDENORE -> HIDDENORE;
             case WORMHOLES -> WORMHOLES;
             case GLOSS -> GLOSS;
+            case SHAPEDPORTALS -> SHAPEDPORTALS;
         };
     }
 }

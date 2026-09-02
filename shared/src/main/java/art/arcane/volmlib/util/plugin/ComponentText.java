@@ -2,10 +2,12 @@ package art.arcane.volmlib.util.plugin;
 
 import art.arcane.volmlib.util.format.ColorFormatter;
 import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.event.ClickEvent;
 import net.kyori.adventure.text.minimessage.MiniMessage;
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 
+import java.net.URI;
 import java.util.Objects;
 
 public final class ComponentText {
@@ -34,10 +36,15 @@ public final class ComponentText {
     public static ComponentText markup(String trustedMarkup) {
         String source = Objects.requireNonNullElse(trustedMarkup, "");
         try {
-            return new ComponentText(MINI_MESSAGE.deserialize(legacyToMiniMessage(source)));
+            return new ComponentText(MINI_MESSAGE.deserialize(normalizeMarkup(source)));
         } catch (RuntimeException ignored) {
             return legacy(source);
         }
+    }
+
+    public static String normalizeMarkup(String mixedText) {
+        String input = Objects.requireNonNullElse(mixedText, "");
+        return legacyToMiniMessage(input);
     }
 
     public static ComponentText legacy(String legacyText) {
@@ -68,6 +75,29 @@ public final class ComponentText {
     public ComponentText append(ComponentText suffix) {
         ComponentText requiredSuffix = Objects.requireNonNull(suffix, "suffix");
         return new ComponentText(Component.empty().append(component).append(requiredSuffix.component));
+    }
+
+    public ComponentText hover(ComponentText content) {
+        ComponentText requiredContent = Objects.requireNonNull(content, "content");
+        return new ComponentText(component.hoverEvent(requiredContent.component));
+    }
+
+    public ComponentText clickRunCommand(String command) {
+        String requiredCommand = Objects.requireNonNull(command, "command");
+        if (!requiredCommand.startsWith("/")) {
+            throw new IllegalArgumentException("Run-command text must start with /");
+        }
+        return new ComponentText(component.clickEvent(ClickEvent.runCommand(requiredCommand)));
+    }
+
+    public ComponentText clickOpenUrl(URI url) {
+        URI requiredUrl = Objects.requireNonNull(url, "url");
+        String scheme = Objects.requireNonNullElse(requiredUrl.getScheme(), "");
+        if ((!scheme.equalsIgnoreCase("https") && !scheme.equalsIgnoreCase("http"))
+                || requiredUrl.getHost() == null || requiredUrl.getHost().isBlank()) {
+            throw new IllegalArgumentException("Open-URL text requires an HTTP or HTTPS URL with a host");
+        }
+        return new ComponentText(component.clickEvent(ClickEvent.openUrl(requiredUrl.toString())));
     }
 
     public String miniMessage() {
