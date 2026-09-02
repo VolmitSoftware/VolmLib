@@ -37,6 +37,7 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
     private final File dataFolder;
     private final int lockSize;
     private final int worldHeight;
+    private static final long USE_STAMP_INTERVAL_MILLIS = 250L;
     private final KMap<Long, Long> lastUse;
     private final KMap<Long, P> loadedRegions;
     private final ConcurrentMap<Long, CompletableFuture<P>> loadingRegions;
@@ -609,6 +610,16 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
     }
 
     @Override
+    protected P acquireLoadedRegionGuarded(int x, int z) {
+        P region = getLoadedRegion(x, z);
+        if (region != null && !isRegionClosed(region)) {
+            markRegionUsed(x, z, region);
+            return region;
+        }
+        return null;
+    }
+
+    @Override
     protected boolean isRegionClosed(P region) {
         return region.isClosed();
     }
@@ -722,8 +733,16 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
     }
 
     protected void use(long key) {
-        lastUse.put(key, nowMillis());
-        toUnload.remove(key);
+        long now = nowMillis();
+        Long previous = lastUse.get(key);
+        // Every mantle access lands here; the idle timers work in seconds, so a fresh stamp is
+        // only written once the previous one is stale enough to matter.
+        if (previous == null || now - previous >= USE_STAMP_INTERVAL_MILLIS) {
+            lastUse.put(key, now);
+        }
+        if (!toUnload.isEmpty()) {
+            toUnload.remove(key);
+        }
     }
 
     protected long nowMillis() {

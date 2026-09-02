@@ -13,6 +13,7 @@ public class WorldCache2D<T> {
     private final ConcurrentLinkedHashMap<Long, ChunkCache2D<T>> chunks;
     private final IntIntFunction<T> resolver;
     private final Supplier<? extends ChunkCache2D<T>> chunkSupplier;
+    private final ThreadLocal<RecentChunk<T>> recent = new ThreadLocal<>();
 
     public WorldCache2D(Function2<Integer, Integer, T> resolver, Supplier<? extends ChunkCache2D<T>> chunkSupplier) {
         this(resolver, 1024, chunkSupplier);
@@ -45,7 +46,7 @@ public class WorldCache2D<T> {
     }
 
     public T get(int x, int z) {
-        long key = CacheKey.key(x >> 4, z >> 4);
+        long key = CacheKey.mix(CacheKey.key(x >> 4, z >> 4));
         ChunkCache2D<T> chunk = chunkFor(key);
         return chunk.getInts(x, z, resolver);
     }
@@ -55,7 +56,7 @@ public class WorldCache2D<T> {
             throw new IllegalArgumentException("Expected a 16x16 target array.");
         }
 
-        long key = CacheKey.key(chunkX, chunkZ);
+        long key = CacheKey.mix(CacheKey.key(chunkX, chunkZ));
         ChunkCache2D<T> chunk = chunkFor(key);
         int worldX = chunkX << 4;
         int worldZ = chunkZ << 4;
@@ -70,12 +71,24 @@ public class WorldCache2D<T> {
         return chunks.capacity() * 256L;
     }
 
+    /**
+     * Generation reads hundreds of columns of one chunk in a row, so the last chunk each thread
+     * resolved answers most lookups without touching the map. A stale entry after eviction still
+     * holds correct values; the map simply computes a fresh chunk once the entry is replaced.
+     */
     private ChunkCache2D<T> chunkFor(long key) {
+        RecentChunk<T> recent = this.recent.get();
+        if (recent != null && recent.key == key) {
+            return recent.chunk;
+        }
         ChunkCache2D<T> chunk = chunks.get(key);
         if (chunk == null) {
             chunk = chunks.computeIfAbsent(key, ignored -> chunkSupplier.get());
         }
-
+        this.recent.set(new RecentChunk<>(key, chunk));
         return chunk;
+    }
+
+    private record RecentChunk<T>(long key, ChunkCache2D<T> chunk) {
     }
 }

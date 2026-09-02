@@ -127,7 +127,7 @@ public class HyperLockSupport {
     }
 
     private OwnedLock getLock(int x, int z) {
-        Long key = CacheKey.key(x, z);
+        Long key = CacheKey.mix(CacheKey.key(x, z));
         OwnedLock lock = locks.get(key);
         return lock != null ? lock : locks.computeIfAbsent(key, lockFactory);
     }

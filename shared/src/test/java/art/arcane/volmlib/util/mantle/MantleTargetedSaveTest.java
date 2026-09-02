@@ -527,4 +527,26 @@ public class MantleTargetedSaveTest {
     private static final class TestSection {
         private final Map<Class<?>, Object> values = new ConcurrentHashMap<>();
     }
+
+    @Test
+    public void repeatedAccessReturnsTheLivePlateAndNeverResurrectsAnUnloadedOne() throws Exception {
+        TestRuntime runtime = new TestRuntime(temporaryFolder.newFolder("guarded-access"));
+        try {
+            MantleChunk<TestSection> first = runtime.mantle.getChunk(0, 0);
+            long requested = Mantle.key(0, 0);
+            TectonicPlate<TestSection> plate = runtime.mantle.getLoadedRegions().get(requested);
+
+            assertSame(first, runtime.mantle.getChunk(0, 0));
+            assertSame(plate, runtime.mantle.getLoadedRegions().get(requested));
+
+            assertEquals(Set.of(), runtime.mantle.saveIdleTectonicPlates(List.of(requested)));
+            assertFalse(runtime.mantle.isChunkLoaded(0, 0));
+
+            MantleChunk<TestSection> reloaded = runtime.mantle.getChunk(0, 0);
+            assertNotSame(first, reloaded);
+            assertNotSame(plate, runtime.mantle.getLoadedRegions().get(requested));
+        } finally {
+            runtime.close();
+        }
+    }
 }

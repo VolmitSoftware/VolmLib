@@ -77,7 +77,6 @@ public class ChunkCache2DAtomic<T> {
             return resolvedFast;
         }
 
-        int spins = dynamic ? 8 : 32;
         while (true) {
             Object cached = VALUE_HANDLE.getAcquire(values, key);
             if (cached != null) {
@@ -103,13 +102,9 @@ public class ChunkCache2DAtomic<T> {
                 return resolved;
             }
 
-            if (spins > 0) {
-                spins--;
-                Thread.onSpinWait();
-                continue;
-            }
-
-            Thread.yield();
+            // Another thread owns the slot. The resolver is pure, so resolving here as well costs
+            // one duplicate sample and never a wait; the owner publishes the shared copy.
+            return resolver.apply(x, z);
         }
     }
 }

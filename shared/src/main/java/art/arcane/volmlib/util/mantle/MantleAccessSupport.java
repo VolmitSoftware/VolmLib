@@ -31,7 +31,9 @@ public abstract class MantleAccessSupport<P> {
     protected P accessRegion(int x, int z) {
         boolean unload = unloadSemaphore.tryAcquire();
         try {
-            P loaded = acquireLoadedRegion(x, z);
+            // While this thread holds an unload permit no eviction or flush can run (they need
+            // every permit), so the loaded plate can be read without the region lock.
+            P loaded = unload ? acquireLoadedRegionGuarded(x, z) : acquireLoadedRegion(x, z);
             if (loaded != null) {
                 return loaded;
             }
@@ -140,6 +142,14 @@ public abstract class MantleAccessSupport<P> {
     protected abstract P getLoadedRegion(int x, int z);
 
     protected abstract P acquireLoadedRegion(int x, int z);
+
+    /**
+     * The loaded, open region at the coordinates, or null. Called only while the caller holds an
+     * unload permit; implementations may skip the region lock the unguarded variant takes.
+     */
+    protected P acquireLoadedRegionGuarded(int x, int z) {
+        return acquireLoadedRegion(x, z);
+    }
 
     protected abstract boolean isRegionClosed(P region);
 
