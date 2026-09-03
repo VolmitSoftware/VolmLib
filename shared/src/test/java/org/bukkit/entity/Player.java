@@ -2,6 +2,7 @@ package org.bukkit.entity;
 
 import net.md_5.bungee.api.ChatMessageType;
 import net.md_5.bungee.api.chat.BaseComponent;
+import org.bukkit.command.CommandSender;
 import org.bukkit.metadata.MetadataValue;
 import org.bukkit.plugin.Plugin;
 
@@ -27,7 +28,10 @@ public interface Player {
     return new Spigot();
   }
 
-  class Spigot {
+  default void updateCommands() {
+  }
+
+  class Spigot extends CommandSender.Spigot {
     public void sendMessage(ChatMessageType position, BaseComponent... components) {
     }
   }

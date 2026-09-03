@@ -498,7 +498,7 @@ public final class TomlCodec {
 
         private String write(Object root) {
             if (root instanceof Map<?, ?> map) {
-                writeMapSection("", map);
+                writeMapSection(List.of(), map);
                 return normalize(out.toString());
             }
 
@@ -506,9 +506,9 @@ public final class TomlCodec {
             return normalize(out.toString());
         }
 
-        private void writeMapSection(String path, Map<?, ?> map) {
+        private void writeMapSection(List<String> path, Map<?, ?> map) {
             boolean hasInlineValues = hasInlineValues(map);
-            if (!path.isBlank() && (hasInlineValues || map.isEmpty())) {
+            if (!path.isEmpty() && (hasInlineValues || map.isEmpty())) {
                 writeSectionHeader(path);
             }
 
@@ -530,7 +530,9 @@ public final class TomlCodec {
             }
 
             for (Map.Entry<?, ?> entry : deferred) {
-                String childPath = joinPath(path, String.valueOf(entry.getKey()));
+                List<String> childPath = new ArrayList<>(path.size() + 1);
+                childPath.addAll(path);
+                childPath.add(String.valueOf(entry.getKey()));
                 Object value = entry.getValue();
                 if (value instanceof Map<?, ?> nested) {
                     writeMapSection(childPath, nested);
@@ -552,12 +554,19 @@ public final class TomlCodec {
             return false;
         }
 
-        private void writeSectionHeader(String path) {
+        private void writeSectionHeader(List<String> path) {
             if (!out.isEmpty()) {
                 out.append('\n');
             }
 
-            out.append('[').append(renderPath(path)).append(']').append('\n');
+            out.append('[');
+            for (int index = 0; index < path.size(); index++) {
+                if (index > 0) {
+                    out.append('.');
+                }
+                out.append(formatKey(path.get(index)));
+            }
+            out.append(']').append('\n');
         }
     }
 }

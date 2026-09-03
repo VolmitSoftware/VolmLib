@@ -13,6 +13,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
@@ -95,6 +96,67 @@ public final class RemoteLanguageCatalog implements AutoCloseable {
         String path = source.revision() + "/" + normalizedSourcePath(options.sourcePath())
                 + requiredLocale + options.extension();
         return options.repositoryRoot().resolve(path);
+    }
+
+    public synchronized String readOrDownload(String locale, ContentValidator validator) throws Exception {
+        String requiredLocale = requireSupportedLocale(locale);
+        Objects.requireNonNull(validator, "validator");
+        CacheResult cached = read(requiredLocale, validator);
+        if (cached.state() == CacheState.VALID) {
+            return cached.content();
+        }
+        requireDownloadReady(requiredLocale);
+        try {
+            byte[] bytes = fetch(requiredLocale, sourceUri(requiredLocale));
+            verifyHash(requiredLocale, bytes);
+            String content = decode(bytes);
+            validator.validate(requiredLocale, content);
+            publishAtomic(cacheFile(requiredLocale), bytes);
+            verifiedCache.add(requiredLocale);
+            failedAtNanos.remove(requiredLocale);
+            return content;
+        } catch (Exception failure) {
+            failedAtNanos.put(requiredLocale, System.nanoTime());
+            throw failure;
+        }
+    }
+
+    public synchronized String readOrInstall(String locale, Path destination, ContentValidator validator) throws Exception {
+        String requiredLocale = requireSupportedLocale(locale);
+        Path target = Objects.requireNonNull(destination, "destination").toAbsolutePath().normalize();
+        Objects.requireNonNull(validator, "validator");
+        if (target.equals(cacheFile(requiredLocale))) {
+            return readOrDownload(requiredLocale, validator);
+        }
+        if (!Files.exists(target, LinkOption.NOFOLLOW_LINKS)) {
+            requireDownloadReady(requiredLocale);
+            try {
+                byte[] bytes = fetch(requiredLocale, sourceUri(requiredLocale));
+                verifyHash(requiredLocale, bytes);
+                validator.validate(requiredLocale, decode(bytes));
+                publishAtomicIfMissing(target, bytes);
+                failedAtNanos.remove(requiredLocale);
+            } catch (Exception failure) {
+                failedAtNanos.put(requiredLocale, System.nanoTime());
+                throw failure;
+            }
+        }
+        if (!Files.isRegularFile(target) || Files.isSymbolicLink(target)) {
+            throw new IOException("Language target is not a regular file: " + target);
+        }
+        String content = decode(readBounded(target));
+        validator.validate(requiredLocale, content);
+        return content;
+    }
+
+    private void requireDownloadReady(String locale) throws IOException {
+        if (executor.isShutdown()) {
+            throw new IOException("Language catalog is closed");
+        }
+        Long failedAt = failedAtNanos.get(locale);
+        if (failedAt != null && System.nanoTime() - failedAt < FAILURE_RETRY_COOLDOWN_NANOS) {
+            throw new IOException("Language download is cooling down after a failure: " + locale);
+        }
     }
 
     public CacheResult read(String locale, ContentValidator validator) {

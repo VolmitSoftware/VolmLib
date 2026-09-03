@@ -100,6 +100,10 @@ public final class ComponentText {
         return new ComponentText(component.clickEvent(ClickEvent.openUrl(requiredUrl.toString())));
     }
 
+    public ComponentText clickCopyToClipboard(String text) {
+        return new ComponentText(component.clickEvent(ClickEvent.copyToClipboard(Objects.requireNonNull(text, "text"))));
+    }
+
     public String miniMessage() {
         return miniMessage;
     }

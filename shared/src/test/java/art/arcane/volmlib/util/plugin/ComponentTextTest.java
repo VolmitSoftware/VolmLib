@@ -123,6 +123,16 @@ public class ComponentTextTest {
     }
 
     @Test
+    public void clipboardPayloadRetainsLiteralMarkupAndNewlines() {
+        String payload = "Report <gold>'quoted' & text\nsecond line";
+        ComponentText message = ComponentText.literal("Copy").clickCopyToClipboard(payload);
+        Component decoded = MiniMessage.miniMessage().deserialize(message.miniMessage());
+
+        assertEquals(ClickEvent.copyToClipboard(payload), decoded.clickEvent());
+        assertEquals("Copy", message.plain());
+    }
+
+    @Test
     public void componentFactoryRejectsNonComponents() {
         assertThrows(IllegalArgumentException.class, () -> ComponentText.component("not a component"));
         assertThrows(IllegalArgumentException.class, () -> ComponentText.component(null));

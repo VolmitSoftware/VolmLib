@@ -1,10 +1,12 @@
 package art.arcane.volmlib.util.scheduling;
 
+import art.arcane.volmlib.util.localization.LanguageAudience;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Server;
 import org.bukkit.World;
 import org.bukkit.entity.Entity;
+import org.bukkit.entity.Player;
 import org.bukkit.plugin.IllegalPluginAccessException;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.scheduler.BukkitScheduler;
@@ -12,6 +14,7 @@ import org.bukkit.scheduler.BukkitTask;
 
 import java.lang.reflect.Method;
 import java.util.Arrays;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
@@ -284,6 +287,15 @@ public final class FoliaScheduler {
     }
 
     public static boolean runEntity(Plugin plugin, Entity entity, Runnable runnable, long delayTicks, Runnable retired) {
+        if (runnable == null) {
+            return false;
+        }
+        UUID audience = entity instanceof Player player ? player.getUniqueId() : LanguageAudience.current();
+        Runnable contextual = audience == null ? runnable : () -> LanguageAudience.run(audience, runnable);
+        return scheduleEntity(plugin, entity, contextual, delayTicks, retired);
+    }
+
+    private static boolean scheduleEntity(Plugin plugin, Entity entity, Runnable runnable, long delayTicks, Runnable retired) {
         if (!isPluginActive(plugin) || entity == null || runnable == null) {
             return false;
         }

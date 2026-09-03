@@ -2,6 +2,7 @@ package art.arcane.volmlib.util.inventorygui;
 
 import art.arcane.volmlib.util.collection.KMap;
 import art.arcane.volmlib.util.collection.KSet;
+import art.arcane.volmlib.util.localization.LanguageAudience;
 import art.arcane.volmlib.util.scheduling.Callback;
 import art.arcane.volmlib.util.scheduling.FoliaScheduler;
 import org.bukkit.Bukkit;
@@ -63,6 +64,12 @@ public class UIWindow implements Window, Listener {
 
     @EventHandler
     public void on(InventoryClickEvent e) {
+        if (e.getWhoClicked().equals(viewer)) {
+            LanguageAudience.run(viewer.getUniqueId(), () -> handleClick(e));
+        }
+    }
+
+    private void handleClick(InventoryClickEvent e) {
         if (!e.getWhoClicked().equals(viewer)) {
             return;
         }
@@ -506,7 +513,7 @@ public class UIWindow implements Window, Listener {
     @Override
     public Window callClosed() {
         if (eClose != null) {
-            eClose.run(this);
+            LanguageAudience.run(viewer.getUniqueId(), () -> eClose.run(this));
         }
 
         return this;
@@ -552,7 +559,7 @@ public class UIWindow implements Window, Listener {
         boolean wasBatching = batching;
         batching = true;
         try {
-            mutations.run();
+            LanguageAudience.run(viewer.getUniqueId(), mutations);
         } finally {
             batching = wasBatching;
         }

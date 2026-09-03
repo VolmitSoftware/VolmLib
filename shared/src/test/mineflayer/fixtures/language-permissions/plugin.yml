@@ -1,0 +1,8 @@
+name: LanguagePermissionFixture
+version: 1.0
+main: art.arcane.volmlib.test.LanguagePermissionFixture
+api-version: '1.20'
+folia-supported: true
+commands:
+  permissionfixture:
+    description: Change the editor test player's permission attachment.

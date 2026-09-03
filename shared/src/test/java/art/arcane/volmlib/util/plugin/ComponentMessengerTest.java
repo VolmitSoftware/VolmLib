@@ -1,5 +1,7 @@
 package art.arcane.volmlib.util.plugin;
 
+import net.md_5.bungee.api.chat.BaseComponent;
+import net.md_5.bungee.api.chat.ClickEvent;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 import org.junit.Test;
@@ -15,6 +17,7 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.withSettings;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 public class ComponentMessengerTest {
     @Test
@@ -76,6 +79,37 @@ public class ComponentMessengerTest {
                 "not-a-command",
                 ComponentText.literal("Hover")
         ));
+    }
+
+    @Test
+    public void clipboardDeliveryRetainsTheInteractiveAction() {
+        CommandSender sender = mock(CommandSender.class, withSettings().extraInterfaces(Player.class));
+
+        ComponentMessenger.sendCopyToClipboard((Player) sender, ComponentText.literal("Copy"),
+                "https://mclo.gs/Ab12", ComponentText.literal("Copy report link"));
+
+        ArgumentCaptor<String> markup = ArgumentCaptor.forClass(String.class);
+        verify(sender).sendRichMessage(markup.capture());
+        assertTrue(markup.getValue().contains("click:copy_to_clipboard"));
+        assertTrue(markup.getValue().contains("https://mclo.gs/Ab12"));
+    }
+
+    @Test
+    public void clipboardDeliveryRetainsSpigotClickEvent() {
+        CommandSender sender = mock(CommandSender.class, withSettings().extraInterfaces(Player.class));
+        Player player = (Player) sender;
+        Player.Spigot spigot = mock(Player.Spigot.class);
+        when(player.spigot()).thenReturn(spigot);
+        doThrow(new UnsupportedOperationException("unsupported")).when(sender).sendRichMessage(anyString());
+
+        ComponentMessenger.sendCopyToClipboard(player, ComponentText.literal("Copy"),
+                "https://mclo.gs/Ab12", ComponentText.literal("Copy report link"));
+
+        ArgumentCaptor<BaseComponent[]> components = ArgumentCaptor.forClass(BaseComponent[].class);
+        verify(spigot).sendMessage(components.capture());
+        assertEquals(ClickEvent.Action.COPY_TO_CLIPBOARD,
+                components.getValue()[0].getClickEvent().getAction());
+        assertEquals("https://mclo.gs/Ab12", components.getValue()[0].getClickEvent().getValue());
     }
 
     @Test

@@ -27,12 +27,37 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.assertThrows;
 
 public class RemoteLanguageCatalogTest {
     private static final String REVISION = "0123456789abcdef0123456789abcdef01234567";
 
     @Rule
     public TemporaryFolder temporaryFolder = new TemporaryFolder();
+
+    @Test
+    public void blockingLoadsVerifyCachesAndPreserveEditableLanguages() throws Exception {
+        byte[] content = "verified language".getBytes(StandardCharsets.UTF_8);
+        HttpServer server = server(content);
+        try (URLClassLoader resources = resources(hash(content));
+             RemoteLanguageCatalog catalog = catalog(server, resources)) {
+            Path cache = catalog.cacheFile("fr_FR");
+            Files.createDirectories(cache.getParent());
+            Files.writeString(cache, "corrupt");
+            assertEquals("verified language", catalog.readOrDownload("fr_FR", (locale, raw) -> {}));
+            assertArrayEquals(content, Files.readAllBytes(cache));
+            Path editable = temporaryFolder.getRoot().toPath().resolve("fr_FR.yml");
+            Files.writeString(editable, "custom translation");
+            assertEquals("custom translation", catalog.readOrInstall("fr_FR", editable, (locale, raw) -> {}));
+            assertEquals("custom translation", Files.readString(editable));
+            assertThrows(IOException.class, () -> catalog.readOrInstall("fr_FR", editable, (locale, raw) -> {
+                throw new IOException("Invalid translation");
+            }));
+            assertEquals("custom translation", Files.readString(editable));
+        } finally {
+            server.stop(0);
+        }
+    }
 
     @Test
     public void downloadsValidatesAndReusesExactCachedBytes() throws Exception {

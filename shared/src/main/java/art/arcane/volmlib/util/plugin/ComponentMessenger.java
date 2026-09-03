@@ -106,6 +106,33 @@ public final class ComponentMessenger {
         }
     }
 
+    public static void sendCopyToClipboard(
+            Player player,
+            ComponentText message,
+            String text,
+            ComponentText hover
+    ) {
+        Player requiredPlayer = Objects.requireNonNull(player, "player");
+        ComponentText requiredMessage = Objects.requireNonNull(message, "message");
+        String requiredText = Objects.requireNonNull(text, "text");
+        ComponentText requiredHover = Objects.requireNonNull(hover, "hover");
+        ComponentText interactive = requiredMessage.clickCopyToClipboard(requiredText).hover(requiredHover);
+        if (sendRichMessage(requiredPlayer, interactive.miniMessage())) {
+            return;
+        }
+        BaseComponent[] components = TextComponent.fromLegacyText(requiredMessage.legacy());
+        ClickEvent clickEvent = new ClickEvent(ClickEvent.Action.COPY_TO_CLIPBOARD, requiredText);
+        HoverEvent hoverEvent = new HoverEvent(HoverEvent.Action.SHOW_TEXT,
+                TextComponent.fromLegacyText(requiredHover.legacy()));
+        for (BaseComponent component : components) {
+            component.setClickEvent(clickEvent);
+            component.setHoverEvent(hoverEvent);
+        }
+        if (!sendSpigotComponents(requiredPlayer, components)) {
+            requiredPlayer.sendMessage(requiredMessage.legacy() + " " + requiredText);
+        }
+    }
+
     public static void send(CommandSender sender, ComponentText message) {
         CommandSender requiredSender = Objects.requireNonNull(sender, "sender");
         ComponentText requiredMessage = Objects.requireNonNull(message, "message");

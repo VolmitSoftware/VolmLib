@@ -1,11 +1,13 @@
 package art.arcane.volmlib.util.localization;
 
 import art.arcane.volmlib.util.config.TomlCodec;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
 
 import java.io.IOException;
+import java.util.Map;
 import java.util.Objects;
 
 public final class TomlLanguageEditor {
@@ -13,24 +15,42 @@ public final class TomlLanguageEditor {
     }
 
     public static EditResult upsertText(String raw, String key, String value) throws IOException {
+        return upsert(raw, key, new TextValue(value));
+    }
+
+    public static EditResult upsert(String raw, String key, MessageValue value) throws IOException {
         String source = Objects.requireNonNullElse(raw, "");
         String requiredKey = LocalizationSupport.requireMessageId(key);
-        String requiredValue = Objects.requireNonNull(value, "Language value cannot be null");
-        JsonObject root = parse(source);
-        JsonObject updated = root.deepCopy();
-        String[] path = requiredKey.split("\\.");
-        JsonObject parent = requireParent(updated, path, true);
-        parent.add(path[path.length - 1], new JsonPrimitive(requiredValue));
+        MessageValue requiredValue = Objects.requireNonNull(value, "Language value cannot be null");
+        JsonObject updated = parse(source);
+        upsertValue(updated, requiredKey, serializeValue(requiredValue));
         return serialize(updated, leadingCommentBlock(source));
+    }
+
+    private static JsonElement serializeValue(MessageValue value) {
+        if (value instanceof TextValue text) {
+            return new JsonPrimitive(text.template());
+        }
+        if (value instanceof LinesValue lines) {
+            JsonArray array = new JsonArray();
+            for (String line : lines.lines()) {
+                array.add(line);
+            }
+            return array;
+        }
+        PluralValue plural = (PluralValue) value;
+        JsonObject object = new JsonObject();
+        for (Map.Entry<String, String> form : plural.forms().entrySet()) {
+            object.addProperty(form.getKey(), form.getValue());
+        }
+        return object;
     }
 
     public static EditResult remove(String raw, String key) throws IOException {
         String source = Objects.requireNonNullElse(raw, "");
         String requiredKey = LocalizationSupport.requireMessageId(key);
-        JsonObject root = parse(source);
-        JsonObject updated = root.deepCopy();
-        String[] path = requiredKey.split("\\.");
-        remove(updated, path, 0);
+        JsonObject updated = parse(source);
+        remove(updated, requiredKey);
         return serialize(updated, leadingCommentBlock(source));
     }
 
@@ -42,34 +62,31 @@ public final class TomlLanguageEditor {
         return parsed.getAsJsonObject();
     }
 
-    private static JsonObject requireParent(JsonObject root, String[] path, boolean create) throws IOException {
-        JsonObject cursor = root;
-        for (int index = 0; index < path.length - 1; index++) {
-            String segment = path[index];
-            JsonElement child = cursor.get(segment);
-            if (child == null) {
-                if (!create) {
-                    return null;
-                }
-                JsonObject created = new JsonObject();
-                cursor.add(segment, created);
-                cursor = created;
-                continue;
-            }
-            if (!child.isJsonObject()) {
-                throw new IOException("Language key collides with a non-table value: " + segment);
-            }
-            cursor = child.getAsJsonObject();
+    private static void upsertValue(JsonObject root, String key, JsonElement value) throws IOException {
+        int separator = key.indexOf('.');
+        if (root.has(key) || separator < 0) {
+            root.add(key, value);
+            return;
         }
-        return cursor;
+        String segment = key.substring(0, separator);
+        JsonElement child = root.get(segment);
+        if (child == null) {
+            child = new JsonObject();
+            root.add(segment, child);
+        }
+        if (!child.isJsonObject()) {
+            throw new IOException("Language key collides with a non-table value: " + segment);
+        }
+        upsertValue(child.getAsJsonObject(), key.substring(separator + 1), value);
     }
 
-    private static boolean remove(JsonObject object, String[] path, int index) throws IOException {
-        String segment = path[index];
-        if (index == path.length - 1) {
-            object.remove(segment);
+    private static boolean remove(JsonObject object, String key) throws IOException {
+        int separator = key.indexOf('.');
+        if (object.has(key) || separator < 0) {
+            object.remove(key);
             return object.size() == 0;
         }
+        String segment = key.substring(0, separator);
         JsonElement child = object.get(segment);
         if (child == null) {
             return object.size() == 0;
@@ -77,7 +94,7 @@ public final class TomlLanguageEditor {
         if (!child.isJsonObject()) {
             throw new IOException("Language key collides with a non-table value: " + segment);
         }
-        if (remove(child.getAsJsonObject(), path, index + 1)) {
+        if (remove(child.getAsJsonObject(), key.substring(separator + 1))) {
             object.remove(segment);
         }
         return object.size() == 0;
