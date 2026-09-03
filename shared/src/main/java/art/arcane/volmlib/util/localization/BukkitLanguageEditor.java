@@ -20,11 +20,14 @@ import org.bukkit.event.player.AsyncPlayerChatEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryHolder;
+import org.bukkit.inventory.InventoryView;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.RegisteredServiceProvider;
 
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -50,6 +53,7 @@ final class BukkitLanguageEditor implements AutoCloseable, Listener {
     private static final int NEXT = 51;
     private static final int CLOSE = 53;
     private static final int MAXIMUM_INPUT_LENGTH = 512;
+    private static final Method INVENTORY_VIEW_GET_TOP_INVENTORY = resolveInventoryViewTopInventory();
     private static final List<String> PLURAL_FORMS = List.of("zero", "one", "two", "few", "many", "other");
 
     private final Plugin plugin;
@@ -82,7 +86,7 @@ final class BukkitLanguageEditor implements AutoCloseable, Listener {
 
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onClick(InventoryClickEvent event) {
-        if (!(event.getView().getTopInventory().getHolder() instanceof Holder holder) || holder.owner != this) {
+        if (!(event.getInventory().getHolder() instanceof Holder holder) || holder.owner != this) {
             return;
         }
         event.setCancelled(true);
@@ -98,7 +102,7 @@ final class BukkitLanguageEditor implements AutoCloseable, Listener {
 
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onDrag(InventoryDragEvent event) {
-        if (event.getView().getTopInventory().getHolder() instanceof Holder holder && holder.owner == this) {
+        if (event.getInventory().getHolder() instanceof Holder holder && holder.owner == this) {
             event.setCancelled(true);
         }
     }
@@ -149,7 +153,7 @@ final class BukkitLanguageEditor implements AutoCloseable, Listener {
         Plugin schedulerOwner = schedulerOwner();
         for (Player player : plugin.getServer().getOnlinePlayers()) {
             Runnable cleanup = () -> {
-                if (player.getOpenInventory().getTopInventory().getHolder() instanceof Holder holder
+                if (inventoryViewTopInventory(player.getOpenInventory()).getHolder() instanceof Holder holder
                         && holder.owner == this) {
                     player.closeInventory();
                 }
@@ -440,6 +444,22 @@ final class BukkitLanguageEditor implements AutoCloseable, Listener {
             }
         }
         return null;
+    }
+
+    private static Method resolveInventoryViewTopInventory() {
+        try {
+            return InventoryView.class.getMethod("getTopInventory");
+        } catch (NoSuchMethodException exception) {
+            throw new ExceptionInInitializerError(exception);
+        }
+    }
+
+    static Inventory inventoryViewTopInventory(InventoryView view) {
+        try {
+            return (Inventory) INVENTORY_VIEW_GET_TOP_INVENTORY.invoke(view);
+        } catch (IllegalAccessException | InvocationTargetException exception) {
+            throw new IllegalStateException("Failed to invoke InventoryView.getTopInventory", exception);
+        }
     }
 
     private static List<String> parts(View view) {
