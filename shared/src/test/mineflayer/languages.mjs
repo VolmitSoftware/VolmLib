@@ -53,6 +53,11 @@ export default {
       await command('/minecraft:seed', /permission|Unknown or incomplete command|Unknown command/i)
     })
     if (mode === 'scopes') {
+      await step('run the plugin language menu from the root help action', async () => {
+        const commands = await collectMenu('/sp', /shapedportals/i)
+        expect(commands.includes('/shapedportals language'),
+          'ShapedPortals root help does not run its language menu directly', commands)
+      })
       await step('offer only local scope actions from plugin language pickers and completions', async () => {
         for (const root of ['sp', 'biletools']) {
           const completions = await bot.tabComplete(`/${root} language `, true, false, timeout)
@@ -64,7 +69,9 @@ export default {
             'Plugin language picker has no personal language action', { root, commands })
           expect(commands.some(value => value === `/${root} language server`),
             'Plugin language picker has no server language action', { root, commands })
-          expect(commands.every(value => value.startsWith(`/${root} language self`)
+          expect(commands.includes(`/${root}`), 'Plugin language menu has no Back action', { root, commands })
+          const scoped = commands.filter(value => value !== `/${root}`)
+          expect(scoped.every(value => value.startsWith(`/${root} language self`)
               || value.startsWith(`/${root} language server`)),
             'Plugin language picker contains an action outside its local scopes', { root, commands })
         }
@@ -82,7 +89,9 @@ export default {
         const commands = await collectMenu('/volmit plugins languages', 'Current: fr_FR')
         expect(commands.includes('/volmit plugins languages en_US'),
           'Shared language picker has no English server selection', commands)
-        expect(commands.every(value => value.startsWith('/volmit plugins languages ')
+        expect(commands.includes('/volmit plugins'), 'Shared language picker has no Back action', commands)
+        const selections = commands.filter(value => value !== '/volmit plugins')
+        expect(selections.every(value => value.startsWith('/volmit plugins languages ')
             && !/\s(self|server)\b/.test(value)),
           'Shared language picker contains a personal or plugin-local action', commands)
         const completions = await bot.tabComplete('/volmit plugins languages ', true, false, timeout)
@@ -143,7 +152,10 @@ export default {
             await command(`/${root} language self fr_FR`, `${name}: your language is now fr_FR.`)
             await command(`/${root} language self de_DE`, `${name}: de_DE is unavailable; using English (en_US).`)
             await command(`/${root} language self`, 'Current: en_US')
-            const preferences = await readFile(path.join(plugins, name, 'language-preferences.properties'), 'utf8')
+            const preferenceFile = name === 'ShapedPortals'
+              ? path.join(plugins, name, 'languages/language-preferences.properties')
+              : path.join(plugins, name, 'language-preferences.properties')
+            const preferences = await readFile(preferenceFile, 'utf8')
             expect(preferences.split('\n').includes(`${bot.player.uuid}=en_US`),
               'Personal language fallback did not persist English', name)
           }

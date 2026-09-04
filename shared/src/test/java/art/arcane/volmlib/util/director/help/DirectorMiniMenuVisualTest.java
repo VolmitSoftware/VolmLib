@@ -132,6 +132,14 @@ public class DirectorMiniMenuVisualTest {
     }
 
     @Test
+    public void parameterlessInvocableEntryRunsImmediately() {
+        String rendered = String.join("\n", render(List.of(), 10));
+
+        assertTrue(rendered.contains("<click:run_command:/test ping>"));
+        assertFalse(rendered.contains("<click:suggest_command:/test ping "));
+    }
+
+    @Test
     public void paginatedBannerOverloadRetainsItsPageTitleContract() {
         DirectorMiniMenu.ContentPage page = DirectorMiniMenu.paginate(40, 2, 15);
         DirectorMiniMenu.Theme theme = DirectorMiniMenu.Theme.irisGreen();
@@ -213,6 +221,19 @@ public class DirectorMiniMenuVisualTest {
 
         assertEquals(3, rendered.size());
         assertEquals("No portals", rendered.get(1));
+    }
+
+    @Test
+    public void contentSubmenusRenderAParentButton() {
+        DirectorMiniMenu.ContentMenu menu = new DirectorMiniMenu.ContentMenu(
+                "/shapedportals language", "/shapedportals language", "/shapedportals",
+                List.of("Language controls"), "", 1, 10);
+
+        List<String> rendered = DirectorMiniMenu.renderContent(
+                menu, DirectorMiniMenu.Theme.reactBlue(), DirectorTextResolver.ENGLISH);
+
+        assertTrue(rendered.get(1).contains("<click:run_command:/shapedportals>"));
+        assertTrue(rendered.get(1).contains("〈 Back"));
     }
 
     @Test

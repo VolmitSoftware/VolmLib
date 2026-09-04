@@ -139,12 +139,17 @@ public class FolderWatcher extends FileWatcher {
         } else {
             detected = scanFast();
         }
-        mergeEvents(events);
+        if (forceFullScan) {
+            mergeScannedEvents(events);
+        } else {
+            mergeEvents(events);
+        }
 
         if (rootWatcher && (forceFullScan || (!nativeEventsActive && file.isDirectory()))) {
             refreshTreeRegistrations();
         }
-        return detected || events.detected() || !changed.isEmpty() || !created.isEmpty() || !deleted.isEmpty();
+        return detected || (!forceFullScan && events.detected())
+                || !changed.isEmpty() || !created.isEmpty() || !deleted.isEmpty();
     }
 
     private boolean scanFull() {
@@ -227,6 +232,12 @@ public class FolderWatcher extends FileWatcher {
         // Writing a file's first bytes raises ENTRY_CREATE and ENTRY_MODIFY together on Windows,
         // and a removal can arrive the same way, so the same file would otherwise be reported as
         // created and changed in one poll. The stronger event wins.
+        changed.removeIf(created::contains);
+        changed.removeIf(deleted::contains);
+    }
+
+    private void mergeScannedEvents(EventDelta events) {
+        addUnique(changed, events.changed());
         changed.removeIf(created::contains);
         changed.removeIf(deleted::contains);
     }

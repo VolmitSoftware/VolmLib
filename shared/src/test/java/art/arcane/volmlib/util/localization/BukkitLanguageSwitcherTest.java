@@ -9,6 +9,7 @@ import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.PluginManager;
+import org.bukkit.plugin.ServicePriority;
 import org.bukkit.plugin.SimpleServicesManager;
 import org.junit.After;
 import org.junit.Before;
@@ -18,11 +19,15 @@ import org.mockito.MockedConstruction;
 import org.mockito.invocation.Invocation;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.BiConsumer;
+import java.util.function.BiFunction;
 import java.util.logging.Logger;
 
 import static org.junit.Assert.assertEquals;
@@ -35,6 +40,7 @@ import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.mockConstruction;
 import static org.mockito.Mockito.mockingDetails;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.when;
@@ -42,6 +48,7 @@ import static org.mockito.Mockito.when;
 public class BukkitLanguageSwitcherTest {
     private final UUID playerId = UUID.randomUUID();
     private Server server;
+    private SimpleServicesManager services;
     private MockedStatic<Bukkit> bukkit;
     private MockedStatic<FoliaScheduler> scheduler;
     private MockedConstruction<BukkitVolmitCommand> commands;
@@ -64,7 +71,8 @@ public class BukkitLanguageSwitcherTest {
             return true;
         });
         server = mock(Server.class);
-        when(server.getServicesManager()).thenReturn(new SimpleServicesManager());
+        services = new SimpleServicesManager();
+        when(server.getServicesManager()).thenReturn(services);
         when(server.getPluginManager()).thenReturn(mock(PluginManager.class));
         bukkit = mockStatic(Bukkit.class);
         bukkit.when(Bukkit::getServer).thenReturn(server);
@@ -85,7 +93,7 @@ public class BukkitLanguageSwitcherTest {
 
     @Test
     public void pickerUsesThePluginDirectorThemeAndCommandForEveryControl() {
-        switcher.command(player, new String[0]);
+        switcher.command(player, new String[]{"self"});
         String rendered = String.join("\n", richMessages());
 
         assertTrue(rendered.contains("<gradient:#8b0000:#ff4d4d>"));
@@ -94,6 +102,59 @@ public class BukkitLanguageSwitcherTest {
         assertTrue(rendered.contains("/adapt language self page=2"));
         assertTrue(rendered.contains("</strikethrough>"));
         assertFalse(rendered.contains("/adapt language server"));
+        assertFalse(rendered.contains("Use server default"));
+        assertTrue(rendered.contains("<font:minecraft:uniform>"));
+        assertTrue(rendered.contains("Command: /adapt language self fr_FR"));
+    }
+
+    @Test
+    public void rootLanguageMenuShowsCurrentScopesResetAndEditor() {
+        when(player.hasPermission("adapt.admin")).thenReturn(true);
+        when(languages.playerLocale(playerId)).thenReturn(Optional.of("fr_FR"));
+        when(languages.effectiveLocale(playerId)).thenReturn("fr_FR");
+
+        switcher.command(player, new String[0]);
+
+        String rendered = String.join("\n", richMessages());
+        assertTrue(rendered.contains("<click:run_command:'/adapt language self'>"));
+        assertTrue(rendered.contains("Current: fr_FR"));
+        assertTrue(rendered.contains("<click:run_command:'/adapt language self reset'>"));
+        assertTrue(rendered.contains("Reset your language"));
+        assertTrue(rendered.contains("<click:run_command:'/adapt language server'>"));
+        assertTrue(rendered.contains("Current: en_US (Yours: fr_FR)"));
+        assertTrue(rendered.contains("<click:run_command:'/adapt language server edit'>"));
+        assertTrue(rendered.indexOf("Your language") < rendered.indexOf("Server default"));
+        assertTrue(rendered.indexOf("Server default") < rendered.indexOf("Reset your language"));
+        assertTrue(rendered.indexOf("Reset your language") < rendered.indexOf("Edit language messages"));
+    }
+
+    @Test
+    public void pluginPickerKeepsScopeControlsOnTheFirstPage() {
+        switcher.command(player, new String[]{"self", "page=2"});
+
+        String rendered = String.join("\n", richMessages());
+        assertFalse(rendered.contains("Your language"));
+        assertFalse(rendered.contains("Use server default"));
+        assertTrue(rendered.contains("/adapt language self page=1"));
+    }
+
+    @Test
+    public void languageHomeAlwaysOffersThePersonalResetCommand() {
+
+        switcher.command(player, new String[0]);
+
+        assertTrue(String.join("\n", richMessages()).contains("Reset your language"));
+    }
+
+    @Test
+    public void languageHomeOmitsPersonalNoteWhenItMatchesTheServerDefault() {
+        when(player.hasPermission("adapt.admin")).thenReturn(true);
+
+        switcher.command(player, new String[0]);
+
+        String rendered = String.join("\n", richMessages());
+        assertTrue(rendered.contains("Current: en_US"));
+        assertFalse(rendered.contains("Yours:"));
     }
 
     @Test
@@ -171,6 +232,158 @@ public class BukkitLanguageSwitcherTest {
     }
 
     @Test
+    public void sharedPluginMenuDiscoversDebugProvidersAndUsesDirectorControls() {
+        List<String> requests = new ArrayList<>();
+        registerDebug("Adapt", "1.2.3", "adapt.debug",
+                (sender, upload) -> requests.add("Adapt:" + upload),
+                (sender, upload) -> {
+                    requests.add("Adapt:aggregate:" + upload);
+                    return CompletableFuture.completedFuture(Map.of(
+                            "status", "success", "name", "Adapt", "version", "1.2.3",
+                            "path", "C:\\reports\\adapt.txt", "url", "https://mclo.gs/Cd34"));
+                });
+        registerDebug("BileTools", "4.5.6", "biletools.debugdump", (sender, upload) -> {
+            requests.add("BileTools:" + upload);
+        }, (sender, upload) -> {
+            requests.add("BileTools:aggregate:" + upload);
+            return CompletableFuture.completedFuture(Map.of(
+                    "status", "success", "name", "BileTools", "version", "4.5.6",
+                    "path", "C:\\reports\\biletools.txt", "url", "https://mclo.gs/Ab12"));
+        });
+        when(player.hasPermission("adapt.debug")).thenReturn(true);
+        when(player.hasPermission("biletools.debugdump")).thenReturn(true);
+        when(player.hasPermission("volmit.language.admin")).thenReturn(true);
+
+        switcher.commandVolmit(player, new String[]{"plugins"});
+        switcher.commandVolmit(player, new String[]{"plugins", "debug"});
+        switcher.commandVolmit(player, new String[]{"plugins", "debug", "Adapt", "upload=false"});
+        switcher.commandVolmit(player, new String[]{"plugins", "debug", "all", "upload=false"});
+
+        String rendered = String.join("\n", richMessages());
+        assertTrue(rendered.contains("/volmit plugins languages"));
+        assertTrue(rendered.contains("/volmit plugins debug"));
+        assertTrue(rendered.contains("<click:run_command:'/volmit plugins debug Adapt'>"));
+        assertTrue(rendered.contains("Command: /volmit plugins debug Adapt"));
+        assertTrue(rendered.contains("BileTools - Debug"));
+        assertEquals(List.of("debug", "languages"),
+                switcher.completeVolmit(player, new String[]{"plugins", ""}).stream().sorted().toList());
+        assertEquals(List.of("all", "Adapt", "BileTools"),
+                switcher.completeVolmit(player, new String[]{"plugins", "debug", ""}));
+        assertEquals(List.of("upload=true", "upload=false"),
+                switcher.completeVolmit(player, new String[]{"plugins", "debug", "Adapt", "upload="}));
+        assertEquals(List.of("Adapt:false", "Adapt:aggregate:false", "BileTools:aggregate:false"), requests);
+        assertTrue(rendered.contains(DirectorMiniMenu.escapeText("C:\\reports\\adapt.txt")));
+        assertTrue(rendered.contains(DirectorMiniMenu.escapeText("C:\\reports\\biletools.txt")));
+        assertTrue(rendered.indexOf(DirectorMiniMenu.escapeText("C:\\reports\\adapt.txt"))
+                < rendered.indexOf("click:open_url:'https://mclo.gs/Cd34'"));
+        assertTrue(rendered.indexOf(DirectorMiniMenu.escapeText("C:\\reports\\biletools.txt"))
+                < rendered.indexOf("click:open_url:'https://mclo.gs/Cd34'"));
+        assertTrue(rendered.indexOf("click:open_url:'https://mclo.gs/Cd34'")
+                < rendered.indexOf("click:open_url:'https://mclo.gs/Ab12'"));
+        assertTrue(rendered.contains("click:open_url:'https://mclo.gs/Ab12'"));
+        assertFalse(rendered.contains("Command: https://mclo.gs/Ab12"));
+        assertFalse(rendered.contains("Started 2 debug reports."));
+    }
+
+    @Test
+    public void allDebugReportsContinueWhenOneProviderFailsToStart() {
+        List<String> requests = new ArrayList<>();
+        registerDebug("Adapt", "1.2.3", "adapt.debug", (sender, upload) -> requests.add("legacy"),
+                (sender, upload) -> {
+                    throw new IllegalStateException("broken provider");
+                });
+        registerDebug("BileTools", "4.5.6", "biletools.debugdump",
+                (sender, upload) -> requests.add("legacy"), (sender, upload) -> {
+                    requests.add("BileTools:" + upload);
+                    return CompletableFuture.completedFuture(Map.of(
+                            "status", "success", "name", "BileTools", "version", "4.5.6",
+                            "path", "C:\\reports\\biletools.txt"));
+                });
+        when(player.hasPermission("adapt.debug")).thenReturn(true);
+        when(player.hasPermission("biletools.debugdump")).thenReturn(true);
+
+        switcher.commandVolmit(player, new String[]{"plugins", "debug", "all", "upload=false"});
+
+        String rendered = String.join("\n", richMessages());
+        assertEquals(List.of("BileTools:false"), requests);
+        assertEquals(1, richMessages().stream()
+                .filter(message -> message.contains("/volmit plugins debug all"))
+                .count());
+        assertTrue(rendered.contains("Adapt v1.2.3 - Unable to start the debug report"));
+        assertTrue(rendered.contains(DirectorMiniMenu.escapeText("C:\\reports\\biletools.txt")));
+    }
+
+    @Test
+    public void sharedMenusExposeTheirImmediateParentRoutes() {
+        registerDebug("Adapt", "1.2.3", "adapt.debug", (sender, upload) -> {
+        });
+        when(player.hasPermission("adapt.debug")).thenReturn(true);
+        when(player.hasPermission("volmit.language.admin")).thenReturn(true);
+
+        switcher.commandVolmit(player, new String[0]);
+        String root = String.join("\n", richMessages());
+        assertTrue(root.contains("<click:run_command:'/volmit plugins'>"));
+        assertFalse(root.contains("〈 Back"));
+
+        clearInvocations(player);
+        switcher.commandVolmit(player, new String[]{"plugins"});
+        assertTrue(String.join("\n", richMessages()).contains("<click:run_command:/volmit>"));
+
+        clearInvocations(player);
+        switcher.commandVolmit(player, new String[]{"plugins", "languages"});
+        assertTrue(String.join("\n", richMessages()).contains("<click:run_command:/volmit plugins>"));
+
+        clearInvocations(player);
+        switcher.commandVolmit(player, new String[]{"plugins", "debug"});
+        assertTrue(String.join("\n", richMessages()).contains("<click:run_command:/volmit plugins>"));
+    }
+
+    @Test
+    public void debugOnlyProvidersRemainAvailableWithoutLanguageProviders() {
+        services = new SimpleServicesManager();
+        when(server.getServicesManager()).thenReturn(services);
+        List<Boolean> requests = new ArrayList<>();
+        registerDebug("DebugOnly", "1.0.0", "debugonly.debug", (sender, upload) -> requests.add(upload),
+                (sender, upload) -> {
+                    requests.add(upload);
+                    return CompletableFuture.completedFuture(Map.of(
+                            "status", "success", "name", "DebugOnly", "version", "1.0.0",
+                            "path", "C:\\reports\\debugonly.txt"));
+                });
+        when(player.hasPermission("debugonly.debug")).thenReturn(true);
+
+        switcher.commandVolmit(player, new String[]{"plugins"});
+        switcher.commandVolmit(player, new String[]{"plugins", "debug", "all", "upload=false"});
+
+        String rendered = String.join("\n", richMessages());
+        assertTrue(rendered.contains("/volmit plugins debug"));
+        assertEquals(List.of(false), requests);
+    }
+
+    @Test
+    public void debugCompletionDoesNotOfferAllWithoutAPermittedProvider() {
+        registerDebug("Adapt", "1.2.3", "adapt.debug", (sender, upload) -> {
+        });
+
+        assertTrue(switcher.completeVolmit(player, new String[]{"plugins", "debug", ""}).isEmpty());
+    }
+
+    @Test
+    public void sharedMenuTextFallsBackWhenAConsumerCatalogHasNoSharedKeys() {
+        DirectorTextResolver incomplete = (key, arguments) -> {
+            if (key.id().startsWith("language.menu.")) {
+                throw new IllegalArgumentException("Unknown message key: " + key.id());
+            }
+            return DirectorTextResolver.ENGLISH.resolve(key, arguments);
+        };
+        BukkitLanguageSwitcher fallback = register("Fallback", "fallback", languages, incomplete);
+
+        fallback.command(player, new String[0]);
+
+        assertTrue(String.join("\n", richMessages()).contains("Your language"));
+    }
+
+    @Test
     public void serverSelectionOnlyChangesTheCurrentPlugin() {
         PluginLanguageService other = languageService();
         register("Iris", "iris", other);
@@ -230,7 +443,7 @@ public class BukkitLanguageSwitcherTest {
         verify(languages, never()).clearPlayer(any(UUID.class));
         assertTrue(switcher.complete(player, new String[]{""}).isEmpty());
         assertTrue(switcher.complete(player, new String[]{"self", ""}).isEmpty());
-        assertFalse(String.join("\n", richMessages()).contains("<click:run_command:"));
+        assertFalse(String.join("\n", richMessages()).contains("<click:run_command:'/adapt language self"));
     }
 
     @Test
@@ -273,17 +486,22 @@ public class BukkitLanguageSwitcherTest {
     }
 
     @Test
-    public void serverPickerOffersPerLocaleEditorLinks() {
+    public void serverPickerLeavesMessageEditingInTheConfigEditor() {
         when(player.hasPermission("adapt.admin")).thenReturn(true);
 
         switcher.command(player, new String[]{"server"});
 
         String rendered = String.join("\n", richMessages());
-        assertTrue(rendered.contains("/adapt language server edit"));
-        assertTrue(rendered.contains("<click:run_command:'/adapt language server edit fr_FR'>"));
+        assertFalse(rendered.contains("/adapt language server edit"));
+        assertTrue(rendered.contains("<click:run_command:'/adapt language server fr_FR'>"));
     }
 
     private BukkitLanguageSwitcher register(String name, String command, PluginLanguageService service) {
+        return register(name, command, service, DirectorTextResolver.ENGLISH);
+    }
+
+    private BukkitLanguageSwitcher register(String name, String command, PluginLanguageService service,
+                                              DirectorTextResolver resolver) {
         when(player.hasPermission(name.toLowerCase(Locale.ROOT) + ".language.self")).thenReturn(true);
         Plugin plugin = mock(Plugin.class);
         when(plugin.getName()).thenReturn(name);
@@ -291,8 +509,30 @@ public class BukkitLanguageSwitcherTest {
         when(plugin.isEnabled()).thenReturn(true);
         when(plugin.getLogger()).thenReturn(Logger.getLogger(name));
         return BukkitLanguageSwitcher.register(plugin, service, new BukkitLanguageSwitcher.Options(
-                command, command + ".admin", DirectorMiniMenu.Theme.adaptRed(), DirectorTextResolver.ENGLISH,
+                command, command + ".admin", DirectorMiniMenu.Theme.adaptRed(), resolver,
                 new PluginLanguageEditor.Options(locale -> mock(LocalizationSnapshot.class), edit -> mock(LocalizationSnapshot.class))));
+    }
+
+    private void registerDebug(String name, String version, String permission,
+                               BiConsumer<CommandSender, Boolean> request) {
+        registerDebug(name, version, permission, request, null);
+    }
+
+    private void registerDebug(String name, String version, String permission,
+                               BiConsumer<CommandSender, Boolean> request,
+                               BiFunction<CommandSender, Boolean, CompletableFuture<Map<String, String>>> aggregate) {
+        Plugin owner = mock(Plugin.class);
+        when(owner.isEnabled()).thenReturn(true);
+        Map<String, Object> provider = new HashMap<>();
+        provider.put("volmit.debug.protocol", "1");
+        provider.put("name", name);
+        provider.put("version", version);
+        provider.put("permission", permission);
+        provider.put("request", request);
+        if (aggregate != null) {
+            provider.put("request.aggregate", aggregate);
+        }
+        services.register(Map.class, provider, owner, ServicePriority.Normal);
     }
 
     private PluginLanguageService languageService() {

@@ -317,6 +317,9 @@ public final class DirectorMiniMenu {
         ContentPage page = menu.page();
         ArrayList<String> lines = new ArrayList<>();
         lines.add(banner(menu.title(), theme));
+        if (!menu.parentCommand().isBlank()) {
+            lines.add(backLink(menu.parentCommand(), theme, activeResolver));
+        }
         if (menu.entries().isEmpty()) {
             if (!menu.emptyLine().isBlank()) {
                 lines.add(menu.emptyLine());
@@ -438,14 +441,23 @@ public final class DirectorMiniMenu {
     }
 
     private static String renderBackLink(DirectorHelpPage page, Theme theme, DirectorTextResolver resolver) {
-        return "<hover:show_text:'" + escapeAttr(escapeText(resolve(resolver, DirectorHelpMessages.PARENT_HOVER)))
-                + "'><click:run_command:" + page.parentCommand() + "><font:minecraft:uniform><" + theme.primaryRight() + ">〈 "
-                + escapeText(resolve(resolver, DirectorHelpMessages.BACK)) + "</" + theme.primaryRight() + "></font></click></hover>";
+        return backLink(page.parentCommand(), theme, resolver);
+    }
+
+    public static String backLink(String parentCommand, Theme theme, DirectorTextResolver resolver) {
+        String command = Objects.requireNonNull(parentCommand, "parentCommand");
+        Theme activeTheme = Objects.requireNonNull(theme, "theme");
+        DirectorTextResolver activeResolver = resolver == null ? DirectorTextResolver.ENGLISH : resolver;
+        return "<hover:show_text:'" + escapeAttr(escapeText(resolve(activeResolver, DirectorHelpMessages.PARENT_HOVER)))
+                + "'><click:run_command:" + command + "><font:minecraft:uniform><" + activeTheme.primaryRight() + ">〈 "
+                + escapeText(resolve(activeResolver, DirectorHelpMessages.BACK)) + "</" + activeTheme.primaryRight()
+                + "></font></click></hover>";
     }
 
     private static String renderNodeLine(DirectorRuntimeNode node, Theme theme, DirectorTextResolver resolver) {
-        String clickType = node.isInvocable() ? "suggest_command" : "run_command";
-        String clickTarget = node.isInvocable() ? node.path() + " " : node.path() + " help=1";
+        boolean runsDirectly = node.isInvocable() && visibleParameters(node).isEmpty();
+        String clickType = node.isInvocable() && !runsDirectly ? "suggest_command" : "run_command";
+        String clickTarget = node.isInvocable() ? node.path() + (runsDirectly ? "" : " ") : node.path() + " help=1";
 
         StringBuilder line = new StringBuilder();
         line.append("<hover:show_text:'").append(renderNodeHover(node, theme, resolver)).append("'>")
@@ -951,11 +963,17 @@ public final class DirectorMiniMenu {
     public record ContentMenu(
             String title,
             String command,
+            String parentCommand,
             List<String> entries,
             String emptyLine,
             int requestedPage,
             int pageSize
     ) {
+        public ContentMenu(String title, String command, List<String> entries, String emptyLine,
+                           int requestedPage, int pageSize) {
+            this(title, command, "", entries, emptyLine, requestedPage, pageSize);
+        }
+
         public ContentMenu {
             if (title == null || title.isBlank()) {
                 throw new IllegalArgumentException("content menu title must not be blank");
@@ -963,6 +981,7 @@ public final class DirectorMiniMenu {
             if (command == null || command.isBlank()) {
                 throw new IllegalArgumentException("content menu command must not be blank");
             }
+            parentCommand = parentCommand == null ? "" : parentCommand;
             entries = List.copyOf(Objects.requireNonNull(entries, "entries"));
             emptyLine = emptyLine == null ? "" : emptyLine;
             if (pageSize < 1) {

@@ -21,6 +21,7 @@ import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.InventoryView;
+import org.bukkit.inventory.ItemFlag;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.plugin.Plugin;
@@ -30,11 +31,13 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -44,13 +47,12 @@ import java.util.logging.Level;
 
 final class BukkitLanguageEditor implements AutoCloseable, Listener {
     static final int PAGE_SIZE = 45;
+    private static final int CATEGORY_PAGE_SIZE = 16;
     private static final int SIZE = 54;
     private static final int BACK = 45;
-    private static final int PREVIOUS = 47;
-    private static final int SEARCH = 48;
-    private static final int REFRESH = 49;
-    private static final int CLEAR_SEARCH = 50;
-    private static final int NEXT = 51;
+    private static final int PREVIOUS = 48;
+    private static final int SEARCH = 49;
+    private static final int NEXT = 50;
     private static final int CLOSE = 53;
     private static final int MAXIMUM_INPUT_LENGTH = 512;
     private static final Method INVENTORY_VIEW_GET_TOP_INVENTORY = resolveInventoryViewTopInventory();
@@ -71,22 +73,33 @@ final class BukkitLanguageEditor implements AutoCloseable, Listener {
     }
 
     void open(Player player, String locale) {
-        FoliaScheduler.runEntity(plugin, player, () -> {
+        open(player, locale, options.back());
+    }
+
+    void open(Player player, String locale, Consumer<Player> back) {
+        Consumer<Player> destination = Objects.requireNonNull(back, "back");
+        Runnable opening = () -> {
             if (!allowed(player)) {
                 return;
             }
             cancel(player.getUniqueId());
             if (locale == null) {
-                show(player, new View(null, null, "", 1, null));
+                show(player, new View(null, null, null, "", 1, null, destination));
             } else {
-                load(player, new View(locale, null, "", 1, null));
+                load(player, new View(locale, null, null, "", 1, null, destination));
             }
-        }, 1L);
+        };
+        if (FoliaScheduler.isOwnedByCurrentRegion(player)) {
+            opening.run();
+        } else {
+            FoliaScheduler.runEntity(plugin, player, opening);
+        }
     }
 
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onClick(InventoryClickEvent event) {
-        if (!(event.getInventory().getHolder() instanceof Holder holder) || holder.owner != this) {
+        if (!(inventoryViewTopInventory(event.getView()).getHolder() instanceof Holder holder)
+                || holder.owner != this) {
             return;
         }
         event.setCancelled(true);
@@ -94,24 +107,41 @@ final class BukkitLanguageEditor implements AutoCloseable, Listener {
             return;
         }
         int slot = event.getRawSlot();
-        if (slot < 0 || slot >= SIZE || views.get(player.getUniqueId()) != holder.view) {
+        if (slot < 0 || slot >= SIZE) {
             return;
         }
-        FoliaScheduler.runEntity(plugin, player, () -> click(player, holder.view, slot), 1L);
+        views.put(player.getUniqueId(), holder.view);
+        Runnable routing = () -> {
+            if (inventoryViewTopInventory(player.getOpenInventory()).getHolder() != holder) {
+                return;
+            }
+            views.put(player.getUniqueId(), holder.view);
+            click(player, holder.view, slot);
+        };
+        if (!FoliaScheduler.runEntity(plugin, player, routing, 1L)
+                && FoliaScheduler.isOwnedByCurrentRegion(player)) {
+            routing.run();
+        }
     }
 
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onDrag(InventoryDragEvent event) {
-        if (event.getInventory().getHolder() instanceof Holder holder && holder.owner == this) {
+        if (inventoryViewTopInventory(event.getView()).getHolder() instanceof Holder holder
+                && holder.owner == this) {
             event.setCancelled(true);
         }
     }
 
     @EventHandler
     public void onClose(InventoryCloseEvent event) {
+        UUID playerId = event.getPlayer().getUniqueId();
         if (event.getInventory().getHolder() instanceof Holder holder && holder.owner == this
-                && !prompts.containsKey(event.getPlayer().getUniqueId())) {
-            views.remove(event.getPlayer().getUniqueId(), holder.view);
+                && !prompts.containsKey(playerId)) {
+            if (pending.containsKey(playerId)) {
+                cancel(playerId);
+            } else {
+                views.remove(playerId, holder.view);
+            }
         }
     }
 
@@ -167,7 +197,7 @@ final class BukkitLanguageEditor implements AutoCloseable, Listener {
     }
 
     private void click(Player player, View view, int slot) {
-        if (views.get(player.getUniqueId()) != view || !allowed(player)) {
+        if (!allowed(player)) {
             return;
         }
         if (slot == CLOSE) {
@@ -176,18 +206,13 @@ final class BukkitLanguageEditor implements AutoCloseable, Listener {
         } else if (slot == BACK) {
             back(player, view);
         } else if (slot == PREVIOUS || slot == NEXT) {
-            show(player, new View(view.locale(), view.document(), view.filter(),
-                    view.page() + (slot == NEXT ? 1 : -1), view.key()));
-        } else if (slot == REFRESH) {
-            if (view.locale() == null) {
-                show(player, view);
-            } else {
-                load(player, view);
-            }
-        } else if (slot == SEARCH && view.document() != null && view.key() == null) {
+            show(player, new View(view.locale(), view.document(), view.group(), view.filter(),
+                    view.page() + (slot == NEXT ? 1 : -1), view.key(), view.back()));
+        } else if (slot == SEARCH && view.document() != null && view.group() == null
+                && view.key() == null && view.filter().isEmpty()) {
             beginPrompt(player, new Prompt(view, null, null, null));
-        } else if (slot == CLEAR_SEARCH && !view.filter().isEmpty()) {
-            show(player, new View(view.locale(), view.document(), "", 1, null));
+        } else if (slot == SEARCH && !view.filter().isEmpty()) {
+            show(player, new View(view.locale(), view.document(), view.group(), "", 1, null, view.back()));
         } else if (slot < PAGE_SIZE) {
             selectEntry(player, view, slot);
         }
@@ -195,23 +220,38 @@ final class BukkitLanguageEditor implements AutoCloseable, Listener {
 
     private void back(Player player, View view) {
         if (view.key() != null) {
-            show(player, new View(view.locale(), view.document(), view.filter(),
-                    Math.max(0, keys(view).indexOf(view.key())) / PAGE_SIZE + 1, null));
+            show(player, new View(view.locale(), view.document(), view.group(), view.filter(),
+                    Math.max(0, keys(view).indexOf(view.key())) / PAGE_SIZE + 1, null, view.back()));
+        } else if (view.group() != null) {
+            show(player, new View(view.locale(), view.document(), null, "", 1, null, view.back()));
+        } else if (!view.filter().isEmpty()) {
+            show(player, new View(view.locale(), view.document(), null, "", 1, null, view.back()));
         } else if (view.locale() != null) {
-            show(player, new View(null, null, "", 1, null));
+            show(player, new View(null, null, null, "", 1, null, view.back()));
         } else {
             cancel(player.getUniqueId());
             player.closeInventory();
-            options.back().accept(player);
+            view.back().accept(player);
         }
     }
 
     private void selectEntry(Player player, View view, int slot) {
-        int index = (view.page() - 1) * PAGE_SIZE + slot;
+        int ordinal = contentOrdinal(view, slot);
+        if (ordinal < 0) {
+            return;
+        }
+        int index = (view.page() - 1) * pageSize(view) + ordinal;
         if (view.locale() == null) {
             List<String> locales = options.languages().availableLocales();
             if (index < locales.size()) {
-                load(player, new View(locales.get(index), null, "", 1, null));
+                load(player, new View(locales.get(index), null, null, "", 1, null, view.back()));
+            }
+            return;
+        }
+        if (view.group() == null && view.filter().isEmpty()) {
+            List<String> groups = groups(view.document());
+            if (index < groups.size()) {
+                show(player, new View(view.locale(), view.document(), groups.get(index), "", 1, null, view.back()));
             }
             return;
         }
@@ -230,7 +270,7 @@ final class BukkitLanguageEditor implements AutoCloseable, Listener {
         MessageKey key = keys.get(index);
         MessageValue value = view.document().snapshot().value(key);
         if (value instanceof PluralValue || value instanceof LinesValue) {
-            show(player, new View(view.locale(), view.document(), view.filter(), 1, key));
+            show(player, new View(view.locale(), view.document(), view.group(), view.filter(), 1, key, view.back()));
         } else {
             beginPrompt(player, new Prompt(view, key, null, value));
         }
@@ -242,12 +282,12 @@ final class BukkitLanguageEditor implements AutoCloseable, Listener {
         }
         views.remove(player.getUniqueId());
         prompts.remove(player.getUniqueId());
-        player.closeInventory();
         message(player, "Loading " + view.locale() + " messages...");
-        complete(player, view, editor.load(view.locale()), false);
+        complete(player, view, editor.load(view.locale()), null);
     }
 
-    private void complete(Player player, View view, CompletableFuture<PluginLanguageEditor.Document> future, boolean saved) {
+    private void complete(Player player, View view, CompletableFuture<PluginLanguageEditor.Document> future,
+                          Change change) {
         UUID playerId = player.getUniqueId();
         CompletableFuture<PluginLanguageEditor.Document> previous = pending.put(playerId, future);
         if (previous != null) {
@@ -263,13 +303,15 @@ final class BukkitLanguageEditor implements AutoCloseable, Listener {
                 }
                 if (failure != null) {
                     failed(player, failure);
-                    show(player, view.document() == null ? new View(null, null, "", 1, null) : view);
+                    show(player, view.document() == null
+                            ? new View(null, null, null, "", 1, null, view.back()) : view);
                     return;
                 }
-                if (saved) {
-                    message(player, "Saved " + view.locale() + ". Language selections are unchanged.");
+                if (change != null) {
+                    saved(player, view, change);
                 }
-                show(player, new View(document.locale(), document, view.filter(), view.page(), view.key()));
+                show(player, new View(document.locale(), document, view.group(), view.filter(),
+                        view.page(), view.key(), view.back()));
             });
         });
     }
@@ -278,14 +320,18 @@ final class BukkitLanguageEditor implements AutoCloseable, Listener {
         prompts.put(player.getUniqueId(), prompt);
         player.closeInventory();
         if (prompt.key() == null) {
-            message(player, "Search message keys or text. Type cancel to return.");
+            promptMenu(player, prompt.view(), List.of(ComponentText.literal(
+                    "Search message keys or text. Type cancel to return.")));
         } else {
-            message(player, "Edit " + prompt.view().locale() + ": " + prompt.key().id()
-                    + (prompt.form() == null ? "" : " [" + partLabel(prompt.expected(), prompt.form()) + "]"));
-            String current = rawValue(prompt.expected(), prompt.form()).replace("\n", "\\n");
-            message(player, "Current: " + (current.length() > 512 ? current.substring(0, 512) + "..." : current));
-            message(player, "Variables: " + variables(prompt.key()));
-            message(player, "Enter text in chat; use \\n for new lines, \\\\ for a backslash, or cancel to return.");
+            String key = prompt.key().id()
+                    + (prompt.form() == null ? "" : " [" + partLabel(prompt.expected(), prompt.form()) + "]");
+            String current = clip(rawValue(prompt.expected(), prompt.form()).replace("\n", "\\n"));
+            promptMenu(player, prompt.view(), List.of(
+                    ComponentText.literal("Type a new value for " + key + " in chat."),
+                    ComponentText.literal("Current Value: ").append(ComponentText.markup(current)),
+                    ComponentText.literal("Variables: " + variables(prompt.key())),
+                    ComponentText.literal("Use \\n for new lines, \\\\ for a backslash, or type cancel to return.")
+            ));
         }
         FoliaScheduler.runEntity(plugin, player, () -> {
             if (prompts.remove(player.getUniqueId(), prompt) && allowed(player)) {
@@ -310,13 +356,15 @@ final class BukkitLanguageEditor implements AutoCloseable, Listener {
         }
         if (prompt.key() == null) {
             View view = prompt.view();
-            show(player, new View(view.locale(), view.document(), input.strip(), 1, null));
+            show(player, new View(view.locale(), view.document(), view.group(), input.strip(), 1, null, view.back()));
             return;
         }
         try {
             MessageValue replacement = replacement(prompt.expected(), prompt.form(), decodeInput(input));
+            Change change = new Change(prompt.key().id(),
+                    rawValue(prompt.expected(), prompt.form()), rawValue(replacement, prompt.form()));
             complete(player, prompt.view(), editor.save(new PluginLanguageEditor.Edit(prompt.view().locale(),
-                    prompt.key().id(), prompt.expected(), replacement)), true);
+                    prompt.key().id(), prompt.expected(), replacement)), change);
         } catch (IllegalArgumentException exception) {
             message(player, "Unable to save: " + exception.getMessage());
             show(player, prompt.view());
@@ -328,74 +376,194 @@ final class BukkitLanguageEditor implements AutoCloseable, Listener {
             return;
         }
         List<String> locales = requested.locale() == null ? options.languages().availableLocales() : List.of();
-        List<MessageKey> keys = requested.document() != null && requested.key() == null ? keys(requested) : List.of();
+        boolean categoryView = requested.document() != null && requested.group() == null
+                && requested.filter().isEmpty();
+        List<String> groups = categoryView
+                ? groups(requested.document()) : List.of();
+        List<MessageKey> keys = requested.document() != null && !categoryView && requested.key() == null
+                ? keys(requested) : List.of();
         List<String> parts = requested.key() == null ? List.of() : parts(requested);
-        int count = requested.locale() == null ? locales.size() : requested.key() == null ? keys.size() : parts.size();
-        DirectorMiniMenu.ContentPage page = DirectorMiniMenu.paginate(count, requested.page(), PAGE_SIZE);
-        View view = new View(requested.locale(), requested.document(), requested.filter(), page.page(), requested.key());
+        int count = requested.locale() == null ? locales.size()
+                : categoryView ? groups.size()
+                : requested.key() == null ? keys.size() : parts.size();
+        DirectorMiniMenu.ContentPage page = DirectorMiniMenu.paginate(count, requested.page(), pageSize(requested));
+        View view = new View(requested.locale(), requested.document(), requested.group(), requested.filter(),
+                page.page(), requested.key(), requested.back());
         Holder holder = new Holder(this, view);
-        String title = plugin.getName() + " - " + (view.locale() == null ? "Language editor" : view.locale());
+        String section = view.locale() == null ? "Languages" : view.group() == null
+                ? view.filter().isEmpty() ? view.locale() : view.locale() + " / Search"
+                : view.locale() + " / " + groupName(view.group());
+        DirectorMiniMenu.Theme theme = options.switcher().theme();
+        String title = ComponentText.markup(
+                "<" + theme.primaryLeft() + ">" + DirectorMiniMenu.escapeText(plugin.getName())
+                        + "</" + theme.primaryLeft() + ">"
+                        + " <" + theme.muted() + ">›</" + theme.muted() + "> "
+                        + "<" + theme.primaryRight() + ">" + DirectorMiniMenu.escapeText(section)
+                        + "</" + theme.primaryRight() + ">"
+        ).legacy();
         Inventory inventory = plugin.getServer().createInventory(holder, SIZE, title);
         holder.inventory = inventory;
         ItemStack filler = item(Material.BLACK_STAINED_GLASS_PANE, " ", List.of());
-        for (int slot = PAGE_SIZE; slot < SIZE; slot++) {
+        for (int slot = 0; slot < SIZE; slot++) {
             inventory.setItem(slot, filler);
         }
+        List<Integer> contentSlots = contentSlots(view, page.endIndex() - page.startIndex());
         for (int index = page.startIndex(); index < page.endIndex(); index++) {
             ItemStack entry;
             if (view.locale() == null) {
                 String locale = locales.get(index);
-                entry = item(Material.BOOK, locale + " - " + VolmitLocales.displayName(locale).orElse(locale),
-                        List.of("Edit this language's messages"));
+                boolean active = locale.equalsIgnoreCase(options.languages().defaultLocale());
+                entry = localeItem(locale, VolmitLocales.displayName(locale).orElse(locale), active);
+            } else if (view.group() == null && view.filter().isEmpty()) {
+                String group = groups.get(index);
+                entry = categoryItem(groupMaterial(group), groupName(group),
+                        messageCount(view.document(), group));
             } else if (view.key() == null) {
                 MessageKey key = keys.get(index);
                 entry = messageItem(key, view.document().snapshot().value(key), null);
             } else {
                 entry = messageItem(view.key(), view.document().snapshot().value(view.key()), parts.get(index));
             }
-            inventory.setItem(index - page.startIndex(), entry);
+            inventory.setItem(contentSlots.get(index - page.startIndex()), entry);
         }
-        inventory.setItem(BACK, item(Material.ARROW, "Back", List.of()));
-        inventory.setItem(REFRESH, item(Material.CLOCK, "Refresh", List.of("Page " + page.page() + " of " + page.pages())));
-        inventory.setItem(CLOSE, item(Material.BARRIER, "Close", List.of()));
+        inventory.setItem(BACK, formattedItem(Material.ARROW, ComponentText.markup("&eBack&r"), List.of()));
+        inventory.setItem(CLOSE, formattedItem(Material.BARRIER, ComponentText.markup("&cClose&r"), List.of()));
         if (page.hasPrevious()) {
-            inventory.setItem(PREVIOUS, item(Material.ARROW, "Previous page", List.of()));
+            inventory.setItem(PREVIOUS, formattedItem(Material.ARROW,
+                    ComponentText.markup("&ePrevious page&r"), List.of()));
         }
         if (page.hasNext()) {
-            inventory.setItem(NEXT, item(Material.ARROW, "Next page", List.of()));
+            inventory.setItem(NEXT, formattedItem(Material.ARROW,
+                    ComponentText.markup("&eNext page&r"), List.of()));
         }
-        if (view.document() != null && view.key() == null) {
-            inventory.setItem(SEARCH, item(Material.COMPASS, "Search messages", List.of(view.filter())));
-            if (!view.filter().isEmpty()) {
-                inventory.setItem(CLEAR_SEARCH, item(Material.PAPER, "Clear search", List.of()));
-            }
+        if (view.document() != null && view.group() == null && view.key() == null && view.filter().isEmpty()) {
+            inventory.setItem(SEARCH, item(Material.COMPASS, "Search messages",
+                    List.of("Click to search all messages.")));
+        }
+        if (view.document() != null && view.group() == null && view.key() == null && !view.filter().isEmpty()) {
+            inventory.setItem(SEARCH, item(Material.PAPER, "Clear search", List.of()));
         }
         views.put(player.getUniqueId(), view);
         player.openInventory(inventory);
     }
 
     private ItemStack messageItem(MessageKey key, MessageValue value, String form) {
-        List<String> lore = new ArrayList<>();
-        lore.add("Variables: " + variables(key));
-        lore.addAll(preview(rawValue(value, form), 44, 6));
-        lore.add(form == null && value instanceof PluralValue ? "Click to edit a plural form"
-                : form == null && value instanceof LinesValue ? "Click to edit individual lines" : "Click to edit in chat");
-        return item(Material.PAPER, form == null ? key.id() : partLabel(value, form), lore);
+        List<ComponentText> lore = new ArrayList<>();
+        lore.add(ComponentText.markup("&7Current Value:&r"));
+        for (String line : preview(rawValue(value, form), 44, 6)) {
+            lore.add(ComponentText.section(line));
+        }
+        if (!key.placeholders().isEmpty()) {
+            lore.add(ComponentText.empty());
+            lore.add(ComponentText.markup("&8" + variables(key) + "&r"));
+        }
+        lore.add(ComponentText.markup(form == null && value instanceof PluralValue
+                ? "&7Click to edit a plural form.&r"
+                : form == null && value instanceof LinesValue
+                ? "&7Click to edit individual lines.&r" : "&7Click to edit in chat.&r"));
+        return formattedItem(Material.PAPER,
+                ComponentText.markup("&f" + DirectorMiniMenu.escapeText(
+                        form == null ? key.id() : partLabel(value, form)) + "&r"), lore);
+    }
+
+    private ItemStack localeItem(String locale, String name, boolean active) {
+        return formattedItem(active ? Material.WRITABLE_BOOK : Material.BOOK,
+                localeTitle(locale, name, active),
+                List.of(ComponentText.markup("&8Click to open this language.&r")));
+    }
+
+    static ComponentText localeTitle(String locale, String name, boolean active) {
+        return ComponentText.markup(
+                (active ? "<green>✔</green> " : "<dark_gray>•</dark_gray> ")
+                        + "<white>" + DirectorMiniMenu.escapeText(locale) + "</white>"
+                        + " <dark_gray>—</dark_gray> "
+                        + "<gray>" + DirectorMiniMenu.escapeText(name) + "</gray>"
+        );
+    }
+
+    private ItemStack categoryItem(Material material, String name, int messages) {
+        return formattedItem(material,
+                categoryTitle(name),
+                List.of(
+                        ComponentText.markup("&7" + messages + " messages&r"),
+                        ComponentText.markup("&8Click to open this category.&r")
+                ));
+    }
+
+    static ComponentText categoryTitle(String name) {
+        return ComponentText.markup("&d" + DirectorMiniMenu.escapeText(name) + "&r");
+    }
+
+    static Set<Integer> navigationSlots() {
+        return Set.of(BACK, PREVIOUS, SEARCH, NEXT, CLOSE);
+    }
+
+    static List<Integer> categorySlots(int count) {
+        int bounded = Math.max(0, Math.min(count, CATEGORY_PAGE_SIZE));
+        if (bounded == 0) {
+            return List.of();
+        }
+        int rows = (bounded + 6) / 7;
+        int firstRow = (5 - rows) / 2;
+        ArrayList<Integer> slots = new ArrayList<>(bounded);
+        int remaining = bounded;
+        for (int row = 0; row < rows; row++) {
+            int rowsLeft = rows - row;
+            int rowSize = (remaining + rowsLeft - 1) / rowsLeft;
+            int firstColumn = (9 - rowSize) / 2;
+            for (int column = firstColumn; column < firstColumn + rowSize; column++) {
+                slots.add((firstRow + row) * 9 + column);
+            }
+            remaining -= rowSize;
+        }
+        return List.copyOf(slots);
     }
 
     private ItemStack item(Material material, String name, List<String> lore) {
+        ComponentText title = ComponentText.markup("<" + options.switcher().theme().primaryRight() + ">"
+                + DirectorMiniMenu.escapeText(name) + "</" + options.switcher().theme().primaryRight() + ">");
+        List<ComponentText> styled = new ArrayList<>(lore.size());
+        for (String line : lore) {
+            styled.add(ComponentText.markup("&7" + DirectorMiniMenu.escapeText(line) + "&r"));
+        }
+        return formattedItem(material, title, styled);
+    }
+
+    private static int pageSize(View view) {
+        return view.locale() != null && view.group() == null && view.filter().isEmpty()
+                ? CATEGORY_PAGE_SIZE : PAGE_SIZE;
+    }
+
+    private static List<Integer> contentSlots(View view, int count) {
+        if (view.locale() != null && view.group() == null && view.filter().isEmpty()) {
+            return categorySlots(count);
+        }
+        ArrayList<Integer> slots = new ArrayList<>(count);
+        for (int slot = 0; slot < count; slot++) {
+            slots.add(slot);
+        }
+        return List.copyOf(slots);
+    }
+
+    private static int contentOrdinal(View view, int slot) {
+        if (view.locale() != null && view.group() == null && view.filter().isEmpty()) {
+            DirectorMiniMenu.ContentPage page = DirectorMiniMenu.paginate(
+                    groups(view.document()).size(), view.page(), CATEGORY_PAGE_SIZE);
+            return categorySlots(page.endIndex() - page.startIndex()).indexOf(slot);
+        }
+        return slot < PAGE_SIZE ? slot : -1;
+    }
+
+    private ItemStack formattedItem(Material material, ComponentText name, List<ComponentText> lore) {
         ItemStack stack = new ItemStack(material);
         ItemMeta meta = stack.getItemMeta();
-        if (meta != null) {
-            meta.setDisplayName(ComponentText.markup("<" + options.switcher().theme().primaryRight() + ">"
-                    + DirectorMiniMenu.escapeText(name) + "</" + options.switcher().theme().primaryRight() + ">").legacy());
-            List<String> styled = new ArrayList<>(lore.size());
-            for (String line : lore) {
-                styled.add(ChatColor.GRAY + line);
-            }
-            meta.setLore(styled);
-            stack.setItemMeta(meta);
+        if (meta == null) {
+            return stack;
         }
+        meta.setDisplayName(name.legacy());
+        meta.setLore(lore.stream().map(ComponentText::legacy).toList());
+        meta.addItemFlags(ItemFlag.HIDE_ATTRIBUTES);
+        stack.setItemMeta(meta);
         return stack;
     }
 
@@ -480,16 +648,119 @@ final class BukkitLanguageEditor implements AutoCloseable, Listener {
     }
 
     private static List<MessageKey> keys(View view) {
-        String filter = view.filter().toLowerCase(Locale.ROOT);
+        return matchingKeys(view.document(), view.group(), view.filter());
+    }
+
+    static List<MessageKey> matchingKeys(PluginLanguageEditor.Document document, String group, String filter) {
+        String query = filter.toLowerCase(Locale.ROOT);
         List<MessageKey> keys = new ArrayList<>();
-        for (MessageKey key : view.document().snapshot().catalog().keys()) {
-            if (filter.isEmpty() || key.id().toLowerCase(Locale.ROOT).contains(filter)
-                    || rawValue(view.document().snapshot().value(key), null).toLowerCase(Locale.ROOT).contains(filter)) {
+        for (MessageKey key : document.snapshot().catalog().keys()) {
+            if (group != null && !group(key.id()).equals(group)) {
+                continue;
+            }
+            if (query.isEmpty() || key.id().toLowerCase(Locale.ROOT).contains(query)
+                    || rawValue(document.snapshot().value(key), null).toLowerCase(Locale.ROOT).contains(query)) {
                 keys.add(key);
             }
         }
         keys.sort(Comparator.comparing(MessageKey::id));
         return keys;
+    }
+
+    private void promptMenu(Player player, View view, List<ComponentText> content) {
+        ArrayList<String> entries = new ArrayList<>(content.size());
+        for (ComponentText line : content) {
+            entries.add(entry(line));
+        }
+        String command = "/" + options.switcher().command() + " language server edit " + view.locale();
+        DirectorMiniMenu.ContentMenu menu = new DirectorMiniMenu.ContentMenu(
+                command, "/" + options.switcher().command() + " language server edit",
+                command, entries, "", 1, Math.max(1, entries.size()));
+        DirectorMiniMenu.deliverContent(player, menu, options.switcher().theme(), options.switcher().textResolver());
+    }
+
+    private void saved(Player player, View view, Change change) {
+        BukkitLanguageSwitcher.LanguageEditFeedback feedback = options.switcher().editorFeedback();
+        if (feedback != null) {
+            try {
+                BukkitLanguageSwitcher.LanguageEditChange edit = new BukkitLanguageSwitcher.LanguageEditChange(
+                        view.locale(), change.key(), clip(change.before()), clip(change.after()));
+                ComponentText message = Objects.requireNonNull(
+                        feedback.saved(player, edit), "Language edit feedback cannot be null");
+                ComponentMessenger.send(player, message);
+                return;
+            } catch (RuntimeException exception) {
+                plugin.getLogger().log(Level.WARNING, "Unable to render compact language edit feedback", exception);
+            }
+        }
+        ComponentText changed = ComponentText.literal(change.key() + ": “")
+                .append(ComponentText.markup(clip(change.before())))
+                .append(ComponentText.literal("” changed to “"))
+                .append(ComponentText.markup(clip(change.after())))
+                .append(ComponentText.literal("”."));
+        promptMenu(player, view, List.of(
+                ComponentText.literal("Saved " + view.locale() + ". Language selections are unchanged."),
+                changed
+        ));
+    }
+
+    private String entry(ComponentText content) {
+        DirectorMiniMenu.Theme theme = options.switcher().theme();
+        return "<" + theme.muted() + ">⇀ </" + theme.muted() + ">" + content.miniMessage();
+    }
+
+    private static String clip(String value) {
+        return value.length() <= 512 ? value : value.substring(0, 512) + "...";
+    }
+
+    static List<String> groups(PluginLanguageEditor.Document document) {
+        Set<String> groups = new LinkedHashSet<>();
+        for (MessageKey key : document.snapshot().catalog().keys()) {
+            groups.add(group(key.id()));
+        }
+        ArrayList<String> sorted = new ArrayList<>(groups);
+        sorted.sort(String.CASE_INSENSITIVE_ORDER);
+        return List.copyOf(sorted);
+    }
+
+    static String group(String messageId) {
+        int separator = messageId.indexOf('.');
+        return separator < 0 ? messageId : messageId.substring(0, separator);
+    }
+
+    static String groupName(String group) {
+        if (group.equalsIgnoreCase("gui") || group.equalsIgnoreCase("hud")
+                || group.equalsIgnoreCase("api")) {
+            return group.toUpperCase(Locale.ROOT);
+        }
+        String normalized = group.replace('_', ' ').replace('-', ' ').trim();
+        return normalized.isEmpty() ? group
+                : Character.toUpperCase(normalized.charAt(0)) + normalized.substring(1);
+    }
+
+    private static int messageCount(PluginLanguageEditor.Document document, String group) {
+        int count = 0;
+        for (MessageKey key : document.snapshot().catalog().keys()) {
+            if (group(key.id()).equals(group)) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private static Material groupMaterial(String group) {
+        return switch (group.toLowerCase(Locale.ROOT)) {
+            case "command" -> Material.COMMAND_BLOCK;
+            case "config", "configuration" -> Material.COMPARATOR;
+            case "debug", "diagnostics" -> Material.SPYGLASS;
+            case "director", "help" -> Material.WRITABLE_BOOK;
+            case "gui", "menu" -> Material.CHEST;
+            case "hud", "presentation" -> Material.NAME_TAG;
+            case "integration" -> Material.ENDER_CHEST;
+            case "portal" -> Material.OBSIDIAN;
+            case "runtime", "system" -> Material.REDSTONE_TORCH;
+            default -> Material.PAPER;
+        };
     }
 
     static String variables(MessageKey key) {
@@ -586,10 +857,14 @@ final class BukkitLanguageEditor implements AutoCloseable, Listener {
     record Options(PluginLanguageService languages, BukkitLanguageSwitcher.Options switcher, Consumer<Player> back) {
     }
 
-    private record View(String locale, PluginLanguageEditor.Document document, String filter, int page, MessageKey key) {
+    private record View(String locale, PluginLanguageEditor.Document document, String group, String filter,
+                        int page, MessageKey key, Consumer<Player> back) {
     }
 
     private record Prompt(View view, MessageKey key, String form, MessageValue expected) {
+    }
+
+    private record Change(String key, String before, String after) {
     }
 
     private static final class Holder implements InventoryHolder {

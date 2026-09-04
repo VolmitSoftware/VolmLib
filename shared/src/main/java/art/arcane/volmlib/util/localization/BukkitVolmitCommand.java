@@ -35,7 +35,7 @@ final class BukkitVolmitCommand extends Command implements PluginIdentifiableCom
     private volatile boolean released;
 
     BukkitVolmitCommand(Plugin plugin, BukkitLanguageSwitcher switcher) {
-        super(ROOT, "Manage Volmit plugin languages", "/volmit plugins languages [locale]", List.of());
+        super(ROOT, "Manage Volmit plugins", "/volmit plugins [languages|debug]", List.of());
         this.plugin = Objects.requireNonNull(plugin, "plugin");
         this.switcher = Objects.requireNonNull(switcher, "switcher");
     }

@@ -17,6 +17,7 @@ import org.bukkit.plugin.ServicePriority;
 import org.bukkit.permissions.Permission;
 import org.bukkit.permissions.PermissionDefault;
 
+import java.net.URI;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
@@ -28,7 +29,10 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.logging.Level;
@@ -83,6 +87,10 @@ public final class BukkitLanguageSwitcher implements AutoCloseable, Listener {
         editor.open(player, null);
     }
 
+    public void openEditor(Player player, Consumer<Player> back) {
+        editor.open(player, null, back);
+    }
+
     public boolean command(CommandSender sender, String[] arguments) {
         return LanguageAudience.call(sender instanceof Player player ? player.getUniqueId() : null,
                 () -> execute(sender, arguments));
@@ -124,28 +132,47 @@ public final class BukkitLanguageSwitcher implements AutoCloseable, Listener {
             if (closed) {
                 return true;
             }
+            if (arguments.length == 0) {
+                showVolmitHome(sender);
+                return true;
+            }
             List<Endpoint> selected = endpoints();
-            if (selected.isEmpty()) {
-                message(sender, "No Volmit language providers are available.");
+            if (arguments.length == 1 && arguments[0].equalsIgnoreCase("plugins")) {
+                showPluginTools(sender, selected);
                 return true;
             }
-            if (!allowed(sender, "server", selected)) {
+            if (arguments.length < 2 || !arguments[0].equalsIgnoreCase("plugins")) {
+                message(sender, "Usage: /volmit plugins [languages|debug]");
                 return true;
             }
-            if (arguments.length < 2 || !arguments[0].equalsIgnoreCase("plugins")
-                    || !arguments[1].equalsIgnoreCase("languages") || arguments.length > 3) {
-                message(sender, "Usage: /volmit plugins languages [locale]");
+            if (arguments[1].equalsIgnoreCase("languages")) {
+                if (selected.isEmpty()) {
+                    message(sender, "No Volmit language providers are available.");
+                    return true;
+                }
+                if (arguments.length > 3 || !allowed(sender, "server", selected)) {
+                    if (arguments.length > 3) {
+                        message(sender, "Usage: /volmit plugins languages [locale]");
+                    }
+                    return true;
+                }
+                Selection selection = new Selection(
+                        "server", selected, "/volmit plugins languages", "all Volmit plugins", false);
+                executeSelection(sender, selection, arguments.length == 3 ? arguments[2] : null);
                 return true;
             }
-            Selection selection = new Selection("server", selected, "/volmit plugins languages", "all Volmit plugins", false);
-            executeSelection(sender, selection, arguments.length == 3 ? arguments[2] : null);
+            if (arguments[1].equalsIgnoreCase("debug")) {
+                executeDebug(sender, arguments);
+                return true;
+            }
+            message(sender, "Usage: /volmit plugins [languages|debug]");
             return true;
         });
     }
 
     List<String> completeVolmit(CommandSender sender, String[] arguments) {
         List<Endpoint> selected = endpoints();
-        if (closed || arguments.length == 0 || !canSelectServer(sender, selected)) {
+        if (closed || arguments.length == 0) {
             return List.of();
         }
         if (arguments.length == 1) {
@@ -155,10 +182,32 @@ public final class BukkitLanguageSwitcher implements AutoCloseable, Listener {
             return List.of();
         }
         if (arguments.length == 2) {
-            return matching(List.of("languages"), arguments[1]);
+            ArrayList<String> tools = new ArrayList<>();
+            if (canSelectServer(sender, selected)) {
+                tools.add("languages");
+            }
+            if (!allowedDebugEndpoints(sender).isEmpty()) {
+                tools.add("debug");
+            }
+            return matching(tools, arguments[1]);
         }
-        return arguments.length == 3 && arguments[1].equalsIgnoreCase("languages")
-                ? matching(commonLocales(selected), arguments[2]) : List.of();
+        if (arguments.length == 3 && arguments[1].equalsIgnoreCase("languages")
+                && canSelectServer(sender, selected)) {
+            return matching(commonLocales(selected), arguments[2]);
+        }
+        if (arguments.length == 3 && arguments[1].equalsIgnoreCase("debug")) {
+            ArrayList<String> providers = new ArrayList<>();
+            List<DebugEndpoint> allowed = allowedDebugEndpoints(sender);
+            if (!allowed.isEmpty()) {
+                providers.add("all");
+            }
+            for (DebugEndpoint endpoint : allowed) {
+                providers.add(endpoint.name());
+            }
+            return matching(providers, arguments[2]);
+        }
+        return arguments.length == 4 && arguments[1].equalsIgnoreCase("debug")
+                ? matching(List.of("upload=true", "upload=false"), arguments[3]) : List.of();
     }
 
     @EventHandler
@@ -182,7 +231,7 @@ public final class BukkitLanguageSwitcher implements AutoCloseable, Listener {
     }
 
     private Map<String, Object> createProvider() {
-        Map<String, Object> values = new LinkedHashMap<>();
+        Map<String, Object> values = new ConcurrentHashMap<>();
         values.put(PROTOCOL_KEY, PROTOCOL);
         values.put("name", plugin.getName());
         values.put("permission", options.adminPermission());
@@ -193,7 +242,7 @@ public final class BukkitLanguageSwitcher implements AutoCloseable, Listener {
         values.put("server", (Function<String, CompletableFuture<String>>) locale ->
                 languages.selectDefault(locale).thenApply(ignored -> languages.defaultLocale()));
         values.put("command.claim", (Runnable) commandRegistration::claim);
-        return Map.copyOf(values);
+        return values;
     }
 
     private CompletableFuture<String> selectPlayer(UUID playerId, String locale) {
@@ -208,6 +257,10 @@ public final class BukkitLanguageSwitcher implements AutoCloseable, Listener {
             return true;
         }
         List<Endpoint> selected = List.of(endpoint(provider));
+        if (arguments.length == 0) {
+            showLanguageHome(sender, selected);
+            return true;
+        }
         if (arguments.length >= 2 && arguments[0].equalsIgnoreCase("server")
                 && arguments[1].equalsIgnoreCase("edit")) {
             if (!allowed(sender, "server", selected)) {
@@ -222,9 +275,7 @@ public final class BukkitLanguageSwitcher implements AutoCloseable, Listener {
             }
             return true;
         }
-        String scope = arguments.length == 0
-                ? (canSelectSelf(sender, selected) ? "self" : "server")
-                : arguments[0].toLowerCase(Locale.ROOT);
+        String scope = arguments[0].toLowerCase(Locale.ROOT);
         if ((!scope.equals("self") && !scope.equals("server")) || arguments.length > 2) {
             message(sender, "Usage: /" + options.command() + " language self [locale|reset] or server [locale]");
             return true;
@@ -299,35 +350,343 @@ public final class BukkitLanguageSwitcher implements AutoCloseable, Listener {
         String base = selection.command();
         DirectorMiniMenu.Theme theme = options.theme();
         List<String> lines = new ArrayList<>(PAGE_SIZE + 6);
-        lines.add(DirectorMiniMenu.banner(base, page, theme));
+        lines.add(selection.pluginOnly()
+                ? DirectorMiniMenu.banner(base, theme)
+                : DirectorMiniMenu.banner(base, page, theme));
+        lines.add(DirectorMiniMenu.backLink(selection.pluginOnly()
+                ? "/" + options.command() + " language" : "/volmit plugins", theme, options.textResolver()));
         String current = selectedLocale(sender, selection.scope(), selection.endpoints());
-        lines.add(styled("Current: " + current, theme.description()));
-        if (selection.pluginOnly()) {
+        if (!selection.pluginOnly()) {
+            lines.add(styled(localized(BukkitLanguageMessages.CURRENT,
+                    MessageArgs.builder().untrusted("locale", current).build()), theme.description()));
+        }
+        if (selection.pluginOnly() && page.page() == 1) {
             String pluginBase = "/" + options.command() + " language";
             if (canSelectSelf(sender, selection.endpoints())) {
-                lines.add(link(sender, "Your preference", pluginBase + " self", "Change only your language"));
+                lines.add(link(sender, localized(BukkitLanguageMessages.YOUR_LANGUAGE), pluginBase + " self",
+                        localized(BukkitLanguageMessages.YOUR_DESCRIPTION)));
             }
             if (canSelectServer(sender, selection.endpoints())) {
-                lines.add(link(sender, "Server default", pluginBase + " server", "Change the default for players without an override"));
-                if (sender instanceof Player) {
-                    lines.add(link(sender, "Edit language messages", pluginBase + " server edit", "Open the per-language message editor"));
-                }
+                lines.add(link(sender, localized(BukkitLanguageMessages.SERVER_DEFAULT), pluginBase + " server",
+                        localized(BukkitLanguageMessages.SERVER_DESCRIPTION)));
             }
         }
         for (int index = page.startIndex(); index < page.endIndex(); index++) {
             String locale = locales.get(index);
             String name = VolmitLocales.displayName(locale).orElse(locale);
-            lines.add(link(sender, (locale.equalsIgnoreCase(current) ? "* " : "") + locale + " - " + name,
-                    base + " " + locale, "Select " + name));
-            if (sender instanceof Player && selection.pluginOnly() && selection.scope().equals("server")) {
-                lines.add(link(sender, "Edit " + locale, base + " edit " + locale, "Edit messages without changing language selections"));
-            }
+            lines.add(languageLink(sender, locale, name, locale.equalsIgnoreCase(current),
+                    base + " " + locale));
         }
-        if (selection.scope().equals("self")) {
-            lines.add(link(sender, "Use server default", base + " reset", "Remove your saved language preference"));
+        if (selection.pluginOnly() && page.page() == 1 && selection.scope().equals("self")
+                && sender instanceof Player player && languages.playerLocale(player.getUniqueId()).isPresent()) {
+            lines.add(link(sender, localized(BukkitLanguageMessages.USE_SERVER_DEFAULT), base + " reset",
+                    localized(BukkitLanguageMessages.REMOVE_PERSONAL_DESCRIPTION)));
         }
         lines.add(DirectorMiniMenu.paginationBar(page, base, theme, options.textResolver()));
         DirectorMiniMenu.deliver(sender, lines);
+    }
+
+    private void showLanguageHome(CommandSender sender, List<Endpoint> endpoints) {
+        String command = "/" + options.command() + " language";
+        String serverLocale = selectedLocale(sender, "server", endpoints);
+        ArrayList<String> entries = new ArrayList<>();
+        if (canSelectSelf(sender, endpoints) && sender instanceof Player) {
+            String personalLocale = selectedLocale(sender, "self", endpoints);
+            entries.add(link(sender, localized(BukkitLanguageMessages.YOUR_LANGUAGE), command + " self",
+                    localized(BukkitLanguageMessages.CURRENT,
+                            MessageArgs.builder().untrusted("locale", personalLocale).build())));
+            if (canSelectServer(sender, endpoints)) {
+                String current = sameLocale(serverLocale, personalLocale)
+                        ? localized(BukkitLanguageMessages.CURRENT,
+                        MessageArgs.builder().untrusted("locale", serverLocale).build())
+                        : localized(BukkitLanguageMessages.CURRENT_WITH_PERSONAL,
+                        MessageArgs.builder()
+                                .untrusted("locale", serverLocale)
+                                .untrusted("personal", personalLocale)
+                                .build());
+                entries.add(link(sender, localized(BukkitLanguageMessages.SERVER_DEFAULT), command + " server",
+                        current));
+            }
+            entries.add(link(sender, localized(BukkitLanguageMessages.RESET_YOUR_LANGUAGE), command + " self reset",
+                    localized(BukkitLanguageMessages.RESET_DESCRIPTION)));
+        } else if (canSelectServer(sender, endpoints)) {
+            entries.add(link(sender, localized(BukkitLanguageMessages.SERVER_DEFAULT), command + " server",
+                    localized(BukkitLanguageMessages.CURRENT,
+                            MessageArgs.builder().untrusted("locale", serverLocale).build())));
+        }
+        if (sender instanceof Player && canSelectServer(sender, endpoints)) {
+            entries.add(link(sender, localized(BukkitLanguageMessages.EDIT_MESSAGES), command + " server edit",
+                    localized(BukkitLanguageMessages.EDIT_DESCRIPTION)));
+        }
+        DirectorMiniMenu.ContentMenu menu = new DirectorMiniMenu.ContentMenu(
+                command, command, "/" + options.command(), entries,
+                styled(localized(BukkitLanguageMessages.NO_CONTROLS), options.theme().muted()),
+                1, Math.max(1, entries.size()));
+        DirectorMiniMenu.deliverContent(sender, menu, options.theme(), options.textResolver());
+    }
+
+    private void showVolmitHome(CommandSender sender) {
+        String entry = link(sender, "Plugins", "/volmit plugins",
+                "Open shared Volmit plugin tools.");
+        DirectorMiniMenu.ContentMenu menu = new DirectorMiniMenu.ContentMenu(
+                "/volmit", "/volmit", List.of(entry), "No shared tools are available.", 1, 1);
+        DirectorMiniMenu.deliverContent(sender, menu, options.theme(), options.textResolver());
+    }
+
+    private void showPluginTools(CommandSender sender, List<Endpoint> endpoints) {
+        ArrayList<String> entries = new ArrayList<>();
+        if (canSelectServer(sender, endpoints)) {
+            entries.add(link(sender, "Languages", "/volmit plugins languages",
+                    "Change the server default language for all registered Volmit plugins"));
+        }
+        List<DebugEndpoint> registeredDebug = debugEndpoints();
+        List<DebugEndpoint> debug = registeredDebug.stream()
+                .filter(endpoint -> sender.hasPermission(endpoint.permission()))
+                .toList();
+        if (!debug.isEmpty()) {
+            entries.add(link(sender, "Debug reports", "/volmit plugins debug",
+                    "Create diagnostic reports for " + debug.size() + " registered Volmit plugin"
+                            + (debug.size() == 1 ? "" : "s")));
+        }
+        LinkedHashSet<String> debugNames = new LinkedHashSet<>();
+        for (DebugEndpoint endpoint : registeredDebug) {
+            debugNames.add(endpoint.name().toLowerCase(Locale.ROOT));
+        }
+        LinkedHashSet<String> languageNames = new LinkedHashSet<>();
+        for (Endpoint endpoint : endpoints) {
+            languageNames.add(endpoint.name().toLowerCase(Locale.ROOT));
+            String capabilities = debugNames.contains(endpoint.name().toLowerCase(Locale.ROOT))
+                    ? "Language and debug" : "Language";
+            entries.add(styled(endpoint.name() + " - " + capabilities, options.theme().description()));
+        }
+        for (DebugEndpoint endpoint : registeredDebug) {
+            if (!languageNames.contains(endpoint.name().toLowerCase(Locale.ROOT))) {
+                entries.add(styled(endpoint.name() + " - Debug", options.theme().description()));
+            }
+        }
+        DirectorMiniMenu.ContentMenu menu = new DirectorMiniMenu.ContentMenu(
+                "/volmit plugins", "/volmit plugins", "/volmit", entries,
+                "No available plugin tools.", 1, Math.max(1, entries.size()));
+        DirectorMiniMenu.deliverContent(sender, menu, options.theme(), options.textResolver());
+    }
+
+    private void executeDebug(CommandSender sender, String[] arguments) {
+        List<DebugEndpoint> debug = debugEndpoints();
+        if (arguments.length == 2) {
+            showDebug(sender, debug, 1);
+            return;
+        }
+        if (arguments.length == 3 && arguments[2].startsWith("page=")) {
+            try {
+                showDebug(sender, debug, Integer.parseInt(arguments[2].substring(5)));
+            } catch (NumberFormatException exception) {
+                message(sender, "Use a numeric debug page.");
+            }
+            return;
+        }
+        if (arguments.length < 3 || arguments.length > 4) {
+            message(sender, "Usage: /volmit plugins debug [plugin|all] [upload=true|false]");
+            return;
+        }
+        Boolean upload = arguments.length == 3 ? Boolean.TRUE : parseBoolean(arguments[3]);
+        if (upload == null) {
+            message(sender, "Use upload=true or upload=false.");
+            return;
+        }
+        if (arguments[2].equalsIgnoreCase("all")) {
+            executeAllDebug(sender, debug, upload);
+            return;
+        }
+        DebugEndpoint selected = debug.stream()
+                .filter(endpoint -> endpoint.name().equalsIgnoreCase(arguments[2]))
+                .findFirst()
+                .orElse(null);
+        if (selected == null) {
+            message(sender, "No registered debug provider matches " + arguments[2] + ".");
+            return;
+        }
+        if (!sender.hasPermission(selected.permission())) {
+            message(sender, "Missing permission: " + selected.permission());
+            return;
+        }
+        selected.request().accept(sender, upload);
+    }
+
+    private void executeAllDebug(CommandSender sender, List<DebugEndpoint> endpoints, boolean upload) {
+        List<DebugEndpoint> allowed = endpoints.stream()
+                .filter(endpoint -> sender.hasPermission(endpoint.permission()))
+                .toList();
+        if (allowed.isEmpty()) {
+            message(sender, "No debug reports are available to you.");
+            return;
+        }
+        ArrayList<CompletableFuture<Map<String, String>>> pending = new ArrayList<>(allowed.size());
+        for (DebugEndpoint endpoint : allowed) {
+            if (endpoint.aggregate() == null) {
+                pending.add(CompletableFuture.completedFuture(debugFailure(endpoint,
+                        "Update this plugin to support combined debug reports.")));
+                continue;
+            }
+            try {
+                CompletableFuture<Map<String, String>> request = endpoint.aggregate().apply(sender, upload);
+                if (request == null) {
+                    pending.add(CompletableFuture.completedFuture(debugFailure(endpoint,
+                            "The debug provider returned no result.")));
+                    continue;
+                }
+                pending.add(request.handle((result, failure) -> failure == null
+                        ? normalizeDebugResult(endpoint, result)
+                        : debugFailure(endpoint, Objects.requireNonNullElse(
+                        failure.getMessage(), failure.getClass().getSimpleName()))));
+            } catch (RuntimeException exception) {
+                plugin.getLogger().log(Level.SEVERE,
+                        "Unable to start the " + endpoint.name() + " debug report from /volmit", exception);
+                pending.add(CompletableFuture.completedFuture(debugFailure(endpoint,
+                        "Unable to start the debug report; check the server console.")));
+            }
+        }
+        CompletableFuture.allOf(pending.toArray(CompletableFuture[]::new)).whenComplete((ignored, failure) -> {
+            List<Map<String, String>> results = pending.stream().map(CompletableFuture::join).toList();
+            reply(sender, () -> showAllDebugResults(sender, results));
+        });
+    }
+
+    private void showAllDebugResults(CommandSender sender, List<Map<String, String>> results) {
+        ArrayList<String> savedReports = new ArrayList<>();
+        ArrayList<String> uploadedReports = new ArrayList<>();
+        ArrayList<String> reportNotices = new ArrayList<>();
+        for (Map<String, String> result : results) {
+            String name = result.getOrDefault("name", "Unknown plugin");
+            String version = result.getOrDefault("version", "unknown");
+            if (!"success".equals(result.get("status"))) {
+                reportNotices.add(styled(name + " v" + version + " - "
+                        + result.getOrDefault("error", "The report failed."), options.theme().required()));
+                continue;
+            }
+            String path = result.getOrDefault("path", "");
+            savedReports.add(debugPathEntry(name, version, path));
+            String notice = result.getOrDefault("notice", "");
+            if (!notice.isEmpty()) {
+                reportNotices.add(styled(name + " - " + notice, options.theme().required()));
+            }
+            String url = result.getOrDefault("url", "");
+            if (!url.isEmpty()) {
+                uploadedReports.add(debugUrlEntry(name, version, url));
+            }
+        }
+        ArrayList<String> entries = new ArrayList<>(
+                savedReports.size() + uploadedReports.size() + reportNotices.size());
+        entries.addAll(savedReports);
+        entries.addAll(uploadedReports);
+        entries.addAll(reportNotices);
+        DirectorMiniMenu.ContentMenu menu = new DirectorMiniMenu.ContentMenu(
+                "/volmit plugins debug all", "/volmit plugins debug all", "/volmit plugins debug", entries,
+                "No debug reports were created.", 1, Math.max(1, entries.size()));
+        DirectorMiniMenu.deliverContent(sender, menu, options.theme(), options.textResolver());
+    }
+
+    private String debugPathEntry(String name, String version, String path) {
+        DirectorMiniMenu.Theme theme = options.theme();
+        ComponentText content = ComponentText.markup(
+                "<gradient:" + theme.primaryLeft() + ":" + theme.primaryRight() + ">"
+                        + DirectorMiniMenu.escapeText(name + " v" + version) + "</gradient>"
+                        + "<" + theme.muted() + "> - </" + theme.muted() + ">"
+                        + "<" + theme.description() + ">"
+                        + DirectorMiniMenu.escapeText(path) + "</" + theme.description() + ">"
+        );
+        ComponentText hover = ComponentText.markup(
+                "<" + theme.primaryRight() + ">" + DirectorMiniMenu.escapeText(name + " debug report")
+                        + "</" + theme.primaryRight() + "><reset>\n"
+                        + "<" + theme.description() + ">✎ <font:minecraft:uniform>Click to copy the local report path."
+                        + "</font></" + theme.description() + "><reset>\n"
+                        + "<" + theme.optional() + ">✒ <font:minecraft:uniform>"
+                        + DirectorMiniMenu.escapeText(path) + "</font></" + theme.optional() + ">"
+        );
+        return entry(content.clickCopyToClipboard(path).hover(hover));
+    }
+
+    private String debugUrlEntry(String name, String version, String value) {
+        DirectorMiniMenu.Theme theme = options.theme();
+        URI url;
+        try {
+            url = URI.create(value);
+        } catch (IllegalArgumentException exception) {
+            return styled(name + " v" + version + " - The upload returned an invalid URL.", theme.required());
+        }
+        ComponentText content = ComponentText.markup(
+                "<gradient:" + theme.primaryLeft() + ":" + theme.primaryRight() + ">Open "
+                        + DirectorMiniMenu.escapeText(name + " report") + "</gradient>"
+                        + "<" + theme.muted() + "> - </" + theme.muted() + ">"
+                        + "<" + theme.description() + ">" + DirectorMiniMenu.escapeText(value)
+                        + "</" + theme.description() + ">"
+        );
+        return entry(content.clickOpenUrl(url).hover(urlHover(
+                "Open " + name + " report", "Open the uploaded diagnostic report", value)));
+    }
+
+    private static Map<String, String> normalizeDebugResult(DebugEndpoint endpoint, Map<String, String> result) {
+        if (result == null) {
+            return debugFailure(endpoint, "The debug provider returned no result.");
+        }
+        LinkedHashMap<String, String> normalized = new LinkedHashMap<>();
+        normalized.put("status", Objects.toString(result.get("status"), "failure"));
+        normalized.put("name", Objects.toString(result.get("name"), endpoint.name()));
+        normalized.put("version", Objects.toString(result.get("version"), endpoint.version()));
+        normalized.put("path", Objects.toString(result.get("path"), ""));
+        normalized.put("url", Objects.toString(result.get("url"), ""));
+        normalized.put("notice", Objects.toString(result.get("notice"), ""));
+        normalized.put("error", Objects.toString(result.get("error"), "The report failed."));
+        return Map.copyOf(normalized);
+    }
+
+    private static Map<String, String> debugFailure(DebugEndpoint endpoint, String error) {
+        return Map.of(
+                "status", "failure",
+                "name", endpoint.name(),
+                "version", endpoint.version(),
+                "error", error
+        );
+    }
+
+    private void showDebug(CommandSender sender, List<DebugEndpoint> endpoints, int requestedPage) {
+        List<DebugEndpoint> allowed = endpoints.stream()
+                .filter(endpoint -> sender.hasPermission(endpoint.permission()))
+                .toList();
+        ArrayList<String> entries = new ArrayList<>();
+        if (!allowed.isEmpty()) {
+            entries.add(link(sender, "All plugins", "/volmit plugins debug all",
+                    "Create reports for every permitted debug provider."));
+        }
+        for (DebugEndpoint endpoint : allowed) {
+            String command = "/volmit plugins debug " + endpoint.name();
+            entries.add(link(sender, endpoint.name() + " v" + endpoint.version(), command,
+                    "Create and save a " + endpoint.name() + " diagnostic report"));
+        }
+        DirectorMiniMenu.ContentMenu menu = new DirectorMiniMenu.ContentMenu(
+                "/volmit plugins debug", "/volmit plugins debug", "/volmit plugins", entries,
+                "No debug reports are available to you.", requestedPage, PAGE_SIZE);
+        DirectorMiniMenu.deliverContent(sender, menu, options.theme(), options.textResolver());
+    }
+
+    private List<DebugEndpoint> allowedDebugEndpoints(CommandSender sender) {
+        return debugEndpoints().stream()
+                .filter(endpoint -> sender.hasPermission(endpoint.permission()))
+                .toList();
+    }
+
+    private List<DebugEndpoint> debugEndpoints() {
+        ArrayList<DebugEndpoint> endpoints = new ArrayList<>();
+        for (RegisteredServiceProvider<?> registration : plugin.getServer().getServicesManager().getRegistrations(Map.class)) {
+            if (registration.getPlugin().isEnabled() && registration.getProvider() instanceof Map<?, ?> values
+                    && "1".equals(values.get("volmit.debug.protocol"))) {
+                DebugEndpoint endpoint = debugEndpoint(values);
+                if (endpoint != null) {
+                    endpoints.add(endpoint);
+                }
+            }
+        }
+        endpoints.sort(Comparator.comparing(DebugEndpoint::name, String.CASE_INSENSITIVE_ORDER));
+        return List.copyOf(endpoints);
     }
 
     private void select(CommandSender sender, Selection selection, String locale) {
@@ -419,6 +778,28 @@ public final class BukkitLanguageSwitcher implements AutoCloseable, Listener {
                 (Function<String, CompletableFuture<String>>) values.get("server"));
     }
 
+    @SuppressWarnings("unchecked")
+    private static DebugEndpoint debugEndpoint(Map<?, ?> values) {
+        Object request = values.get("request");
+        Object aggregate = values.get("request.aggregate");
+        Object name = values.get("name");
+        Object permission = values.get("permission");
+        if (!(name instanceof String pluginName) || pluginName.isBlank()
+                || !(permission instanceof String permissionNode) || permissionNode.isBlank()
+                || !(request instanceof BiConsumer<?, ?>)) {
+            return null;
+        }
+        return new DebugEndpoint(
+                pluginName,
+                Objects.toString(values.get("version"), "unknown"),
+                permissionNode,
+                (BiConsumer<CommandSender, Boolean>) request,
+                aggregate instanceof BiFunction<?, ?, ?>
+                        ? (BiFunction<CommandSender, Boolean, CompletableFuture<Map<String, String>>>) aggregate
+                        : null
+        );
+    }
+
     private static List<String> commonLocales(List<Endpoint> endpoints) {
         LinkedHashSet<String> locales = new LinkedHashSet<>();
         boolean first = true;
@@ -451,8 +832,80 @@ public final class BukkitLanguageSwitcher implements AutoCloseable, Listener {
         if (!(sender instanceof Player)) {
             return styled(label + ": " + command, options.theme().description());
         }
-        return "<hover:show_text:'" + attribute(hover) + "'><click:run_command:'" + attribute(command) + "'>"
-                + styled(label, options.theme().primaryRight()) + "</click></hover>";
+        DirectorMiniMenu.Theme theme = options.theme();
+        ComponentText content = ComponentText.markup(
+                "<gradient:" + theme.primaryLeft() + ":" + theme.primaryRight() + ">"
+                        + DirectorMiniMenu.escapeText(label) + "</gradient>"
+                        + "<" + theme.muted() + "> - </" + theme.muted() + ">"
+                        + "<" + theme.description() + ">" + DirectorMiniMenu.escapeText(hover)
+                        + "</" + theme.description() + ">"
+        );
+        return entry(content.clickRunCommand(command).hover(commandHover(label, hover, command)));
+    }
+
+    private String languageLink(CommandSender sender, String locale, String name, boolean selected, String command) {
+        if (!(sender instanceof Player)) {
+            return styled((selected ? "[selected] " : "") + locale + " - " + name + ": " + command,
+                    options.theme().description());
+        }
+        DirectorMiniMenu.Theme theme = options.theme();
+        ComponentText content = ComponentText.markup(
+                (selected ? "<green>✔</green> " : "<dark_gray>•</dark_gray> ")
+                        + "<gradient:" + theme.primaryLeft() + ":" + theme.primaryRight() + ">"
+                        + DirectorMiniMenu.escapeText(locale) + "</gradient>"
+                        + "<" + theme.muted() + "> - </" + theme.muted() + ">"
+                        + "<" + theme.description() + ">" + DirectorMiniMenu.escapeText(name)
+                        + "</" + theme.description() + ">"
+        );
+        return entry(content.clickRunCommand(command).hover(commandHover(
+                locale + " - " + name, localized(BukkitLanguageMessages.SELECT_DESCRIPTION), command)));
+    }
+
+    private String localized(TextKey key) {
+        return localized(key, MessageArgs.empty());
+    }
+
+    private String localized(TextKey key, MessageArgs arguments) {
+        String rendered;
+        try {
+            rendered = options.textResolver().resolve(key, arguments);
+        } catch (IllegalArgumentException exception) {
+            rendered = null;
+        }
+        if (rendered == null) {
+            rendered = DirectorTextResolver.ENGLISH.resolve(key, arguments);
+        }
+        return ComponentText.markup(rendered).plain();
+    }
+
+    private String entry(ComponentText content) {
+        return ComponentText.markup("<" + options.theme().muted() + ">⇀</" + options.theme().muted() + "> ")
+                .append(content)
+                .miniMessage();
+    }
+
+    private ComponentText commandHover(String title, String description, String command) {
+        DirectorMiniMenu.Theme theme = options.theme();
+        return ComponentText.markup(
+                "<" + theme.primaryRight() + ">" + DirectorMiniMenu.escapeText(title)
+                        + "</" + theme.primaryRight() + "><reset>\n"
+                        + "<" + theme.description() + ">✎ <font:minecraft:uniform>"
+                        + DirectorMiniMenu.escapeText(description) + "</font></" + theme.description() + "><reset>\n"
+                        + "<" + theme.optional() + ">✒ <font:minecraft:uniform>"
+                        + DirectorMiniMenu.escapeText("Command: " + command) + "</font></" + theme.optional() + ">"
+        );
+    }
+
+    private ComponentText urlHover(String title, String description, String url) {
+        DirectorMiniMenu.Theme theme = options.theme();
+        return ComponentText.markup(
+                "<" + theme.primaryRight() + ">" + DirectorMiniMenu.escapeText(title)
+                        + "</" + theme.primaryRight() + "><reset>\n"
+                        + "<" + theme.description() + ">✎ <font:minecraft:uniform>"
+                        + DirectorMiniMenu.escapeText(description) + "</font></" + theme.description() + "><reset>\n"
+                        + "<" + theme.optional() + ">✒ <font:minecraft:uniform>"
+                        + DirectorMiniMenu.escapeText(url) + "</font></" + theme.optional() + ">"
+        );
     }
 
     private String styled(String text, String color) {
@@ -460,12 +913,32 @@ public final class BukkitLanguageSwitcher implements AutoCloseable, Listener {
                 + DirectorMiniMenu.escapeText(text) + "</" + color + ">";
     }
 
-    private static String attribute(String text) {
-        return DirectorMiniMenu.escapeText(text).replace("'", "\\'");
+    private static Boolean parseBoolean(String input) {
+        String value = input;
+        int separator = value.indexOf('=');
+        if (separator >= 0) {
+            if (!value.substring(0, separator).equalsIgnoreCase("upload")) {
+                return null;
+            }
+            value = value.substring(separator + 1);
+        }
+        if (value.equalsIgnoreCase("true")) {
+            return Boolean.TRUE;
+        }
+        if (value.equalsIgnoreCase("false")) {
+            return Boolean.FALSE;
+        }
+        return null;
     }
 
     public record Options(String command, String adminPermission, DirectorMiniMenu.Theme theme,
-                          DirectorTextResolver textResolver, PluginLanguageEditor.Options editor) {
+                          DirectorTextResolver textResolver, PluginLanguageEditor.Options editor,
+                          LanguageEditFeedback editorFeedback) {
+        public Options(String command, String adminPermission, DirectorMiniMenu.Theme theme,
+                       DirectorTextResolver textResolver, PluginLanguageEditor.Options editor) {
+            this(command, adminPermission, theme, textResolver, editor, null);
+        }
+
         public Options {
             if (command == null || !command.matches("[a-z0-9][a-z0-9_-]*")) {
                 throw new IllegalArgumentException("A root command name without a slash is required");
@@ -474,6 +947,20 @@ public final class BukkitLanguageSwitcher implements AutoCloseable, Listener {
             Objects.requireNonNull(theme, "theme");
             Objects.requireNonNull(textResolver, "textResolver");
             Objects.requireNonNull(editor, "editor");
+        }
+    }
+
+    @FunctionalInterface
+    public interface LanguageEditFeedback {
+        ComponentText saved(CommandSender sender, LanguageEditChange change);
+    }
+
+    public record LanguageEditChange(String locale, String key, String before, String after) {
+        public LanguageEditChange {
+            Objects.requireNonNull(locale, "locale");
+            Objects.requireNonNull(key, "key");
+            Objects.requireNonNull(before, "before");
+            Objects.requireNonNull(after, "after");
         }
     }
 
@@ -488,6 +975,15 @@ public final class BukkitLanguageSwitcher implements AutoCloseable, Listener {
             Function<UUID, String> selected,
             BiFunction<UUID, String, CompletableFuture<String>> self,
             Function<String, CompletableFuture<String>> server
+    ) {
+    }
+
+    private record DebugEndpoint(
+            String name,
+            String version,
+            String permission,
+            BiConsumer<CommandSender, Boolean> request,
+            BiFunction<CommandSender, Boolean, CompletableFuture<Map<String, String>>> aggregate
     ) {
     }
 }

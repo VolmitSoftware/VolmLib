@@ -11,7 +11,7 @@ function commandValues(value) {
 
 export default {
   name: 'language-editor',
-  description: 'Edit native language messages through inventory menus with private chat, permission, persistence, and reload checks.',
+  description: 'Edit native language messages through inventory menus with private chat, permission, persistence, and hot-apply checks.',
   async run(context) {
     const { bot, expect, step } = context
     const timeout = 30000
@@ -36,11 +36,12 @@ export default {
       }
     }
     const shapedFrench = path.join(plugins, 'ShapedPortals/languages/fr_FR.toml')
-    const bileFrench = path.join(plugins, 'BileTools/languages/overrides/fr_FR.yml')
+    const bileFrench = path.join(plugins, 'BileTools/languages/fr_FR.toml')
     const selectionFiles = [
       path.join(plugins, 'ShapedPortals/config.toml'),
       path.join(plugins, 'BileTools/biletools.yml'),
-      ...['ShapedPortals', 'BileTools'].map(name => path.join(plugins, name, 'language-preferences.properties'))
+      path.join(plugins, 'ShapedPortals/languages/language-preferences.properties'),
+      path.join(plugins, 'BileTools/languages/language-preferences.properties')
     ]
     const unchanged = async (file, before, message) => {
       expect(JSON.stringify(await snapshot(file)) === JSON.stringify(before), message, file)
@@ -58,14 +59,23 @@ export default {
       expect(false, message, { title: title(), slots: bot.currentWindow?.slots.slice(0, 54).map(itemName) })
     }
     const ready = async expected => {
-      await until(() => title() === expected && itemName(bot.currentWindow?.slots[49]) === 'Refresh',
+      await until(() => title() === expected && itemName(bot.currentWindow?.slots[53]) === 'Close',
         `Editor window did not open: ${expected}`)
       expect(bot.currentWindow.inventoryStart === 54, 'Editor does not have 54 slots')
+      expect(!['Refresh', 'Reload files'].includes(itemName(bot.currentWindow.slots[49])),
+        'Editor still exposes a manual reload control')
       return bot.currentWindow
     }
     const open = async (root, plugin, locale = null) => {
       await command(`/${root} language server edit${locale === null ? '' : ` ${locale}`}`)
-      return ready(`${plugin} - ${locale ?? 'Language editor'}`)
+      return ready(`${plugin} › ${locale ?? 'Languages'}`)
+    }
+    const openGroup = async (group, plugin, locale = 'fr_FR') => {
+      const slot = bot.currentWindow.slots.slice(0, 45).findIndex(item => itemName(item) === group)
+      expect(slot >= 0, 'Language category was not available', { group, plugin, locale })
+      const previous = await click(slot)
+      await newWindow(previous)
+      return ready(`${plugin} › ${locale} / ${group}`)
     }
     const close = async () => {
       if (bot.currentWindow) bot.closeWindow(bot.currentWindow)
@@ -78,7 +88,7 @@ export default {
     }
     const newWindow = async previous => {
       await until(() => bot.currentWindow != null && bot.currentWindow !== previous
-        && itemName(bot.currentWindow.slots[49]) === 'Refresh', 'Editor did not replace its window')
+        && itemName(bot.currentWindow.slots[53]) === 'Close', 'Editor did not replace its window')
       return bot.currentWindow
     }
     const privateInputs = new Set()
@@ -94,16 +104,24 @@ export default {
       await until(() => bot.currentWindow === null, 'Private editor prompt did not close the inventory')
     }
     const search = async (filter, expectedKey) => {
-      await prompt(48, 'Search message keys or text.')
+      if (itemName(bot.currentWindow?.slots[49]) !== 'Search messages') {
+        expect(itemName(bot.currentWindow?.slots[49]).trim() === '',
+          'Message category unexpectedly repeated the search control')
+        const previous = await click(45)
+        await newWindow(previous)
+      }
+      expect(lore(bot.currentWindow.slots[49]).includes('Click to search all messages.'),
+        'Catalog search did not explain its all-message scope')
+      await prompt(49, 'Search message keys or text.')
       await chatInput(filter)
       await until(() => itemName(bot.currentWindow?.slots[0]) === expectedKey
-        && itemName(bot.currentWindow?.slots[50]) === 'Clear search', 'Message search did not find the expected key')
+        && itemName(bot.currentWindow?.slots[49]) === 'Clear search', 'Message search did not find the expected key')
     }
     const save = async (input, locale = 'fr_FR') => {
-      const saved = context.waitForMessage(`Saved ${locale}. Language selections are unchanged.`, timeout)
+      const saved = context.waitForMessage(input.split('\\n', 1)[0], timeout)
       await chatInput(input)
       await saved
-      await until(() => bot.currentWindow != null && itemName(bot.currentWindow.slots[49]) === 'Refresh',
+      await until(() => bot.currentWindow != null && itemName(bot.currentWindow.slots[53]) === 'Close',
         'Editor did not reopen after saving')
     }
     const inventory = () => JSON.stringify(bot.inventory.items().map(item => ({ name: item.name, count: item.count, slot: item.slot })))
@@ -156,11 +174,12 @@ export default {
           }
           expect(hydrated, 'Persisted personal language did not hydrate after reloading ShapedPortals')
           await open('sp', 'ShapedPortals', 'fr_FR')
+          await openGroup('Command', 'ShapedPortals')
           await search('Editor Shaped French', 'command.status.header')
           expect(lore(bot.currentWindow.slots[0]).includes('Editor Shaped French'), 'ShapedPortals reload lost its edited message')
           await close()
         })
-        await step('retain native overrides and the shared editor after reloading BileTools', async () => {
+        await step('retain direct language edits and the shared editor after reloading BileTools', async () => {
           const before = (await readFile(context.server.logPath, 'utf8')).length
           await command('/biletools reload BileTools', /Reloading BileTools|Rechargement en cours : BileTools/)
           const deadline = Date.now() + timeout
@@ -172,7 +191,8 @@ export default {
           }
           expect(enabled, 'BileTools did not complete its targeted reload')
           await open('biletools', 'BileTools', 'fr_FR')
-          await search('bile.message.plugin_not_found', 'bile.message.plugin_not_found')
+          await openGroup('Message', 'BileTools')
+          await search('message.plugin_not_found', 'message.plugin_not_found')
           expect(lore(bot.currentWindow.slots[0]).includes('Editor Bile second'), 'BileTools reload lost its multiline message')
           await close()
           const hydrationDeadline = Date.now() + timeout
@@ -192,11 +212,12 @@ export default {
       if (mode === 'expiry') {
         await step('expire a private edit without modifying the language file', async () => {
           await open('sp', 'ShapedPortals', 'fr_FR')
+          await openGroup('Command', 'ShapedPortals')
           await search('command.status.header', 'command.status.header')
           const before = await snapshot(shapedFrench)
-          await prompt(0, 'Edit fr_FR: command.status.header')
+          await prompt(0, 'Type a new value for command.status.header in chat.')
           await context.waitForMessage('Language editor input expired.', 70000)
-          await ready('ShapedPortals - fr_FR')
+          await ready('ShapedPortals › fr_FR / Search')
           await unchanged(shapedFrench, before, 'Expired editor input modified its language file')
         })
         return
@@ -210,7 +231,7 @@ export default {
       const selections = await Promise.all(selectionFiles.map(snapshot))
       const initialInventory = inventory()
       const englishFiles = [path.join(plugins, 'ShapedPortals/languages/en_US.toml'),
-        path.join(plugins, 'BileTools/languages/overrides/en_US.yml')]
+        path.join(plugins, 'BileTools/languages/en_US.toml')]
       const englishBefore = await Promise.all(englishFiles.map(snapshot))
       await step('open the locale editor through server picker links and ShapedPortals config', async () => {
         for (const [root, name] of [['sp', 'ShapedPortals'], ['biletools', 'BileTools']]) {
@@ -232,57 +253,51 @@ export default {
         await command('/sp config')
         await until(() => bot.currentWindow?.slots[34]?.name === 'bookshelf', 'ShapedPortals config did not show its Languages tile')
         await click(34)
-        await ready('ShapedPortals - Language editor')
+        await ready('ShapedPortals › Languages')
       })
-      await step('paginate local language files and the selected locale message list', async () => {
-        expect(itemName(bot.currentWindow.slots[51]) === 'Next page', 'Locale list did not paginate its local fixtures')
+      await step('paginate local language files and open a dynamically derived message category', async () => {
+        expect(itemName(bot.currentWindow.slots[50]) === 'Next page', 'Locale list did not paginate its local fixtures')
         const first = itemName(bot.currentWindow.slots[0])
-        const previous = await click(51)
+        const previous = await click(50)
         await newWindow(previous)
-        expect(itemName(bot.currentWindow.slots[47]) === 'Previous page' && itemName(bot.currentWindow.slots[0]) !== first,
+        expect(itemName(bot.currentWindow.slots[48]) === 'Previous page' && itemName(bot.currentWindow.slots[0]) !== first,
           'Locale next page did not change the visible entries')
-        const second = await click(47)
+        const second = await click(48)
         await newWindow(second)
         expect(itemName(bot.currentWindow.slots[0]) === first, 'Locale previous page did not restore its first entry')
-        const french = bot.currentWindow.slots.slice(0, 45).findIndex(item => itemName(item).startsWith('fr_FR -'))
+        const french = bot.currentWindow.slots.slice(0, 45).findIndex(item => itemName(item).startsWith('fr_FR —'))
         expect(french >= 0, 'French locale was not available in the locale picker')
         await click(french)
-        await ready('ShapedPortals - fr_FR')
-        expect(itemName(bot.currentWindow.slots[51]) === 'Next page', 'Message list did not paginate')
-        const firstMessage = itemName(bot.currentWindow.slots[0])
-        const page = await click(51)
-        await newWindow(page)
-        expect(itemName(bot.currentWindow.slots[0]) !== firstMessage && lore(bot.currentWindow.slots[49]).includes('Page 2'),
-          'Message next page did not update its entries and page indicator')
-        const back = await click(47)
-        await newWindow(back)
+        await ready('ShapedPortals › fr_FR')
+        expect(bot.currentWindow.slots.slice(0, 45).map(itemName).includes('Command'),
+          'Top-level message IDs did not produce the Command category')
+        await openGroup('Command', 'ShapedPortals')
       })
       await step('save a ShapedPortals message in its native file and render it for the selected player locale', async () => {
         await search('command.status.header', 'command.status.header')
-        await prompt(0, 'Edit fr_FR: command.status.header')
+        await prompt(0, 'Type a new value for command.status.header in chat.')
         await save('{prefix}Editor Shaped French')
         expect((await readFile(shapedFrench, 'utf8')).includes('Editor Shaped French'), 'ShapedPortals did not persist its edited template')
         expect(lore(bot.currentWindow.slots[0]).includes('Editor Shaped French'), 'Saved message did not refresh in its locale')
         await close()
         await command('/sp status', 'Editor Shaped French')
         await open('sp', 'ShapedPortals', 'fr_FR')
+        await openGroup('Command', 'ShapedPortals')
         await search('Editor Shaped French', 'command.status.header')
-        const refreshed = await click(49)
-        await newWindow(refreshed)
-        expect(title() === 'ShapedPortals - fr_FR' && lore(bot.currentWindow.slots[0]).includes('Editor Shaped French'),
-          'Refresh did not preserve the edited locale and message search')
+        expect(title() === 'ShapedPortals › fr_FR / Search' && lore(bot.currentWindow.slots[0]).includes('Editor Shaped French'),
+          'Hot-applied edit did not preserve the locale and message search')
       })
       await step('reject invalid placeholders and cancelled edits without writing files or transferring menu items', async () => {
         const before = await snapshot(shapedFrench)
-        await prompt(0, 'Edit fr_FR: command.status.header')
+        await prompt(0, 'Type a new value for command.status.header in chat.')
         const rejected = context.waitForMessage(/Unable to (edit|save):/, timeout)
         await chatInput('{prefix}Editor invalid {bad_editor_variable}')
         await rejected
-        await ready('ShapedPortals - fr_FR')
+        await ready('ShapedPortals › fr_FR / Search')
         await unchanged(shapedFrench, before, 'Invalid placeholders modified the language file')
-        await prompt(0, 'Edit fr_FR: command.status.header', 1)
+        await prompt(0, 'Type a new value for command.status.header in chat.', 1)
         await chatInput('cancel')
-        await ready('ShapedPortals - fr_FR')
+        await ready('ShapedPortals › fr_FR / Search')
         await unchanged(shapedFrench, before, 'Cancelled editor input modified the language file')
         await close()
         expect(inventory() === initialInventory && bot.inventory.selectedItem == null,
@@ -290,9 +305,10 @@ export default {
       })
       await step('recheck administrator permission when private input is submitted', async () => {
         await open('sp', 'ShapedPortals', 'fr_FR')
+        await openGroup('Command', 'ShapedPortals')
         await search('command.status.header', 'command.status.header')
         const before = await snapshot(shapedFrench)
-        await prompt(0, 'Edit fr_FR: command.status.header')
+        await prompt(0, 'Type a new value for command.status.header in chat.')
         await command('/permissionfixture revoke', 'Editor permissions revoked.')
         const denied = context.waitForMessage('You do not have permission to edit ShapedPortals languages.', timeout)
         await chatInput('{prefix}Editor revoked must not persist')
@@ -304,8 +320,9 @@ export default {
       })
       await step('save and render a multiline BileTools text override', async () => {
         await open('biletools', 'BileTools', 'fr_FR')
-        await search('bile.message.plugin_not_found', 'bile.message.plugin_not_found')
-        await prompt(0, 'Edit fr_FR: bile.message.plugin_not_found')
+        await openGroup('Message', 'BileTools')
+        await search('message.plugin_not_found', 'message.plugin_not_found')
+        await prompt(0, 'Type a new value for message.plugin_not_found in chat.')
         await save('Editor Bile missing {plugin}\\nEditor Bile second')
         const saved = await readFile(bileFrench, 'utf8')
         expect(saved.includes('Editor Bile missing {plugin}') && saved.includes('Editor Bile second'),
@@ -318,28 +335,27 @@ export default {
       })
       await step('edit one defined plural form while preserving the other form', async () => {
         await open('biletools', 'BileTools', 'fr_FR')
-        await search('bile.message.remote.deployed', 'bile.message.remote.deployed')
+        await openGroup('Message', 'BileTools')
+        await search('message.remote.deployed', 'message.remote.deployed')
         const previous = await click(0)
         await newWindow(previous)
         const entries = bot.currentWindow.slots.slice(0, 45).filter(Boolean)
         expect(entries.map(itemName).join(',') === 'one,other', 'Plural submenu did not expose only its defined forms', entries.map(itemName))
         const otherBefore = lore(entries[1])
-        await prompt(0, 'Edit fr_FR: bile.message.remote.deployed [one]')
+        await prompt(0, 'Type a new value for message.remote.deployed [one] in chat.')
         await save('Editor plural {plugin} {count}')
         expect(itemName(bot.currentWindow.slots[0]) === 'one' && lore(bot.currentWindow.slots[0]).includes('Editor plural'),
           'Saved plural form did not refresh its submenu')
         expect(lore(bot.currentWindow.slots[1]) === otherBefore, 'Saving one plural form changed another form')
         const persisted = await readFile(bileFrench, 'utf8')
         expect(persisted.includes('Editor plural {plugin} {count}'), 'BileTools did not persist its edited plural form')
-        const refreshed = await click(49)
-        await newWindow(refreshed)
         expect(lore(bot.currentWindow.slots[0]).includes('Editor plural') && lore(bot.currentWindow.slots[1]) === otherBefore,
-          'Refresh lost a plural edit or modified another form')
+          'Hot-applied plural edit was lost or modified another form')
         const back = await click(45)
         await newWindow(back)
-        const clear = await click(50)
+        const clear = await click(49)
         await newWindow(clear)
-        expect(itemName(bot.currentWindow.slots[50]) !== 'Clear search' && itemName(bot.currentWindow.slots[51]) === 'Next page',
+        expect(itemName(bot.currentWindow.slots[49]) !== 'Clear search' && itemName(bot.currentWindow.slots[50]) === 'Next page',
           'Clear search did not restore the complete message list')
         await click(53)
         await until(() => bot.currentWindow === null, 'Close control left the editor open')
@@ -363,7 +379,7 @@ export default {
       await step('keep editor input private from another connected player', async () => {
         await context.sleep(250)
         const leaked = observerMessages.filter(message => [...privateInputs].some(input => message.includes(input))
-          || /Search message keys or text|Enter text in chat;|Edit fr_FR:|Saved fr_FR\./.test(message))
+          || /Search message keys or text|Enter text in chat;|Type a new value for|Changed to:|Modifié en :/.test(message))
         expect(leaked.length === 0, 'Private editor input or prompts reached another player', leaked)
         expect(bot.entity !== undefined && bot.health > 0 && observer.entity !== undefined && observer.health > 0,
           'A player did not remain active during editor checks')

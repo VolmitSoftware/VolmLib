@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises'
+import { isAbsolute } from 'node:path'
 
 function clickValues(value, action) {
   if (value === null || typeof value !== 'object') {
@@ -13,7 +14,7 @@ function clickValues(value, action) {
 
 export default {
   name: 'debugdump',
-  description: 'Validate diagnostic permissions, local report paths, upload links, and targeted plugin reloads.',
+  description: 'Validate diagnostic permissions, local report paths, upload links, shared all-plugin reports, and targeted plugin reloads.',
   async run(context) {
     const { bot, expect, step, waitForEvent, waitForMessage } = context
     const timeout = 30000
@@ -25,35 +26,34 @@ export default {
     }
     const dump = async (root, name, upload) => {
       await context.sleep(1100)
-      const saved = waitForMessage(`Saved ${name} debug dump: debug/`, timeout)
+      const saved = waitForMessage(new RegExp(`Saved ${name} debug dump to .*[\\\\/]debug[\\\\/]`), timeout)
       const copied = waitForEvent('message', message =>
         clickValues(message.json, 'copy_to_clipboard').some(value =>
-          value.startsWith(`debug/${name.toLowerCase()}-debugdump-`)), timeout)
+          isAbsolute(value) && value.toLowerCase().includes(`${name.toLowerCase()}-v`)), timeout)
       const uploadResult = upload
-        ? waitForMessage(/Debug dump: https:\/\/mclo\.gs\/|Debug dump upload (failed|was interrupted)/, timeout)
+        ? waitForMessage(/Uploaded as VolmitSoftware - .+ - v|Debug dump upload (failed|was interrupted)/, timeout)
         : Promise.resolve(undefined)
       const uploaded = upload
         ? waitForEvent('message', message =>
           clickValues(message.json, 'open_url').some(value => /^https:\/\/mclo\.gs\/[A-Za-z0-9]+$/.test(value)), timeout)
         : Promise.resolve(undefined)
-      const copiedLink = upload
-        ? waitForEvent('message', message =>
-          clickValues(message.json, 'copy_to_clipboard').some(value => /^https:\/\/mclo\.gs\/[A-Za-z0-9]+$/.test(value)), timeout)
-        : Promise.resolve(undefined)
-      bot.chat(`/${root} debugdump${upload ? '' : ' upload=false'}`)
-      const [savedMessage, [copyMessage], outcome, openResult, copyResult] =
-        await Promise.all([saved, copied, uploadResult, uploaded, copiedLink])
-      const relativePath = savedMessage.match(/debug\/[a-z]+-debugdump-[A-Za-z0-9.-]+\.txt/)?.[0]
-      expect(relativePath !== undefined, 'Diagnostic response did not contain a relative report path', savedMessage)
-      expect(clickValues(copyMessage.json, 'copy_to_clipboard').includes(relativePath),
+      const subcommand = name === 'ShapedPortals' ? 'debug dump' : 'debugdump'
+      bot.chat(`/${root} ${subcommand}${upload ? '' : ' upload=false'}`)
+      const [savedMessage, [copyMessage], outcome, openResult] =
+        await Promise.all([saved, copied, uploadResult, uploaded])
+      const localPath = clickValues(copyMessage.json, 'copy_to_clipboard')
+        .find(value => isAbsolute(value) && value.toLowerCase().includes(`${name.toLowerCase()}-v`))
+      expect(localPath !== undefined, 'Diagnostic response did not contain an absolute report path', savedMessage)
+      expect(savedMessage.includes(localPath), 'Saved response and clipboard path differ', savedMessage)
+      expect(clickValues(copyMessage.json, 'copy_to_clipboard').includes(localPath),
         'Copy path payload does not match the saved report path', copyMessage.json)
-      expect(JSON.stringify(copyMessage.json).includes('[Copy path]'), 'Diagnostic path copy action has no label')
+      expect(JSON.stringify(copyMessage.json).includes('Copy local path'), 'Diagnostic path copy action has no label')
       if (upload) {
-        expect(outcome.startsWith('Debug dump: https://mclo.gs/'), 'Diagnostic upload failed', outcome)
-        const url = outcome.match(/https:\/\/mclo\.gs\/[A-Za-z0-9]+/)?.[0]
+        expect(outcome.startsWith('Uploaded as VolmitSoftware - '), 'Diagnostic upload failed', outcome)
+        const url = clickValues(openResult[0].json, 'open_url')[0]
         expect(clickValues(openResult[0].json, 'open_url').includes(url), 'Diagnostic open URL differs from upload URL')
-        expect(clickValues(copyResult[0].json, 'copy_to_clipboard').includes(url), 'Copy link payload differs from upload URL')
-        expect(JSON.stringify(copyResult[0].json).includes('[Copy link]'), 'Diagnostic link copy action has no label')
+        expect(JSON.stringify(openResult[0].json).includes(`Open: ${url}`), 'Diagnostic open action does not show its URL')
+        expect(!clickValues(openResult[0].json, 'copy_to_clipboard').includes(url), 'Report URL still has a copy action')
       }
     }
 
@@ -62,7 +62,7 @@ export default {
     })
     if (mode === 'deny') {
       await step('deny diagnostic creation without each dedicated permission', async () => {
-        await command('/sp debugdump upload=false', /permission/i)
+        await command('/sp debug dump upload=false', /permission/i)
         await command('/biletools debugdump upload=false', /permission/i)
       })
     } else if (mode === 'dedicated') {
@@ -70,17 +70,24 @@ export default {
         await command('/sp status', /permission/i)
         await command('/biletools reload ShapedPortals', /permission/i)
       })
-      await step('save ShapedPortals diagnostics and deliver the relative clipboard path', async () => {
+      await step('save ShapedPortals diagnostics and deliver the absolute clipboard path', async () => {
         await dump('sp', 'ShapedPortals', false)
       })
-      await step('save BileTools diagnostics and deliver the relative clipboard path', async () => {
+      await step('save BileTools diagnostics and deliver the absolute clipboard path', async () => {
         await dump('biletools', 'BileTools', false)
       })
+      await step('start every permitted Volmit diagnostic report from one command', async () => {
+        await context.sleep(1100)
+        const shaped = waitForMessage(new RegExp('ShapedPortals v.*[\\\\/]debug[\\\\/]'), timeout)
+        const bile = waitForMessage(new RegExp('BileTools v.*[\\\\/]debug[\\\\/]'), timeout)
+        bot.chat('/volmit plugins debug all upload=false')
+        await Promise.all([shaped, bile])
+      })
     } else if (mode === 'upload') {
-      await step('upload ShapedPortals diagnostics by default with matching open and copy actions', async () => {
+      await step('upload ShapedPortals diagnostics by default with one visible open action', async () => {
         await dump('sp', 'ShapedPortals', true)
       })
-      await step('upload BileTools diagnostics by default with matching open and copy actions', async () => {
+      await step('upload BileTools diagnostics by default with one visible open action', async () => {
         await dump('biletools', 'BileTools', true)
       })
     } else {

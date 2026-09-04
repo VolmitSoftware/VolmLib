@@ -14,6 +14,7 @@ import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
@@ -89,12 +90,62 @@ public class BukkitLanguageEditorTest {
     }
 
     @Test
+    public void languageEditorGroupsEveryCatalogByItsTopLevelKeySegment() {
+        MessageCatalog catalog = MessageCatalog.of("en_US",
+                TextKey.of("gui.prompt.cancel", "Cancel"),
+                TextKey.of("portal.created", "Created"),
+                TextKey.of("command.description.root", "Root"),
+                TextKey.of("runtime.prefix", "Prefix"),
+                TextKey.of("portal.failed", "Failed"),
+                TextKey.of("custom", "Custom"));
+        LocalizationSnapshot snapshot = LocalizationSnapshot.create(
+                LocalizationCandidate.english(catalog, PluralSelector.oneOther()));
+        PluginLanguageEditor.Document document = new PluginLanguageEditor.Document("en_US", snapshot);
+
+        assertEquals(List.of("command", "custom", "gui", "portal", "runtime"),
+                BukkitLanguageEditor.groups(document));
+        assertEquals("director", BukkitLanguageEditor.group("director.help.page"));
+        assertEquals("GUI", BukkitLanguageEditor.groupName("gui"));
+        assertEquals("API", BukkitLanguageEditor.groupName("api"));
+        assertEquals("Hot reload", BukkitLanguageEditor.groupName("hot_reload"));
+    }
+
+    @Test
+    public void languageEditorSearchCanMatchMessagesAcrossEveryCategory() {
+        MessageCatalog catalog = MessageCatalog.of("en_US",
+                TextKey.of("command.create", "Create a portal"),
+                TextKey.of("portal.created", "Portal created"),
+                TextKey.of("runtime.ready", "Ready"));
+        LocalizationSnapshot snapshot = LocalizationSnapshot.create(
+                LocalizationCandidate.english(catalog, PluralSelector.oneOther()));
+        PluginLanguageEditor.Document document = new PluginLanguageEditor.Document("en_US", snapshot);
+
+        assertEquals(List.of("command.create", "portal.created"),
+                BukkitLanguageEditor.matchingKeys(document, null, "portal").stream().map(MessageKey::id).toList());
+        assertEquals(List.of("portal.created"),
+                BukkitLanguageEditor.matchingKeys(document, "portal", "created").stream().map(MessageKey::id).toList());
+    }
+
+    @Test
     public void inventoryViewAccessUsesRuntimeMethod() {
         Inventory inventory = mock(Inventory.class);
         InventoryView view = mock(InventoryView.class);
         when(view.getTopInventory()).thenReturn(inventory);
 
         assertSame(inventory, BukkitLanguageEditor.inventoryViewTopInventory(view));
+    }
+
+    @Test
+    public void inventoryLanguageTilesUseTheShapedPortalStyleWithoutReload() {
+        String active = BukkitLanguageEditor.localeTitle("fr_FR", "French (France)", true).legacy();
+        String inactive = BukkitLanguageEditor.localeTitle("de_DE", "German (Germany)", false).legacy();
+
+        assertEquals("§a✔§r §ffr_FR§r §8—§r §7French (France)", active);
+        assertEquals("§8•§r §fde_DE§r §8—§r §7German (Germany)", inactive);
+        assertTrue(BukkitLanguageEditor.categoryTitle("Command").legacy().contains("§dCommand"));
+        assertEquals(List.of(20, 21, 22, 23, 24), BukkitLanguageEditor.categorySlots(5));
+        assertEquals(List.of(11, 12, 13, 14, 20, 21, 22, 23), BukkitLanguageEditor.categorySlots(8));
+        assertEquals(Set.of(45, 48, 49, 50, 53), BukkitLanguageEditor.navigationSlots());
     }
 
     @Test

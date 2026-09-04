@@ -1,5 +1,6 @@
 package art.arcane.volmlib.util.web;
 
+import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
@@ -31,15 +32,12 @@ public final class MclogsClient {
     public URI publish(String content, String source, String userAgent) throws IOException, InterruptedException {
         String report = Objects.requireNonNull(content, "content");
         validateSize(report);
-        JsonObject body = new JsonObject();
-        body.addProperty("content", report);
-        body.addProperty("source", sanitizeHeader(source, "VolmLib"));
         HttpRequest request = HttpRequest.newBuilder(ENDPOINT)
                 .timeout(Duration.ofSeconds(10L))
                 .header("Accept", "application/json")
                 .header("Content-Type", "application/json")
                 .header("User-Agent", sanitizeHeader(userAgent, "VolmLib"))
-                .POST(HttpRequest.BodyPublishers.ofString(body.toString(), StandardCharsets.UTF_8))
+                .POST(HttpRequest.BodyPublishers.ofString(requestBody(report, source), StandardCharsets.UTF_8))
                 .build();
         HttpResponse<InputStream> response = client.send(request, HttpResponse.BodyHandlers.ofInputStream());
         String responseBody;
@@ -80,6 +78,22 @@ public final class MclogsClient {
         } catch (RuntimeException exception) {
             throw new IOException("mclo.gs returned an invalid response", exception);
         }
+    }
+
+    static String requestBody(String content, String source) {
+        String reportName = sanitizeHeader(source, "VolmLib");
+        JsonObject body = new JsonObject();
+        body.addProperty("content", Objects.requireNonNull(content, "content"));
+        body.addProperty("source", reportName);
+        JsonObject reportMetadata = new JsonObject();
+        reportMetadata.addProperty("key", "volmit_report");
+        reportMetadata.addProperty("value", reportName);
+        reportMetadata.addProperty("label", "Report");
+        reportMetadata.addProperty("visible", true);
+        JsonArray metadata = new JsonArray();
+        metadata.add(reportMetadata);
+        body.add("metadata", metadata);
+        return body.toString();
     }
 
     private static void validateSize(String report) throws IOException {

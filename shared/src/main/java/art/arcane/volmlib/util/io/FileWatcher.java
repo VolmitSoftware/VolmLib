@@ -61,9 +61,11 @@ public class FileWatcher implements AutoCloseable {
         long m = lastModified;
         long g = size;
         Object previousFileKey = fileKey;
+        boolean previouslyMissing = isMissing();
         boolean eventDetected = drainEvents();
         readProperties();
-        return eventDetected || lastModified != m || g != size || !Objects.equals(previousFileKey, fileKey);
+        boolean propertiesChanged = lastModified != m || g != size || !Objects.equals(previousFileKey, fileKey);
+        return propertiesChanged || (eventDetected && !(previouslyMissing && isMissing()));
     }
 
     public boolean checkModifiedEvents() {
@@ -188,6 +190,10 @@ public class FileWatcher implements AutoCloseable {
     private Path watchedDirectory() {
         Path target = path();
         return target == null ? null : target.getParent();
+    }
+
+    private boolean isMissing() {
+        return lastModified == -1 && size == -1 && fileKey == null;
     }
 
     private Path path() {
