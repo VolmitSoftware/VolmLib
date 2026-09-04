@@ -29,6 +29,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
 import java.util.logging.Logger;
+import java.util.regex.Pattern;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -281,6 +282,13 @@ public class BukkitLanguageSwitcherTest {
         assertTrue(rendered.indexOf("click:open_url:'https://mclo.gs/Cd34'")
                 < rendered.indexOf("click:open_url:'https://mclo.gs/Ab12'"));
         assertTrue(rendered.contains("click:open_url:'https://mclo.gs/Ab12'"));
+        assertTrue(rendered.contains("Copy all mclo.gs links"));
+        assertTrue(rendered.contains("Copy all local paths"));
+        assertTrue(rendered.indexOf("click:open_url:'https://mclo.gs/Ab12'")
+                < rendered.indexOf("Copy all mclo.gs links"));
+        assertTrue(rendered.indexOf("Copy all mclo.gs links")
+                < rendered.indexOf("Copy all local paths"));
+        assertEquals(4, Pattern.compile("click:copy_to_clipboard:").matcher(rendered).results().count());
         assertFalse(rendered.contains("Command: https://mclo.gs/Ab12"));
         assertFalse(rendered.contains("Started 2 debug reports."));
     }
@@ -311,6 +319,8 @@ public class BukkitLanguageSwitcherTest {
                 .count());
         assertTrue(rendered.contains("Adapt v1.2.3 - Unable to start the debug report"));
         assertTrue(rendered.contains(DirectorMiniMenu.escapeText("C:\\reports\\biletools.txt")));
+        assertFalse(rendered.contains("Copy all mclo.gs links"));
+        assertTrue(rendered.contains("Copy all local paths"));
     }
 
     @Test

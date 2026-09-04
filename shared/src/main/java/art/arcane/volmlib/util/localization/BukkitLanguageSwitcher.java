@@ -553,7 +553,9 @@ public final class BukkitLanguageSwitcher implements AutoCloseable, Listener {
 
     private void showAllDebugResults(CommandSender sender, List<Map<String, String>> results) {
         ArrayList<String> savedReports = new ArrayList<>();
+        ArrayList<String> savedPaths = new ArrayList<>();
         ArrayList<String> uploadedReports = new ArrayList<>();
+        ArrayList<String> uploadedUrls = new ArrayList<>();
         ArrayList<String> reportNotices = new ArrayList<>();
         for (Map<String, String> result : results) {
             String name = result.getOrDefault("name", "Unknown plugin");
@@ -564,7 +566,10 @@ public final class BukkitLanguageSwitcher implements AutoCloseable, Listener {
                 continue;
             }
             String path = result.getOrDefault("path", "");
-            savedReports.add(debugPathEntry(name, version, path));
+            if (!path.isEmpty()) {
+                savedReports.add(debugPathEntry(name, version, path));
+                savedPaths.add(path);
+            }
             String notice = result.getOrDefault("notice", "");
             if (!notice.isEmpty()) {
                 reportNotices.add(styled(name + " - " + notice, options.theme().required()));
@@ -572,13 +577,28 @@ public final class BukkitLanguageSwitcher implements AutoCloseable, Listener {
             String url = result.getOrDefault("url", "");
             if (!url.isEmpty()) {
                 uploadedReports.add(debugUrlEntry(name, version, url));
+                uploadedUrls.add(url);
             }
         }
         ArrayList<String> entries = new ArrayList<>(
-                savedReports.size() + uploadedReports.size() + reportNotices.size());
+                savedReports.size() + uploadedReports.size() + reportNotices.size() + 2);
         entries.addAll(savedReports);
         entries.addAll(uploadedReports);
         entries.addAll(reportNotices);
+        if (!uploadedUrls.isEmpty()) {
+            entries.add(bulkDebugCopyEntry(
+                    "Copy all mclo.gs links",
+                    "Copy every uploaded report URL",
+                    uploadedUrls
+            ));
+        }
+        if (!savedPaths.isEmpty()) {
+            entries.add(bulkDebugCopyEntry(
+                    "Copy all local paths",
+                    "Copy every saved report path",
+                    savedPaths
+            ));
+        }
         DirectorMiniMenu.ContentMenu menu = new DirectorMiniMenu.ContentMenu(
                 "/volmit plugins debug all", "/volmit plugins debug all", "/volmit plugins debug", entries,
                 "No debug reports were created.", 1, Math.max(1, entries.size()));
@@ -622,6 +642,27 @@ public final class BukkitLanguageSwitcher implements AutoCloseable, Listener {
         );
         return entry(content.clickOpenUrl(url).hover(urlHover(
                 "Open " + name + " report", "Open the uploaded diagnostic report", value)));
+    }
+
+    private String bulkDebugCopyEntry(String label, String description, List<String> values) {
+        DirectorMiniMenu.Theme theme = options.theme();
+        ComponentText content = ComponentText.markup(
+                "<gradient:" + theme.primaryLeft() + ":" + theme.primaryRight() + ">"
+                        + DirectorMiniMenu.escapeText(label) + "</gradient>"
+                        + "<" + theme.muted() + "> - </" + theme.muted() + ">"
+                        + "<" + theme.description() + ">" + DirectorMiniMenu.escapeText(description)
+                        + "</" + theme.description() + ">"
+        );
+        ComponentText hover = ComponentText.markup(
+                "<" + theme.primaryRight() + ">" + DirectorMiniMenu.escapeText(label)
+                        + "</" + theme.primaryRight() + "><reset>\n"
+                        + "<" + theme.description() + ">✎ <font:minecraft:uniform>"
+                        + DirectorMiniMenu.escapeText(description) + ".</font></" + theme.description() + "><reset>\n"
+                        + "<" + theme.optional() + ">✒ <font:minecraft:uniform>"
+                        + values.size() + (values.size() == 1 ? " item" : " items")
+                        + " separated by new lines</font></" + theme.optional() + ">"
+        );
+        return entry(content.clickCopyToClipboard(String.join("\n", values)).hover(hover));
     }
 
     private static Map<String, String> normalizeDebugResult(DebugEndpoint endpoint, Map<String, String> result) {
