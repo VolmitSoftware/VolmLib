@@ -56,6 +56,13 @@ public class WorldCache2DDouble {
         return chunks.capacity() * 256L;
     }
 
+    public void setMaximumChunks(int maximumChunks) {
+        if (maximumChunks <= 0) {
+            throw new IllegalArgumentException("maximumChunks must be positive.");
+        }
+        chunks.setCapacity(maximumChunks);
+    }
+
     private ChunkCache2DDouble chunkFor(long key) {
         RecentChunk recent = this.recent.get();
         if (recent != null && recent.key == key) {

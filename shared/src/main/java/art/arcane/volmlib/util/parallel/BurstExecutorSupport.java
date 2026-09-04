@@ -120,16 +120,27 @@ public class BurstExecutorSupport {
             futures.clear();
         }
 
-        for (Future<?> i : queued) {
-            try {
-                i.get();
-            } catch (InterruptedException e) {
+        boolean interrupted = false;
+        try {
+            for (Future<?> future : queued) {
+                while (true) {
+                    try {
+                        future.get();
+                        break;
+                    } catch (InterruptedException e) {
+                        interrupted = true;
+                    } catch (CancellationException e) {
+                        errorHandler.accept(e);
+                        break;
+                    } catch (ExecutionException e) {
+                        errorHandler.accept(e);
+                        break;
+                    }
+                }
+            }
+        } finally {
+            if (interrupted) {
                 Thread.currentThread().interrupt();
-                errorHandler.accept(e);
-            } catch (CancellationException e) {
-                errorHandler.accept(e);
-            } catch (ExecutionException e) {
-                errorHandler.accept(e);
             }
         }
     }

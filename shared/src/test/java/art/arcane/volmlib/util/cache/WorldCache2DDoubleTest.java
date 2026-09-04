@@ -5,6 +5,7 @@ import org.junit.Test;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertThrows;
 
 public class WorldCache2DDoubleTest {
     @Test
@@ -55,4 +56,19 @@ public class WorldCache2DDoubleTest {
         assertEquals(3, calls.get());
         assertEquals(256L, cache.getSize());
     }
+
+    @Test
+    public void maximumChunkCapacityCanGrowWithoutDiscardingCachedValues() {
+        AtomicInteger calls = new AtomicInteger();
+        WorldCache2DDouble cache = new WorldCache2DDouble((x, z) -> calls.incrementAndGet(), 1);
+
+        assertEquals(1D, cache.get(0, 0), 0D);
+        cache.setMaximumChunks(4);
+        assertEquals(1D, cache.get(0, 0), 0D);
+
+        assertEquals(1, calls.get());
+        assertEquals(1_024L, cache.getMaxSize());
+        assertThrows(IllegalArgumentException.class, () -> cache.setMaximumChunks(0));
+    }
+
 }
