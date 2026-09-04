@@ -284,6 +284,8 @@ public class BukkitLanguageSwitcherTest {
         assertTrue(rendered.contains("click:open_url:'https://mclo.gs/Ab12'"));
         assertTrue(rendered.contains("Copy all mclo.gs links"));
         assertTrue(rendered.contains("Copy all local paths"));
+        assertTrue(rendered.contains("Adapt - https://mclo.gs/Cd34"));
+        assertTrue(rendered.contains("BileTools - https://mclo.gs/Ab12"));
         assertTrue(rendered.indexOf("click:open_url:'https://mclo.gs/Ab12'")
                 < rendered.indexOf("Copy all mclo.gs links"));
         assertTrue(rendered.indexOf("Copy all mclo.gs links")

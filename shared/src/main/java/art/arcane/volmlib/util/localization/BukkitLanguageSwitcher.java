@@ -577,7 +577,7 @@ public final class BukkitLanguageSwitcher implements AutoCloseable, Listener {
             String url = result.getOrDefault("url", "");
             if (!url.isEmpty()) {
                 uploadedReports.add(debugUrlEntry(name, version, url));
-                uploadedUrls.add(url);
+                uploadedUrls.add(name + " - " + url);
             }
         }
         ArrayList<String> entries = new ArrayList<>(
