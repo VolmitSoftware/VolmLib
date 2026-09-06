@@ -66,17 +66,22 @@ public class FolderWatcherDeltaTest {
         assertTrue(watcher.getDeleted().isEmpty());
     }
 
-    @Test
+    @Test(timeout = 8_000L)
     public void createdFilesAreReportedOnceAndThenGoQuiet() throws Exception {
-        FolderWatcher watcher = new FolderWatcher(root.toFile());
-        write(root.resolve("new.json"), "1");
+        Path file = root.resolve("new.json");
+        try (FolderWatcher watcher = new FolderWatcher(root.toFile())) {
+            write(file, "1");
 
-        assertTrue(watcher.checkModified());
-        assertEquals(List.of("new.json"), names(watcher.getCreated()));
-        assertTrue(watcher.getChanged().isEmpty());
+            assertTrue(watcher.checkModified());
+            assertEquals(List.of("new.json"), names(watcher.getCreated()));
+            assertTrue(watcher.getChanged().isEmpty());
 
-        assertFalse(watcher.checkModified());
-        assertTrue(watcher.getCreated().isEmpty());
+            assertTrue(awaitFullScanQuiet(watcher, file.toFile(), 5_000L));
+            assertFalse(watcher.checkModified());
+            assertTrue(watcher.getCreated().isEmpty());
+            assertTrue(watcher.getChanged().isEmpty());
+            assertTrue(watcher.getDeleted().isEmpty());
+        }
     }
 
     @Test
@@ -392,6 +397,28 @@ public class FolderWatcherDeltaTest {
         FolderWatcher watcher = new FolderWatcher(root.toFile());
         assertFalse(watcher.checkModified());
         watcher.close();
+    }
+
+    private boolean awaitFullScanQuiet(FolderWatcher watcher, File writtenFile, long timeoutMs)
+            throws InterruptedException {
+        long quietSince = System.nanoTime();
+        long deadline = quietSince + TimeUnit.MILLISECONDS.toNanos(timeoutMs);
+        long quietPeriod = TimeUnit.MILLISECONDS.toNanos(250L);
+        while (System.nanoTime() < deadline) {
+            boolean modified = watcher.checkModified();
+            assertTrue(watcher.getCreated().isEmpty());
+            assertTrue(watcher.getDeleted().isEmpty());
+            for (File changedFile : watcher.getChanged()) {
+                assertEquals(writtenFile, changedFile);
+            }
+            if (modified) {
+                quietSince = System.nanoTime();
+            } else if (System.nanoTime() - quietSince >= quietPeriod) {
+                return true;
+            }
+            Thread.sleep(25L);
+        }
+        return false;
     }
 
     private boolean awaitEventChange(FolderWatcher watcher,
