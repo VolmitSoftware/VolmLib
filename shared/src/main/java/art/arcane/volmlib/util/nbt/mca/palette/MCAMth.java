@@ -31,13 +31,6 @@ public class MCAMth {
     public static final float RAD_TO_DEG = 57.295776F;
     public static final float EPSILON = 1.0E-5F;
     public static final float SQRT_OF_TWO = sqrt(2.0F);
-    private static final int BIG_ENOUGH_INT = 1024;
-    private static final float BIG_ENOUGH_FLOAT = 1024.0F;
-    private static final long UUID_VERSION = 61440L;
-    private static final long UUID_VERSION_TYPE_4 = 16384L;
-    private static final long UUID_VARIANT = -4611686018427387904L;
-    private static final long UUID_VARIANT_2 = -9223372036854775808L;
-    private static final float SIN_SCALE = 10430.378F;
 
     private static final float[] SIN;
     private static final Random RANDOM = new Random();
@@ -46,9 +39,6 @@ public class MCAMth {
             20, 15, 25, 17, 4, 8, 31, 27, 13, 23,
             21, 19, 16, 7, 26, 12, 18, 6, 11, 5,
             10, 9};
-    private static final double ONE_SIXTH = 0.16666666666666666D;
-    private static final int FRAC_EXP = 8;
-    private static final int LUT_SIZE = 257;
     private static final double FRAC_BIAS = Double.longBitsToDouble(4805340802404319232L);
     private static final double[] ASIN_TAB = new double[257];
     private static final double[] COS_TAB = new double[257];
