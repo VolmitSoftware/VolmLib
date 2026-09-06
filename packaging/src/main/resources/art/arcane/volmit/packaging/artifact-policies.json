@@ -1,0 +1,280 @@
+{
+  "profiles": [
+    {
+      "name": "Adapt",
+      "filename": "Adapt-*.jar",
+      "max_bytes": 6553600,
+      "forbidden_prefixes": [
+        "org/bukkit/",
+        "io/papermc/",
+        "net/minecraft/",
+        "net/kyori/",
+        "com/google/gson/",
+        "it/unimi/dsi/fastutil/",
+        "art/arcane/volmit/packaging/",
+        "org/gradle/"
+      ],
+      "required_entries": [
+        "plugin.yml",
+        "art/arcane/adapt/Adapt.class",
+        "slimjar.dat",
+        "slimjar-resolutions.dat",
+        "io/github/slimjar/app/builder/SpigotApplicationBuilder.class"
+      ]
+    },
+    {
+      "name": "BileTools",
+      "filename": "BileTools-*.jar",
+      "max_bytes": 1101004,
+      "forbidden_prefixes": [
+        "org/bukkit/",
+        "io/papermc/",
+        "net/minecraft/",
+        "com/volmit/bile/libs/gson/",
+        "com/volmit/bile/libs/toml/",
+        "com/volmit/bile/libs/kyori/",
+        "com/google/gson/",
+        "com/moandjiezana/toml/",
+        "net/kyori/",
+        "art/arcane/volmit/packaging/",
+        "org/gradle/"
+      ],
+      "required_entries": [
+        "plugin.yml",
+        "com/volmit/bile/BileTools.class",
+        "slimjar.dat",
+        "slimjar-resolutions.dat",
+        "com/volmit/bile/libs/slimjar/app/builder/SpigotApplicationBuilder.class"
+      ]
+    },
+    {
+      "name": "Gloss",
+      "filename": "Gloss-*.jar",
+      "max_bytes": 2778726,
+      "forbidden_prefixes": [
+        "org/bukkit/",
+        "io/papermc/",
+        "net/minecraft/",
+        "com/github/retrooper/",
+        "io/github/retrooper/",
+        "art/arcane/gloss/libs/packetevents/",
+        "net/kyori/",
+        "it/unimi/dsi/fastutil/",
+        "art/arcane/volmit/packaging/",
+        "org/gradle/"
+      ],
+      "required_entries": [
+        "plugin.yml",
+        "art/arcane/gloss/Gloss.class",
+        "slimjar.dat",
+        "slimjar-resolutions.dat",
+        "art/arcane/gloss/libs/slimjar/app/builder/SpigotApplicationBuilder.class",
+        "paper-plugin.yml"
+      ]
+    },
+    {
+      "name": "HiddenOre",
+      "filename": "HiddenOre-*.jar",
+      "max_bytes": 838860,
+      "forbidden_prefixes": [
+        "org/bukkit/",
+        "io/papermc/",
+        "net/minecraft/",
+        "net/kyori/",
+        "art/arcane/hiddenore/libs/kyori/",
+        "com/google/gson/",
+        "it/unimi/dsi/fastutil/",
+        "art/arcane/volmit/packaging/",
+        "org/gradle/"
+      ],
+      "required_entries": [
+        "plugin.yml",
+        "art/arcane/hiddenore/HiddenOre.class",
+        "slimjar.dat",
+        "slimjar-resolutions.dat",
+        "art/arcane/hiddenore/libs/slimjar/app/builder/SpigotApplicationBuilder.class"
+      ]
+    },
+    {
+      "name": "React",
+      "filename": "React-*.jar",
+      "max_bytes": 3984588,
+      "forbidden_prefixes": [
+        "org/bukkit/",
+        "io/papermc/",
+        "net/minecraft/",
+        "net/bytebuddy/",
+        "it/unimi/dsi/fastutil/",
+        "com/google/gson/",
+        "art/arcane/volmit/packaging/",
+        "org/gradle/"
+      ],
+      "required_entries": [
+        "plugin.yml",
+        "art/arcane/react/React.class",
+        "slimjar.dat",
+        "slimjar-resolutions.dat",
+        "art/arcane/react/util/arcane/slimjar/app/builder/SpigotApplicationBuilder.class"
+      ]
+    },
+    {
+      "name": "ShapedPortals",
+      "filename": "ShapedPortals-*.jar",
+      "max_bytes": 1153433,
+      "forbidden_prefixes": [
+        "org/bukkit/",
+        "io/papermc/",
+        "net/minecraft/",
+        "com/volmit/shapedportals/libs/gson/",
+        "com/volmit/shapedportals/libs/toml/",
+        "com/volmit/shapedportals/libs/kyori/",
+        "com/google/gson/",
+        "com/moandjiezana/toml/",
+        "net/kyori/",
+        "art/arcane/volmit/packaging/",
+        "org/gradle/"
+      ],
+      "required_entries": [
+        "plugin.yml",
+        "com/volmit/shapedportals/ShapedPortals.class",
+        "shapedportals-language-source.properties",
+        "slimjar.dat",
+        "slimjar-resolutions.dat",
+        "com/volmit/shapedportals/libs/slimjar/app/builder/SpigotApplicationBuilder.class"
+      ]
+    },
+    {
+      "name": "Wormholes",
+      "filename": "Wormholes-*.jar",
+      "max_bytes": 3250585,
+      "forbidden_prefixes": [
+        "org/bukkit/",
+        "io/papermc/",
+        "net/minecraft/",
+        "com/github/retrooper/",
+        "io/github/retrooper/",
+        "art/arcane/wormholes/libs/packetevents/",
+        "net/kyori/",
+        "it/unimi/dsi/fastutil/",
+        "art/arcane/volmit/packaging/",
+        "org/gradle/"
+      ],
+      "required_entries": [
+        "plugin.yml",
+        "art/arcane/wormholes/Wormholes.class",
+        "slimjar.dat",
+        "slimjar-resolutions.dat",
+        "art/arcane/wormholes/libs/slimjar/app/builder/SpigotApplicationBuilder.class",
+        "paper-plugin.yml",
+        "art/arcane/wormholes/survival/doors/dimension/WormholesBootstrap.class"
+      ]
+    },
+    {
+      "name": "Iris Bukkit",
+      "filename": "Iris v* [[]CraftBukkit] *.jar",
+      "max_bytes": 7600000,
+      "forbidden_prefixes": [
+        "org/bukkit/",
+        "io/papermc/",
+        "net/minecraft/",
+        "it/unimi/dsi/fastutil/",
+        "com/google/gson/",
+        "com/github/benmanes/caffeine/",
+        "art/arcane/volmit/packaging/",
+        "org/gradle/",
+        "art/arcane/iris/modded/localization/",
+        "art/arcane/iris/core/lifecycle/CapabilitySnapshot$Testing",
+        "art/arcane/iris/util/common/scheduling/jobs/DownloadJob",
+        "art/arcane/iris/util/common/scheduling/jobs/JobCollection",
+        "art/arcane/iris/util/common/scheduling/jobs/ParallelQueueJob",
+        "art/arcane/iris/util/common/scheduling/jobs/QueueJob",
+        "art/arcane/volmlib/util/math/MathHelper",
+        "com/googlecode/pngtastic/"
+      ],
+      "required_entries": [
+        "plugin.yml",
+        "art/arcane/iris/Iris.class",
+        "slimjar.dat",
+        "slimjar-resolutions.dat",
+        "art/arcane/iris/util/slimjar/app/builder/SpigotApplicationBuilder.class",
+        "paper-plugin.yml",
+        "art/arcane/iris/IrisBootstrap.class",
+        "art/arcane/iris/IrisPluginLoader.class",
+        "META-INF/iris/generation-kernels/catalog.tsv",
+        "agent.jar"
+      ]
+    },
+    {
+      "name": "Iris Fabric",
+      "filename": "Iris v* [[]Fabric] *.jar",
+      "max_bytes": 12478054,
+      "forbidden_prefixes": [
+        "org/bukkit/",
+        "io/papermc/",
+        "net/minecraft/",
+        "art/arcane/volmit/packaging/",
+        "org/gradle/"
+      ],
+      "required_entries": [
+        "fabric.mod.json",
+        "art/arcane/iris/fabric/IrisFabricBootstrap.class",
+        "META-INF/iris/generation-kernels/catalog.tsv",
+        "irisworldgen.entity.mixins.json",
+        "irisworldgen.client.mixins.json",
+        "META-INF/services/art.arcane.iris.core.localization.IrisMessageContributor",
+        "art/arcane/iris/modded/localization/ModdedMessageContributor.class",
+        "art/arcane/iris/modded/localization/ModdedCommandMessages.class",
+        "art/arcane/iris/modded/localization/ModdedHelpMessages.class",
+        "art/arcane/iris/modded/localization/ClientUiMessages.class"
+      ]
+    },
+    {
+      "name": "Iris Forge",
+      "filename": "Iris v* [[]Forge] *.jar",
+      "max_bytes": 11639193,
+      "forbidden_prefixes": [
+        "org/bukkit/",
+        "io/papermc/",
+        "net/minecraft/",
+        "art/arcane/volmit/packaging/",
+        "org/gradle/"
+      ],
+      "required_entries": [
+        "META-INF/mods.toml",
+        "art/arcane/iris/forge/IrisForgeBootstrap.class",
+        "META-INF/iris/generation-kernels/catalog.tsv",
+        "irisworldgen.entity.mixins.json",
+        "irisworldgen.client.mixins.json",
+        "META-INF/services/art.arcane.iris.core.localization.IrisMessageContributor",
+        "art/arcane/iris/modded/localization/ModdedMessageContributor.class",
+        "art/arcane/iris/modded/localization/ModdedCommandMessages.class",
+        "art/arcane/iris/modded/localization/ModdedHelpMessages.class",
+        "art/arcane/iris/modded/localization/ClientUiMessages.class"
+      ]
+    },
+    {
+      "name": "Iris NeoForge",
+      "filename": "Iris v* [[]NeoForge] *.jar",
+      "max_bytes": 11639193,
+      "forbidden_prefixes": [
+        "org/bukkit/",
+        "io/papermc/",
+        "net/minecraft/",
+        "art/arcane/volmit/packaging/",
+        "org/gradle/"
+      ],
+      "required_entries": [
+        "META-INF/neoforge.mods.toml",
+        "art/arcane/iris/neoforge/IrisNeoForgeBootstrap.class",
+        "META-INF/iris/generation-kernels/catalog.tsv",
+        "irisworldgen.entity.mixins.json",
+        "irisworldgen.client.mixins.json",
+        "META-INF/services/art.arcane.iris.core.localization.IrisMessageContributor",
+        "art/arcane/iris/modded/localization/ModdedMessageContributor.class",
+        "art/arcane/iris/modded/localization/ModdedCommandMessages.class",
+        "art/arcane/iris/modded/localization/ModdedHelpMessages.class",
+        "art/arcane/iris/modded/localization/ClientUiMessages.class"
+      ]
+    }
+  ]
+}

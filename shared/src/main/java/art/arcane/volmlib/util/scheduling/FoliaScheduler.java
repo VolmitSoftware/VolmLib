@@ -31,6 +31,7 @@ public final class FoliaScheduler {
     private static final Method SERVER_GET_REGION_SCHEDULER = resolveServerMethod("getRegionScheduler");
     private static final Method SERVER_GET_ASYNC_SCHEDULER = resolveServerMethod("getAsyncScheduler");
     private static final Method SERVER_IS_TICK_THREAD = resolveServerMethod("isTickThread");
+    private static final Method SERVER_IS_STOPPING = resolveServerMethod("isStopping");
     private static final Method SERVER_IS_GLOBAL_TICK_THREAD = resolveServerMethod("isGlobalTickThread");
     private static final Method SERVER_IS_OWNED_LOCATION_REGION = resolveServerMethod("isOwnedByCurrentRegion", Location.class);
     private static final Method SERVER_IS_OWNED_ENTITY_REGION = resolveServerMethod("isOwnedByCurrentRegion", Entity.class);
@@ -79,6 +80,10 @@ public final class FoliaScheduler {
     private static volatile SchedulerHandle asyncSchedulerHandle;
 
     private FoliaScheduler() {
+    }
+
+    public static boolean isStopping(Server server) {
+        return server != null && Boolean.TRUE.equals(invokeBooleanNoThrow(SERVER_IS_STOPPING, server));
     }
 
     public static boolean isFolia(Server server) {

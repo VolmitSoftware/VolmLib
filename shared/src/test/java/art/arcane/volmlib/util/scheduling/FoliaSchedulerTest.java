@@ -52,6 +52,15 @@ public class FoliaSchedulerTest {
     }
 
     @Test
+    public void stoppingStatusUsesTheAvailableServerCapability() {
+        Server stopping = proxy(Server.class, (instance, method, arguments) ->
+            method.getName().equals("isStopping") ? true : defaultValue(method.getReturnType()));
+        assertTrue(FoliaScheduler.isStopping(stopping));
+        assertFalse(FoliaScheduler.isStopping(server));
+        assertFalse(FoliaScheduler.isStopping(null));
+    }
+
+    @Test
     public void nonFoliaImmediateTasksUseBukkitSchedulers() {
         World world = proxy(World.class, FoliaSchedulerTest::defaultInvocation);
         Entity entity = proxy(Entity.class, FoliaSchedulerTest::defaultInvocation);
