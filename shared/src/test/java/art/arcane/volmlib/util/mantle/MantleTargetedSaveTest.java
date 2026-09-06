@@ -44,6 +44,82 @@ public class MantleTargetedSaveTest {
     public TemporaryFolder temporaryFolder = new TemporaryFolder();
 
     @Test
+    public void failedCloseRetainsUnsavedRegionsForRetry() throws Exception {
+        TestRuntime runtime = new TestRuntime(temporaryFolder.newFolder("close-write-failure"));
+        try {
+            MantleChunk<TestSection> chunk = runtime.mantle.getChunk(0, 0);
+            long key = Mantle.key(0, 0);
+            runtime.regionIo.failWritesFor(key);
+
+            assertThrows(IllegalStateException.class, runtime.mantle::close);
+
+            assertFalse(runtime.mantle.isClosed());
+            assertFalse(chunk.isClosed());
+            assertSame(chunk, runtime.mantle.getChunk(0, 0));
+            assertEquals(0, runtime.regionIo.closeAttempts);
+            assertEquals(1, runtime.regionIo.attempts(key));
+
+            runtime.regionIo.allowWrites();
+            runtime.mantle.close();
+
+            assertTrue(runtime.mantle.isClosed());
+            assertEquals(2, runtime.regionIo.attempts(key));
+            assertEquals(1, runtime.regionIo.closeAttempts);
+        } finally {
+            runtime.close();
+        }
+    }
+
+    @Test
+    public void failedSaveAllRetainsUnsavedRegionsForRetry() throws Exception {
+        TestRuntime runtime = new TestRuntime(temporaryFolder.newFolder("save-all-write-failure"));
+        try {
+            MantleChunk<TestSection> chunk = runtime.mantle.getChunk(0, 0);
+            long key = Mantle.key(0, 0);
+            runtime.regionIo.failWritesFor(key);
+
+            assertThrows(IllegalStateException.class, runtime.mantle::saveAll);
+
+            assertFalse(runtime.mantle.isClosed());
+            assertFalse(chunk.isClosed());
+            assertSame(chunk, runtime.mantle.getChunk(0, 0));
+
+            runtime.regionIo.allowWrites();
+            runtime.mantle.saveAll();
+
+            assertEquals(2, runtime.regionIo.attempts(key));
+            assertFalse(runtime.mantle.isChunkLoaded(0, 0));
+        } finally {
+            runtime.close();
+        }
+    }
+
+    @Test
+    public void failedIoCloseCanBeRetriedWithoutRewritingSavedRegions() throws Exception {
+        TestRuntime runtime = new TestRuntime(temporaryFolder.newFolder("close-io-failure"));
+        try {
+            runtime.mantle.getChunk(0, 0);
+            long key = Mantle.key(0, 0);
+            runtime.regionIo.failClose = true;
+
+            assertThrows(IllegalStateException.class, runtime.mantle::close);
+
+            assertFalse(runtime.mantle.isClosed());
+            assertEquals(1, runtime.regionIo.attempts(key));
+            assertEquals(1, runtime.regionIo.closeAttempts);
+
+            runtime.regionIo.failClose = false;
+            runtime.mantle.close();
+
+            assertTrue(runtime.mantle.isClosed());
+            assertEquals(1, runtime.regionIo.attempts(key));
+            assertEquals(2, runtime.regionIo.closeAttempts);
+        } finally {
+            runtime.close();
+        }
+    }
+
+    @Test
     public void requestedRegionsPersistAndUnloadWithoutTouchingOtherLoadedRegions() throws Exception {
         TestRuntime runtime = new TestRuntime(temporaryFolder.newFolder("targeted-success"));
         try {
@@ -403,6 +479,8 @@ public class MantleTargetedSaveTest {
         private final Set<Long> successfulWrites = ConcurrentHashMap.newKeySet();
         private volatile Long failingRegion;
         private volatile Long blockedRegion;
+        private boolean failClose;
+        private int closeAttempts;
         private volatile CountDownLatch writeEntered = new CountDownLatch(0);
         private volatile CountDownLatch allowWrite = new CountDownLatch(0);
 
@@ -435,7 +513,11 @@ public class MantleTargetedSaveTest {
         }
 
         @Override
-        public void close() {
+        public void close() throws IOException {
+            closeAttempts++;
+            if (failClose) {
+                throw new IOException("Simulated region IO close failure");
+            }
         }
 
         private int attempts(long key) {
@@ -449,6 +531,7 @@ public class MantleTargetedSaveTest {
 
         private void allowWrites() {
             failingRegion = null;
+            failClose = false;
             releaseBlockedWrite();
         }
 

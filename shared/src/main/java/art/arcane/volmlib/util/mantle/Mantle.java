@@ -372,6 +372,13 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
             loadingRegions.clear();
             lastUse.clear();
             toUnload.clear();
+            regionIO.close();
+        } catch (Exception e) {
+            closed.set(false);
+            throw new IllegalStateException("Failed to close mantle storage " + dataFolder.getAbsolutePath(), e);
+        } catch (Error e) {
+            closed.set(false);
+            throw e;
         } finally {
             unloadSemaphore().release(lockSize);
         }
@@ -379,12 +386,6 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
         // Disable AFTER the flush: the flush depends on the per-region lock for its
         // serialization, and disabling first also deadlocked against in-flight holders.
         hyperLock.disable();
-
-        try {
-            regionIO.close();
-        } catch (Throwable e) {
-            onError(e);
-        }
 
         deleteTemporaryFiles();
         onDebug("The Mantle has Closed " + dataFolder.getAbsolutePath());
@@ -773,17 +774,25 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
     }
 
     private void flushLoadedRegions() {
+        AtomicReference<Throwable> failure = new AtomicReference<>();
         MantleLifecycleSupport.flushLoadedRegions(
                 loadedRegions.size(),
                 consumer -> loadedRegions.forEach((id, plate) -> consumer.accept(id, plate)),
                 ioBurst::burst,
                 this::persistRegionLocked,
                 (id, plate, e) -> {
+                    failure.compareAndSet(null, e);
                     onWarn("Failed to write Tectonic Plate " + CacheKey.keyX(id) + " " + CacheKey.keyZ(id));
                     onError(e);
                 },
-                this::onError
+                e -> {
+                    failure.compareAndSet(null, e);
+                    onError(e);
+                }
         );
+        if (failure.get() != null) {
+            throw new IllegalStateException("Failed to flush mantle storage " + dataFolder.getAbsolutePath(), failure.get());
+        }
     }
 
     private void persistRegion(long id, P plate) throws Exception {
