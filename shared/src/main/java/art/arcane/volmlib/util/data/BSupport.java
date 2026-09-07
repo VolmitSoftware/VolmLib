@@ -50,8 +50,8 @@ public abstract class BSupport<P> {
     private final BlockData AIR = AIR_MATERIAL.createBlockData();
     private final IntSet foliageCache = buildFoliageCache();
     private final IntSet deepslateCache = buildDeepslateCache();
-    private final Int2IntMap normal2DeepslateCache = buildNormal2DeepslateCache();
-    private final Int2IntMap deepslate2NormalCache = buildDeepslate2NormalCache();
+    private final Int2ObjectMap<Material> normal2DeepslateCache = buildNormal2DeepslateCache();
+    private final Int2ObjectMap<Material> deepslate2NormalCache = buildDeepslate2NormalCache();
     private final IntSet decorantCache = buildDecorantCache();
     private final IntSet storageCache = buildStorageCache();
     private final IntSet storageChestCache = buildStorageChestCache();
@@ -192,32 +192,32 @@ public abstract class BSupport<P> {
         return IntSets.unmodifiable(b);
     }
 
-    private Int2IntMap buildNormal2DeepslateCache() {
-        Int2IntMap b = new Int2IntOpenHashMap();
+    private Int2ObjectMap<Material> buildNormal2DeepslateCache() {
+        Int2ObjectMap<Material> b = new Int2ObjectOpenHashMap<>();
 
-        b.put(COAL_ORE.ordinal(), DEEPSLATE_COAL_ORE.ordinal());
-        b.put(EMERALD_ORE.ordinal(), DEEPSLATE_EMERALD_ORE.ordinal());
-        b.put(DIAMOND_ORE.ordinal(), DEEPSLATE_DIAMOND_ORE.ordinal());
-        b.put(COPPER_ORE.ordinal(), DEEPSLATE_COPPER_ORE.ordinal());
-        b.put(GOLD_ORE.ordinal(), DEEPSLATE_GOLD_ORE.ordinal());
-        b.put(IRON_ORE.ordinal(), DEEPSLATE_IRON_ORE.ordinal());
-        b.put(LAPIS_ORE.ordinal(), DEEPSLATE_LAPIS_ORE.ordinal());
-        b.put(REDSTONE_ORE.ordinal(), DEEPSLATE_REDSTONE_ORE.ordinal());
+        b.put(COAL_ORE.ordinal(), DEEPSLATE_COAL_ORE);
+        b.put(EMERALD_ORE.ordinal(), DEEPSLATE_EMERALD_ORE);
+        b.put(DIAMOND_ORE.ordinal(), DEEPSLATE_DIAMOND_ORE);
+        b.put(COPPER_ORE.ordinal(), DEEPSLATE_COPPER_ORE);
+        b.put(GOLD_ORE.ordinal(), DEEPSLATE_GOLD_ORE);
+        b.put(IRON_ORE.ordinal(), DEEPSLATE_IRON_ORE);
+        b.put(LAPIS_ORE.ordinal(), DEEPSLATE_LAPIS_ORE);
+        b.put(REDSTONE_ORE.ordinal(), DEEPSLATE_REDSTONE_ORE);
 
         return b;
     }
 
-    private Int2IntMap buildDeepslate2NormalCache() {
-        Int2IntMap b = new Int2IntOpenHashMap();
+    private Int2ObjectMap<Material> buildDeepslate2NormalCache() {
+        Int2ObjectMap<Material> b = new Int2ObjectOpenHashMap<>();
 
-        b.put(DEEPSLATE_COAL_ORE.ordinal(), COAL_ORE.ordinal());
-        b.put(DEEPSLATE_EMERALD_ORE.ordinal(), EMERALD_ORE.ordinal());
-        b.put(DEEPSLATE_DIAMOND_ORE.ordinal(), DIAMOND_ORE.ordinal());
-        b.put(DEEPSLATE_COPPER_ORE.ordinal(), COPPER_ORE.ordinal());
-        b.put(DEEPSLATE_GOLD_ORE.ordinal(), GOLD_ORE.ordinal());
-        b.put(DEEPSLATE_IRON_ORE.ordinal(), IRON_ORE.ordinal());
-        b.put(DEEPSLATE_LAPIS_ORE.ordinal(), LAPIS_ORE.ordinal());
-        b.put(DEEPSLATE_REDSTONE_ORE.ordinal(), REDSTONE_ORE.ordinal());
+        b.put(DEEPSLATE_COAL_ORE.ordinal(), COAL_ORE);
+        b.put(DEEPSLATE_EMERALD_ORE.ordinal(), EMERALD_ORE);
+        b.put(DEEPSLATE_DIAMOND_ORE.ordinal(), DIAMOND_ORE);
+        b.put(DEEPSLATE_COPPER_ORE.ordinal(), COPPER_ORE);
+        b.put(DEEPSLATE_GOLD_ORE.ordinal(), GOLD_ORE);
+        b.put(DEEPSLATE_IRON_ORE.ordinal(), IRON_ORE);
+        b.put(DEEPSLATE_LAPIS_ORE.ordinal(), LAPIS_ORE);
+        b.put(DEEPSLATE_REDSTONE_ORE.ordinal(), REDSTONE_ORE);
 
         return b;
     }
@@ -361,18 +361,8 @@ public abstract class BSupport<P> {
 
     public BlockData toDeepSlateOre(BlockData block, BlockData ore) {
         int key = ore.getMaterial().ordinal();
-
-        if (isDeepSlate(block)) {
-            if (normal2DeepslateCache.containsKey(key)) {
-                return Material.values()[normal2DeepslateCache.get(key)].createBlockData();
-            }
-        } else {
-            if (deepslate2NormalCache.containsKey(key)) {
-                return Material.values()[deepslate2NormalCache.get(key)].createBlockData();
-            }
-        }
-
-        return ore;
+        Material target = (isDeepSlate(block) ? normal2DeepslateCache : deepslate2NormalCache).get(key);
+        return target == null ? ore : target.createBlockData();
     }
 
     public boolean isDeepSlate(BlockData blockData) {

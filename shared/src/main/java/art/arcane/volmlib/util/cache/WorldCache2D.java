@@ -46,7 +46,7 @@ public class WorldCache2D<T> {
     }
 
     public T get(int x, int z) {
-        long key = CacheKey.mix(CacheKey.key(x >> 4, z >> 4));
+        long key = CacheKey.key(x >> 4, z >> 4);
         ChunkCache2D<T> chunk = chunkFor(key);
         return chunk.getInts(x, z, resolver);
     }
@@ -56,7 +56,7 @@ public class WorldCache2D<T> {
             throw new IllegalArgumentException("Expected a 16x16 target array.");
         }
 
-        long key = CacheKey.mix(CacheKey.key(chunkX, chunkZ));
+        long key = CacheKey.key(chunkX, chunkZ);
         ChunkCache2D<T> chunk = chunkFor(key);
         int worldX = chunkX << 4;
         int worldZ = chunkZ << 4;
@@ -81,9 +81,10 @@ public class WorldCache2D<T> {
         if (recent != null && recent.key == key) {
             return recent.chunk;
         }
-        ChunkCache2D<T> chunk = chunks.get(key);
+        long mixedKey = CacheKey.mix(key);
+        ChunkCache2D<T> chunk = chunks.get(mixedKey);
         if (chunk == null) {
-            chunk = chunks.computeIfAbsent(key, ignored -> chunkSupplier.get());
+            chunk = chunks.computeIfAbsent(mixedKey, ignored -> chunkSupplier.get());
         }
         this.recent.set(new RecentChunk<>(key, chunk));
         return chunk;

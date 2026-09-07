@@ -9,6 +9,36 @@ import static org.junit.Assert.assertThrows;
 
 public class WorldCache2DDoubleTest {
     @Test
+    public void interleavedFillsAndReadsRetainSignedChunkIdentity() {
+        AtomicInteger calls = new AtomicInteger();
+        WorldCache2DDouble cache = new WorldCache2DDouble((x, z) -> {
+            calls.incrementAndGet();
+            return x * 0.5D - z * 0.25D;
+        }, 16);
+        int[][] chunks = {{0, 0}, {-1, 1}, {1, -1}, {134217727, -134217728}, {-134217728, 134217727}};
+        Object[] boxed = new Object[256];
+        double[] values = new double[256];
+        for (int round = 0; round < 2; round++) {
+            for (int[] chunk : chunks) {
+                int x = chunk[0] << 4;
+                int z = chunk[1] << 4;
+                assertEquals(x * 0.5D - z * 0.25D, cache.get(x, z), 0D);
+                cache.fillChunk(chunk[0], chunk[1], boxed);
+                cache.fillChunk(chunk[0], chunk[1], values);
+                for (int localX = 0; localX < 16; localX++) {
+                    for (int localZ = 0; localZ < 16; localZ++) {
+                        double expected = (x + localX) * 0.5D - (z + localZ) * 0.25D;
+                        assertEquals(expected, (Double) boxed[localZ * 16 + localX], 0D);
+                        assertEquals(expected, values[localZ * 16 + localX], 0D);
+                        assertEquals(expected, cache.get(x + localX, z + localZ), 0D);
+                    }
+                }
+            }
+        }
+        assertEquals(chunks.length * 256, calls.get());
+    }
+
+    @Test
     public void getCachesResolvedValuesPerCoordinate() {
         AtomicInteger calls = new AtomicInteger();
         WorldCache2DDouble cache = new WorldCache2DDouble((x, z) -> {

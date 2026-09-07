@@ -10,6 +10,33 @@ import static org.junit.Assert.assertThrows;
 
 public class WorldCache2DTest {
     @Test
+    public void interleavedFillsAndReadsRetainSignedChunkIdentity() {
+        AtomicInteger calls = new AtomicInteger();
+        WorldCache2D<Integer> cache = WorldCache2D.ofInts((x, z) -> {
+            calls.incrementAndGet();
+            return x * 31 + z;
+        }, 16, () -> new ChunkCache2D<>("iris"));
+        int[][] chunks = {{0, 0}, {-1, 1}, {1, -1}, {134217727, -134217728}, {-134217728, 134217727}};
+        Object[] values = new Object[256];
+        for (int round = 0; round < 2; round++) {
+            for (int[] chunk : chunks) {
+                int x = chunk[0] << 4;
+                int z = chunk[1] << 4;
+                assertEquals(x * 31 + z, cache.get(x, z).intValue());
+                cache.fillChunk(chunk[0], chunk[1], values);
+                for (int localX = 0; localX < 16; localX++) {
+                    for (int localZ = 0; localZ < 16; localZ++) {
+                        int expected = (x + localX) * 31 + z + localZ;
+                        assertEquals(expected, values[localZ * 16 + localX]);
+                        assertEquals(expected, cache.get(x + localX, z + localZ).intValue());
+                    }
+                }
+            }
+        }
+        assertEquals(chunks.length * 256, calls.get());
+    }
+
+    @Test
     public void getCachesResolvedValuesPerCoordinate() {
         AtomicInteger calls = new AtomicInteger();
         WorldCache2D<Integer> cache = new WorldCache2D<>((x, z) -> {
