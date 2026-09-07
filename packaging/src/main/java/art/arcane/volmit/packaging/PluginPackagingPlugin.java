@@ -4,6 +4,8 @@ import org.gradle.api.GradleException;
 import org.gradle.api.Plugin;
 import org.gradle.api.Project;
 import org.gradle.api.Task;
+import org.gradle.api.plugins.JavaPluginExtension;
+import org.gradle.api.tasks.SourceSet;
 import org.gradle.api.tasks.TaskProvider;
 import org.gradle.api.tasks.bundling.AbstractArchiveTask;
 import org.gradle.api.tasks.compile.JavaCompile;
@@ -32,13 +34,58 @@ public class PluginPackagingPlugin implements Plugin<Project> {
             task.setGroup("verification");
             task.setDescription("Verifies compact plugin artifacts and size budgets.");
         });
+        TaskProvider<VerifyLoggingPolicy> loggingPolicy = project.getTasks().register(
+                "verifyLoggingPolicy", VerifyLoggingPolicy.class, task -> {
+                    task.setGroup("verification");
+                    task.setDescription("Fails when main sources bypass the plugin logger; exemptions only shrink.");
+                    task.getReport().set(project.getLayout().getBuildDirectory().file("reports/logging-policy.txt"));
+                });
         project.getTasks().matching(task -> task.getName().equals("check"))
-                .configureEach(task -> task.dependsOn(verify));
+                .configureEach(task -> task.dependsOn(verify, loggingPolicy));
         project.afterEvaluate(ignored -> {
             for (PackagingArtifact artifact : extension.getArtifacts()) {
                 configureArtifact(project, artifact, verify);
             }
+            configureLoggingPolicy(project, extension.getLoggingPolicy(), loggingPolicy);
         });
+    }
+
+    private void configureLoggingPolicy(Project project, LoggingPolicySpec policy,
+                                        TaskProvider<VerifyLoggingPolicy> task) {
+        List<File> directories = new ArrayList<>();
+        for (File directory : resolveSourceDirectories(project, policy)) {
+            if (directory.isDirectory()) {
+                directories.add(directory);
+            }
+        }
+        List<String> roots = new ArrayList<>();
+        for (File directory : directories) {
+            roots.add(directory.getAbsolutePath());
+        }
+        task.configure(verification -> {
+            for (File directory : directories) {
+                verification.getSources().from(project.fileTree(directory, tree -> tree.include("**/*.java")));
+            }
+            verification.getSourceRoots().set(roots);
+            verification.getForbiddenPatterns().set(policy.getForbiddenPatterns());
+            verification.getAllowlist().setFrom(project.files(policy.getAllowlistFile()));
+            verification.getAllowlistLocation().set(policy.getAllowlistFile().getAbsolutePath());
+        });
+    }
+
+    private List<File> resolveSourceDirectories(Project project, LoggingPolicySpec policy) {
+        if (!policy.getSourceDirectories().isEmpty()) {
+            return policy.getSourceDirectories();
+        }
+        JavaPluginExtension java = project.getExtensions().findByType(JavaPluginExtension.class);
+        if (java == null) {
+            return List.of();
+        }
+        SourceSet main = java.getSourceSets().findByName(SourceSet.MAIN_SOURCE_SET_NAME);
+        if (main == null) {
+            return List.of();
+        }
+        return new ArrayList<>(main.getJava().getSrcDirs());
     }
 
     private void configureArtifact(Project project, PackagingArtifact policy, TaskProvider<Task> verify) {
