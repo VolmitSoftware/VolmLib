@@ -33,6 +33,8 @@ import static org.mockito.Mockito.when;
  * it used to call {@code Board.update()} straight from there. These pin the dispatch decision.
  */
 public class BoardManagerFoliaDispatchTest {
+    private static final int INTERVAL_TICKS = 5;
+
     private Server server;
     private JavaPlugin plugin;
     private final Map<UUID, Player> playersById = new HashMap<>();
@@ -114,7 +116,7 @@ public class BoardManagerFoliaDispatchTest {
 
     private BoardManager<Board> manager() {
         return new BoardManager<>(plugin,
-                new BoardSettings(null, ScoreDirection.DOWN, 5),
+                new BoardSettings(null, ScoreDirection.DOWN, INTERVAL_TICKS),
                 (player, boardSettings) -> mock(Board.class));
     }
 
@@ -125,10 +127,13 @@ public class BoardManagerFoliaDispatchTest {
         return board;
     }
 
+    /** Drives one whole interval of the striped driver, so every registered board gets its slice. */
     private static void updateAll(BoardManager<Board> manager) throws Exception {
-        Method updateAll = BoardManager.class.getDeclaredMethod("updateAll");
-        updateAll.setAccessible(true);
-        updateAll.invoke(manager);
+        Method updateStripe = BoardManager.class.getDeclaredMethod("updateStripe");
+        updateStripe.setAccessible(true);
+        for (int tick = 0; tick < INTERVAL_TICKS; tick++) {
+            updateStripe.invoke(manager);
+        }
     }
 
     private static Player player(UUID id) {

@@ -104,23 +104,25 @@ public class CharacterizationBoardManagerDriverTest {
     }
 
     @Test
-    public void driverSchedulesUpdateTaskAtConfiguredCadence() {
+    public void driverSchedulesUpdateTaskEveryTickAndStripesTheConfiguredCadence() {
         BoardSettings settings = new BoardSettings(null, ScoreDirection.DOWN, 7);
         new BoardManager<>(plugin, settings, (player, boardSettings) -> mock(Board.class));
 
+        // The timer period is the stripe period, not the refresh interval: the driver walks 1/7th
+        // of the fleet per tick so each board still renders once per seven ticks.
         assertEquals(1, scheduledTimers.size());
         assertTrue(scheduledTimers.get(0)[0] instanceof BoardUpdateTask);
         assertEquals(2L, scheduledTimers.get(0)[1]);
-        assertEquals(7L, scheduledTimers.get(0)[2]);
+        assertEquals(1L, scheduledTimers.get(0)[2]);
     }
 
     @Test
-    public void nullSettingsDriveAtTwentyTickDefault() {
+    public void nullSettingsStripeAcrossTheTwentyTickDefault() {
         new BoardManager<Board>(plugin, null, (player, boardSettings) -> mock(Board.class));
 
         assertEquals(1, scheduledTimers.size());
         assertEquals(2L, scheduledTimers.get(0)[1]);
-        assertEquals(20L, scheduledTimers.get(0)[2]);
+        assertEquals(1L, scheduledTimers.get(0)[2]);
     }
 
     @Test
@@ -161,7 +163,9 @@ public class CharacterizationBoardManagerDriverTest {
         boardsOf(manager).put(offline.getUniqueId(), offlineBoard);
         playersById.put(online.getUniqueId(), online);
 
-        ((Runnable) scheduledTimers.get(0)[0]).run();
+        for (int tick = 0; tick < 5; tick++) {
+            ((Runnable) scheduledTimers.get(0)[0]).run();
+        }
 
         verify(onlineBoard).update();
         verify(offlineBoard, never()).update();

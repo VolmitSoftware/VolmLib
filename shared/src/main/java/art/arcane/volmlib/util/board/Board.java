@@ -30,6 +30,8 @@ import java.util.stream.IntStream;
 
 public class Board {
     private static final int MAX_LINES = 15;
+    private static final long DISPLAY_OBJECTIVE_REASSERT_NANOS = 5_000_000_000L;
+    private static final long DISPLAY_OBJECTIVE_SPREAD_NANOS = 2_000_000_000L;
     private static final int UNSET_SCORE = Integer.MIN_VALUE;
     private static final String[] CACHED_ENTRIES = new String[ChatColor.values().length];
     private static final boolean CANVAS_RUNTIME = detectCanvasRuntime();
@@ -249,6 +251,24 @@ public class Board {
 
     static boolean effectiveHideScoreNumbers(boolean requested, boolean supported) {
         return requested && supported;
+    }
+
+    /**
+     * The display-objective packet reaches the client on the first render, when the objective
+     * instance was rebuilt, when the sidebar is reclaimed, and otherwise only on a slow heartbeat.
+     * Sending it on every update wastes a packet per player per update; never re-sending it hands
+     * the sidebar permanently to any plugin that takes the display slot without the ownership
+     * metadata protocol (the plain Bukkit scoreboard API, or /scoreboard objectives setdisplay).
+     */
+    static boolean shouldSendDisplayObjective(boolean displayedObjective, boolean objectiveRebuilt,
+                                              long nowNanos, long reassertAtNanos) {
+        return !displayedObjective || objectiveRebuilt || nowNanos - reassertAtNanos >= 0L;
+    }
+
+    /** Next heartbeat deadline, spread per board so a whole fleet does not re-assert on one tick. */
+    static long nextDisplayObjectiveNanos(long nowNanos, String ownershipToken) {
+        return nowNanos + DISPLAY_OBJECTIVE_REASSERT_NANOS
+                + Math.floorMod((long) ownershipToken.hashCode(), DISPLAY_OBJECTIVE_SPREAD_NANOS);
     }
 
     public void removeEntry(String id) {
@@ -474,6 +494,7 @@ public class Board {
         private Boolean appliedHideScores;
         private boolean createdObjective;
         private boolean displayedObjective;
+        private long reassertDisplayNanos;
         private int visibleLines;
         private long lastFailureLogMillis;
         private Throwable initializationFailure;
@@ -534,11 +555,13 @@ public class Board {
             }
 
             boolean effectiveHideScores = effectiveHideScoreNumbers(hideScores, BRIDGE.supportsNumberFormats());
+            boolean objectiveRebuilt = false;
             try {
                 if (!createdObjective) {
                     objective = BRIDGE.newObjective(scoreboard, objectiveName, title, effectiveHideScores);
                     BRIDGE.sendObjectivePacket(player, objective, BRIDGE.objectiveMethodAdd);
                     createdObjective = true;
+                    objectiveRebuilt = true;
                     forgetApplied();
                     appliedTitle = title;
                     appliedHideScores = effectiveHideScores;
@@ -546,6 +569,7 @@ public class Board {
                     boolean numberFormatChanged = !Objects.equals(appliedHideScores, effectiveHideScores);
                     objective = BRIDGE.newObjective(scoreboard, objectiveName, title, effectiveHideScores);
                     BRIDGE.sendObjectivePacket(player, objective, BRIDGE.objectiveMethodChange);
+                    objectiveRebuilt = true;
                     appliedTitle = title;
                     appliedHideScores = effectiveHideScores;
                     if (numberFormatChanged) {
@@ -581,9 +605,11 @@ public class Board {
                 }
 
                 visibleLines = size;
-                if (!displayedObjective || ownershipRegistered) {
+                long nowNanos = System.nanoTime();
+                if (shouldSendDisplayObjective(displayedObjective, objectiveRebuilt, nowNanos, reassertDisplayNanos)) {
                     BRIDGE.sendDisplayObjectivePacket(player, objective);
                     displayedObjective = true;
+                    reassertDisplayNanos = nextDisplayObjectiveNanos(nowNanos, ownershipToken);
                 }
                 return true;
             } catch (Throwable throwable) {
