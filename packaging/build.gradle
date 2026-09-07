@@ -35,6 +35,11 @@ dependencies {
     testRuntimeOnly('org.junit.platform:junit-platform-launcher')
 }
 
+int testForkCount = providers.gradleProperty('volmLibTestForks')
+        .map { String forks -> Integer.parseInt(forks) }
+        .getOrElse(Math.max(1, Runtime.runtime.availableProcessors().intdiv(2)))
+
 tasks.named('test') {
     useJUnitPlatform()
+    maxParallelForks = testForkCount
 }

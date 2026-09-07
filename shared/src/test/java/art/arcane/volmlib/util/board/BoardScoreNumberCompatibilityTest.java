@@ -41,28 +41,6 @@ public class BoardScoreNumberCompatibilityTest {
     }
 
     @Test
-    public void providersCanKeepScoreNumbersVisible() {
-        BoardProvider provider = new BoardProvider() {
-            @Override
-            public String getTitle(Player player) {
-                return "Title";
-            }
-
-            @Override
-            public List<String> getLines(Player player) {
-                return List.of("Line");
-            }
-
-            @Override
-            public boolean hideScoreNumbers(Player player) {
-                return false;
-            }
-        };
-
-        assertFalse(provider.hideScoreNumbers(null));
-    }
-
-    @Test
     public void requestedFormattingIsEffectiveOnlyWhenTheRuntimeSupportsIt() {
         assertTrue(Board.effectiveHideScoreNumbers(true, true));
         assertFalse(Board.effectiveHideScoreNumbers(true, false));

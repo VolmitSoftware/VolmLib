@@ -11,8 +11,10 @@ public class HudBidTest {
   @Test
   public void test_encodeDecode_roundTrip_recoversAllFields() {
     HudBid bid = new HudBid(60, 1000L, 2000L, 1500L, "iris:studio-open");
-    HudBid decoded = HudBid.decode(bid.encode());
-    assertEquals(bid, decoded);
+    assertEquals(bid, HudBid.decode(bid.encode()));
+
+    HudBid nestedColons = new HudBid(100, 5L, 6L, 7L, "wormholes:hold:extra");
+    assertEquals(nestedColons, HudBid.decode(nestedColons.encode()));
   }
 
   @Test
@@ -38,9 +40,4 @@ public class HudBidTest {
     assertTrue(bid.isExpired(1501L));
   }
 
-  @Test
-  public void test_encode_purposeWithColons_survivesRoundTrip() {
-    HudBid bid = new HudBid(100, 5L, 6L, 7L, "wormholes:hold:extra");
-    assertEquals(bid, HudBid.decode(bid.encode()));
-  }
 }

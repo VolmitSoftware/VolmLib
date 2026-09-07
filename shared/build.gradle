@@ -97,8 +97,13 @@ tasks.named('check').configure {
     dependsOn(tasks.named('compileCurrentSpigotCompatibility'))
 }
 
+int testForkCount = providers.gradleProperty('volmLibTestForks')
+        .map { String forks -> Integer.parseInt(forks) }
+        .getOrElse(Math.max(1, Runtime.runtime.availableProcessors().intdiv(2)))
+
 tasks.withType(Test).configureEach {
     jvmArgs('-Dnet.bytebuddy.experimental=true')
+    maxParallelForks = testForkCount
 }
 
 dependencies {

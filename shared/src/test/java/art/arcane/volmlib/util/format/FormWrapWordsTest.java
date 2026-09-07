@@ -6,28 +6,20 @@ import static org.junit.Assert.assertEquals;
 
 public class FormWrapWordsTest {
     @Test
-    public void wrapWordsBreaksAtActualSpaceInsteadOfHardCuttingMidWord() {
-        assertEquals("one two\nthree\nfour", Form.wrapWords("one two three four", 9));
-    }
+    public void wrapWordsBreaksOnWordBoundariesAndSoftCutsWhenItCannot() {
+        String[][] cases = {
+                {"one two three four", "9", "one two\nthree\nfour"},
+                {"hello world", "5", "hello\nworld"},
+                {"aaa bbb ccc", "3", "aaa\nbbb\nccc"},
+                {"abcdefghij", "4", "abcd\nefgh\nij"},
+                {"short", "9", "short"}
+        };
 
-    @Test
-    public void wrapWordsBreaksSingleSpacePair() {
-        assertEquals("hello\nworld", Form.wrapWords("hello world", 5));
-    }
-
-    @Test
-    public void wrapWordsBreaksExactWidthWords() {
-        assertEquals("aaa\nbbb\nccc", Form.wrapWords("aaa bbb ccc", 3));
-    }
-
-    @Test
-    public void wrapWordsSoftCutsUnbreakableWord() {
-        assertEquals("abcd\nefgh\nij", Form.wrapWords("abcdefghij", 4));
-    }
-
-    @Test
-    public void wrapWordsLeavesShortStringUntouched() {
-        assertEquals("short", Form.wrapWords("short", 9));
+        for (String[] wrapCase : cases) {
+            String input = wrapCase[0];
+            int width = Integer.parseInt(wrapCase[1]);
+            assertEquals(input + " @ " + width, wrapCase[2], Form.wrapWords(input, width));
+        }
     }
 
     @Test

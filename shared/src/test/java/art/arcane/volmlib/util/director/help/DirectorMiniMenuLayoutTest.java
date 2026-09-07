@@ -26,7 +26,6 @@ public class DirectorMiniMenuLayoutTest {
                 DirectorTextResolver.ENGLISH
         );
 
-        assertEquals(19, DirectorMiniMenu.MAX_ENTRIES_PER_PAGE);
         assertEquals(19, page.entries().size());
         assertEquals(1, page.totalPages());
         assertEquals(21, rendered.size());

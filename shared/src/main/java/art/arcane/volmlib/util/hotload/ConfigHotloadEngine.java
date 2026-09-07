@@ -29,6 +29,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.LongSupplier;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.function.UnaryOperator;
@@ -54,6 +55,7 @@ public class ConfigHotloadEngine {
     private final UnaryOperator<String> normalizer;
     private final long fullWatchScanWindowMs;
     private final long signatureScanWindowMs;
+    private final LongSupplier clock;
 
     private final Object watcherStateLock = new Object();
     private final List<WatchedFile> fileWatchers = new ArrayList<>();
@@ -101,12 +103,31 @@ public class ConfigHotloadEngine {
                                UnaryOperator<String> normalizer,
                                long fullWatchScanWindowMs,
                                long signatureScanWindowMs) {
+        this(
+                managedConfigFilePredicate,
+                knownFilesSupplier,
+                fileReader,
+                normalizer,
+                fullWatchScanWindowMs,
+                signatureScanWindowMs,
+                System::nanoTime
+        );
+    }
+
+    public ConfigHotloadEngine(Predicate<File> managedConfigFilePredicate,
+                               Supplier<? extends Collection<File>> knownFilesSupplier,
+                               Function<File, String> fileReader,
+                               UnaryOperator<String> normalizer,
+                               long fullWatchScanWindowMs,
+                               long signatureScanWindowMs,
+                               LongSupplier clock) {
         this.managedConfigFilePredicate = Objects.requireNonNull(managedConfigFilePredicate, "managedConfigFilePredicate");
         this.knownFilesSupplier = Objects.requireNonNull(knownFilesSupplier, "knownFilesSupplier");
         this.fileReader = Objects.requireNonNull(fileReader, "fileReader");
         this.normalizer = Objects.requireNonNull(normalizer, "normalizer");
         this.fullWatchScanWindowMs = Math.max(100L, fullWatchScanWindowMs);
         this.signatureScanWindowMs = Math.max(100L, signatureScanWindowMs);
+        this.clock = Objects.requireNonNull(clock, "clock");
     }
 
     public void configure(long pollIntervalMs,
@@ -351,7 +372,7 @@ public class ConfigHotloadEngine {
             return Set.of();
         }
 
-        long now = System.nanoTime();
+        long now = clock.getAsLong();
         if (emittedTouchedFiles && now - lastTouchedEmissionNanos < hotloadCooldownNanos) {
             return Set.of();
         }
@@ -376,7 +397,7 @@ public class ConfigHotloadEngine {
 
         Set<StableContentSnapshot> stable = new HashSet<>();
         Map<String, FileState> stillPending = new HashMap<>();
-        long now = System.nanoTime();
+        long now = clock.getAsLong();
         for (Map.Entry<String, File> entry : candidates.entrySet()) {
             String path = entry.getKey();
             File file = entry.getValue();
@@ -425,12 +446,12 @@ public class ConfigHotloadEngine {
 
     private Set<File> scanForMissedChanges() {
         Set<File> changed = new HashSet<>();
-        long startedAt = System.nanoTime();
+        long startedAt = clock.getAsLong();
         long bytes = 0L;
         int files = 0;
         while (signatureReconciliationIndex < signatureReconciliationFiles.size()
                 && files < RECONCILIATION_FILE_BUDGET) {
-            if (files > 0 && System.nanoTime() - startedAt >= RECONCILIATION_TIME_BUDGET_NANOS) {
+            if (files > 0 && clock.getAsLong() - startedAt >= RECONCILIATION_TIME_BUDGET_NANOS) {
                 break;
             }
             File file = signatureReconciliationFiles.get(signatureReconciliationIndex);
@@ -697,11 +718,11 @@ public class ConfigHotloadEngine {
 
         queuedTouchedSnapshots.remove(path);
         pendingStates.put(path, after);
-        pendingSinceNanos.put(path, System.nanoTime());
+        pendingSinceNanos.put(path, clock.getAsLong());
     }
 
     private void recordApplyCompletionLocked() {
-        lastTouchedEmissionNanos = System.nanoTime();
+        lastTouchedEmissionNanos = clock.getAsLong();
         emittedTouchedFiles = true;
     }
 

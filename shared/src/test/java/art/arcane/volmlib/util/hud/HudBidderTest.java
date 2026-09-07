@@ -10,32 +10,21 @@ import static org.junit.Assert.assertSame;
 
 public class HudBidderTest {
   @Test
-  public void test_winner_higherPriorityWins() {
-    HudBidder ambient = new HudBidder("React", new HudBid(10, 100L, 1000L, 1500L, "react:monitor"));
-    HudBidder progress = new HudBidder("Iris", new HudBid(60, 200L, 1000L, 1500L, "iris:studio-open"));
-    assertSame(progress, HudBidder.winner(List.of(ambient, progress), 1000L));
-    assertSame(progress, HudBidder.winner(List.of(progress, ambient), 1000L));
-  }
+  public void test_winner_resolvesEveryTiebreakInOrder() {
+    HudBidder highPriority = new HudBidder("Iris", new HudBid(60, 200L, 1000L, 1500L, "iris:studio-open"));
+    HudBidder lowPriority = new HudBidder("React", new HudBid(10, 100L, 1000L, 1500L, "react:monitor"));
+    HudBidder olderSince = new HudBidder("React", new HudBid(10, 100L, 1000L, 1500L, "react:monitor"));
+    HudBidder newerSince = new HudBidder("Adapt", new HudBid(10, 900L, 1000L, 1500L, "adapt:xp"));
+    HudBidder smallerPlugin = new HudBidder("Adapt", new HudBid(10, 100L, 1000L, 1500L, "adapt:xp"));
+    HudBidder largerPlugin = new HudBidder("React", new HudBid(10, 100L, 1000L, 1500L, "react:monitor"));
+    HudBidder smallerPurpose = new HudBidder("Iris", new HudBid(60, 100L, 1000L, 1500L, "iris:chunk-job"));
+    HudBidder largerPurpose = new HudBidder("Iris", new HudBid(60, 100L, 1000L, 1500L, "iris:job"));
 
-  @Test
-  public void test_winner_earlierSinceWinsAtEqualPriority() {
-    HudBidder older = new HudBidder("React", new HudBid(10, 100L, 1000L, 1500L, "react:monitor"));
-    HudBidder newer = new HudBidder("Adapt", new HudBid(10, 900L, 1000L, 1500L, "adapt:xp"));
-    assertSame(older, HudBidder.winner(List.of(newer, older), 1000L));
-  }
-
-  @Test
-  public void test_winner_smallerPluginNameBreaksTies() {
-    HudBidder adapt = new HudBidder("Adapt", new HudBid(10, 100L, 1000L, 1500L, "adapt:xp"));
-    HudBidder react = new HudBidder("React", new HudBid(10, 100L, 1000L, 1500L, "react:monitor"));
-    assertSame(adapt, HudBidder.winner(List.of(react, adapt), 1000L));
-  }
-
-  @Test
-  public void test_winner_smallerPurposeBreaksFullTies() {
-    HudBidder first = new HudBidder("Iris", new HudBid(60, 100L, 1000L, 1500L, "iris:chunk-job"));
-    HudBidder second = new HudBidder("Iris", new HudBid(60, 100L, 1000L, 1500L, "iris:job"));
-    assertSame(first, HudBidder.winner(List.of(second, first), 1000L));
+    assertSame("priority", highPriority, HudBidder.winner(List.of(lowPriority, highPriority), 1000L));
+    assertSame("priority reversed", highPriority, HudBidder.winner(List.of(highPriority, lowPriority), 1000L));
+    assertSame("since", olderSince, HudBidder.winner(List.of(newerSince, olderSince), 1000L));
+    assertSame("plugin name", smallerPlugin, HudBidder.winner(List.of(largerPlugin, smallerPlugin), 1000L));
+    assertSame("purpose", smallerPurpose, HudBidder.winner(List.of(largerPurpose, smallerPurpose), 1000L));
   }
 
   @Test

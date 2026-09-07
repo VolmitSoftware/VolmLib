@@ -342,11 +342,11 @@ public class ReactiveFolder {
 
     private boolean reconcileContent(boolean allowFullCycle) {
         boolean queued = false;
-        long startedAt = System.nanoTime();
+        long startedAt = clock.getAsLong();
         long bytes = 0L;
         int files = 0;
         while (bytes < RECONCILIATION_BYTE_BUDGET && files < RECONCILIATION_FILE_BUDGET) {
-            if (files > 0 && System.nanoTime() - startedAt >= RECONCILIATION_TIME_BUDGET_NANOS) {
+            if (files > 0 && clock.getAsLong() - startedAt >= RECONCILIATION_TIME_BUDGET_NANOS) {
                 break;
             }
             if (reconciliationDigest == null) {

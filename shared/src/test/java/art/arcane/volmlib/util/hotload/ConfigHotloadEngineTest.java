@@ -18,6 +18,7 @@ import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.Assert.assertEquals;
@@ -25,8 +26,13 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 public class ConfigHotloadEngineTest {
+    private static final int MAX_VIRTUAL_POLLS = 200;
+    private static final long VIRTUAL_POLL_STEP_MILLIS = 25L;
+
     @Rule
     public TemporaryFolder temporaryFolder = new TemporaryFolder();
+
+    private final AtomicLong clock = new AtomicLong();
 
     @Test
     public void idleEventWatcherDoesNotRescanKnownFilesEveryPoll() throws IOException {
@@ -74,7 +80,7 @@ public class ConfigHotloadEngineTest {
             Assume.assumeTrue(engine.isDirectoryEventWatchActive());
             Files.writeString(file.toPath(), "enabled = false\nlimit = 42\n", StandardCharsets.UTF_8);
 
-            Set<File> touched = awaitTouchedFile(engine, file, 5_000L);
+            Set<File> touched = awaitTouchedFile(engine, file);
             assertTrue(touched.contains(file));
 
             AtomicInteger applyCalls = new AtomicInteger();
@@ -162,7 +168,7 @@ public class ConfigHotloadEngineTest {
             File file = new File(directory, "feature.toml");
             Files.writeString(file.toPath(), "enabled = true\n", StandardCharsets.UTF_8);
 
-            Set<File> touched = awaitTouchedFile(engine, file, 5_000L);
+            Set<File> touched = awaitTouchedFile(engine, file);
 
             assertTrue(touched.contains(file));
             assertTrue(engine.isDirectoryEventWatchActive());
@@ -183,7 +189,8 @@ public class ConfigHotloadEngineTest {
                 this::readFile,
                 this::normalize,
                 200L,
-                100L
+                100L,
+                clock::get
         );
 
         try {
@@ -192,7 +199,7 @@ public class ConfigHotloadEngineTest {
             engine.suppressDirectoryEventDelivery(true);
             Files.writeString(file.toPath(), "enabled = false\nlimit = 7\n", StandardCharsets.UTF_8);
 
-            Set<File> touched = awaitTouchedFile(engine, file, 5_000L);
+            Set<File> touched = awaitTouchedFile(engine, file);
             assertTrue(touched.contains(file));
 
             AtomicInteger applyCalls = new AtomicInteger();
@@ -249,14 +256,15 @@ public class ConfigHotloadEngineTest {
                 watched -> readerUnavailable.get() ? null : readFile(watched),
                 this::normalize,
                 100L,
-                100L
+                100L,
+                clock::get
         );
 
         try {
             engine.configure(100L, 100L, List.of(), List.of());
             readerUnavailable.set(true);
             Files.writeString(file.toPath(), "unreadable", StandardCharsets.UTF_8);
-            ConfigHotloadEngine.StableContentSnapshot unreadable = awaitTouchedSnapshot(engine, file, 5_000L);
+            ConfigHotloadEngine.StableContentSnapshot unreadable = awaitTouchedSnapshot(engine, file);
             AtomicInteger applyCalls = new AtomicInteger();
 
             assertFalse(engine.processSnapshotChange(unreadable, snapshot -> {
@@ -284,13 +292,14 @@ public class ConfigHotloadEngineTest {
                 ignored -> null,
                 this::normalize,
                 100L,
-                100L
+                100L,
+                clock::get
         );
 
         try {
             engine.configure(100L, 100L, List.of(), List.of());
             Files.writeString(file.toPath(), "unreadable", StandardCharsets.UTF_8);
-            ConfigHotloadEngine.StableContentSnapshot unreadable = awaitTouchedSnapshot(engine, file, 5_000L);
+            ConfigHotloadEngine.StableContentSnapshot unreadable = awaitTouchedSnapshot(engine, file);
             AtomicInteger applyCalls = new AtomicInteger();
 
             assertFalse(engine.processSnapshotChange(unreadable, snapshot -> {
@@ -320,7 +329,8 @@ public class ConfigHotloadEngineTest {
                 this::readFile,
                 this::normalize,
                 200L,
-                100L
+                100L,
+                clock::get
         );
 
         try {
@@ -329,7 +339,7 @@ public class ConfigHotloadEngineTest {
             Files.writeString(file.toPath(), "value = 2\n", StandardCharsets.UTF_8);
             Files.setLastModifiedTime(file.toPath(), originalModified);
 
-            assertTrue(awaitTouchedFile(engine, file, 5_000L).contains(file));
+            assertTrue(awaitTouchedFile(engine, file).contains(file));
         } finally {
             engine.clear();
         }
@@ -354,7 +364,8 @@ public class ConfigHotloadEngineTest {
                 },
                 this::normalize,
                 200L,
-                100L
+                100L,
+                clock::get
         );
 
         try {
@@ -396,7 +407,7 @@ public class ConfigHotloadEngineTest {
         try {
             engine.configure(100L, 250L, List.of(file), List.of());
             Files.writeString(file.toPath(), "value = 2\n", StandardCharsets.UTF_8);
-            assertTrue(awaitTouchedFile(engine, file, 5_000L).contains(file));
+            assertTrue(awaitTouchedFile(engine, file).contains(file));
 
             assertTrue(engine.processFileChange(file, changedFile -> {
                 try {
@@ -408,7 +419,7 @@ public class ConfigHotloadEngineTest {
             }, null));
 
             assertTrue(engine.pollTouchedFiles().isEmpty());
-            assertTrue(awaitTouchedFile(engine, file, 5_000L).contains(file));
+            assertTrue(awaitTouchedFile(engine, file).contains(file));
             AtomicInteger applies = new AtomicInteger();
             assertTrue(engine.processFileChange(file, changedFile -> {
                 applies.incrementAndGet();
@@ -430,7 +441,7 @@ public class ConfigHotloadEngineTest {
         try {
             engine.configure(100L, 250L, List.of(file), List.of());
             Files.writeString(file.toPath(), "value = 2\n", StandardCharsets.UTF_8);
-            ConfigHotloadEngine.StableContentSnapshot snapshot = awaitTouchedSnapshot(engine, file, 5_000L);
+            ConfigHotloadEngine.StableContentSnapshot snapshot = awaitTouchedSnapshot(engine, file);
             Files.writeString(file.toPath(), "value = 3\n", StandardCharsets.UTF_8);
             AtomicReference<String> appliedContent = new AtomicReference<>();
 
@@ -440,7 +451,7 @@ public class ConfigHotloadEngineTest {
             }, null));
 
             assertEquals("value = 2", appliedContent.get());
-            ConfigHotloadEngine.StableContentSnapshot trailing = awaitTouchedSnapshot(engine, file, 5_000L);
+            ConfigHotloadEngine.StableContentSnapshot trailing = awaitTouchedSnapshot(engine, file);
             assertEquals("value = 3", trailing.normalizedContent());
         } finally {
             engine.clear();
@@ -457,12 +468,12 @@ public class ConfigHotloadEngineTest {
         try {
             engine.configure(100L, 250L, List.of(file), List.of());
             Files.writeString(file.toPath(), "value = 2\n", StandardCharsets.UTF_8);
-            ConfigHotloadEngine.StableContentSnapshot snapshot = awaitTouchedSnapshot(engine, file, 5_000L);
+            ConfigHotloadEngine.StableContentSnapshot snapshot = awaitTouchedSnapshot(engine, file);
 
             assertFalse(engine.processSnapshotChange(snapshot, ignored -> false, null));
             assertTrue(engine.pollTouchedSnapshots().isEmpty());
 
-            ConfigHotloadEngine.StableContentSnapshot retry = awaitTouchedSnapshot(engine, file, 5_000L);
+            ConfigHotloadEngine.StableContentSnapshot retry = awaitTouchedSnapshot(engine, file);
             assertEquals(snapshot.signature(), retry.signature());
             assertEquals(snapshot.normalizedContent(), retry.normalizedContent());
         } finally {
@@ -480,7 +491,7 @@ public class ConfigHotloadEngineTest {
         try {
             engine.configure(100L, 250L, List.of(file), List.of());
             Files.writeString(file.toPath(), "value = 2\n", StandardCharsets.UTF_8);
-            ConfigHotloadEngine.StableContentSnapshot snapshot = awaitTouchedSnapshot(engine, file, 5_000L);
+            ConfigHotloadEngine.StableContentSnapshot snapshot = awaitTouchedSnapshot(engine, file);
 
             try {
                 engine.processSnapshotChange(snapshot, ignored -> {
@@ -491,7 +502,7 @@ public class ConfigHotloadEngineTest {
                 assertEquals("apply failed", expected.getMessage());
             }
 
-            ConfigHotloadEngine.StableContentSnapshot retry = awaitTouchedSnapshot(engine, file, 5_000L);
+            ConfigHotloadEngine.StableContentSnapshot retry = awaitTouchedSnapshot(engine, file);
             assertEquals(snapshot.signature(), retry.signature());
             assertEquals(snapshot.normalizedContent(), retry.normalizedContent());
         } finally {
@@ -509,17 +520,17 @@ public class ConfigHotloadEngineTest {
         try {
             engine.configure(50L, 300L, List.of(file), List.of());
             Files.writeString(file.toPath(), "value = 2\n", StandardCharsets.UTF_8);
-            ConfigHotloadEngine.StableContentSnapshot first = awaitTouchedSnapshot(engine, file, 5_000L);
-            Thread.sleep(250L);
+            ConfigHotloadEngine.StableContentSnapshot first = awaitTouchedSnapshot(engine, file);
+            clock.addAndGet(TimeUnit.MILLISECONDS.toNanos(250L));
             assertTrue(engine.processSnapshotChange(first, ignored -> true, null));
 
             Files.writeString(file.toPath(), "value = 3\n", StandardCharsets.UTF_8);
-            Thread.sleep(100L);
+            clock.addAndGet(TimeUnit.MILLISECONDS.toNanos(100L));
             assertTrue(engine.pollTouchedSnapshots().isEmpty());
-            Thread.sleep(100L);
+            clock.addAndGet(TimeUnit.MILLISECONDS.toNanos(100L));
             assertTrue(engine.pollTouchedSnapshots().isEmpty());
 
-            ConfigHotloadEngine.StableContentSnapshot trailing = awaitTouchedSnapshot(engine, file, 5_000L);
+            ConfigHotloadEngine.StableContentSnapshot trailing = awaitTouchedSnapshot(engine, file);
             assertEquals("value = 3", trailing.normalizedContent());
         } finally {
             engine.clear();
@@ -531,7 +542,10 @@ public class ConfigHotloadEngineTest {
                 file -> file != null && file.getName().endsWith(".toml"),
                 knownFilesSupplier::get,
                 this::readFile,
-                this::normalize
+                this::normalize,
+                ConfigHotloadEngine.DEFAULT_FULL_WATCH_SCAN_WINDOW_MS,
+                ConfigHotloadEngine.DEFAULT_SIGNATURE_SCAN_WINDOW_MS,
+                clock::get
         );
     }
 
@@ -548,35 +562,33 @@ public class ConfigHotloadEngineTest {
         return known;
     }
 
-    private Set<File> awaitTouchedFile(ConfigHotloadEngine engine, File expected, long timeoutMs) throws InterruptedException {
-        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs);
+    private Set<File> awaitTouchedFile(ConfigHotloadEngine engine, File expected) {
         Set<File> touched = Set.of();
-        while (System.nanoTime() < deadline) {
+        for (int poll = 0; poll < MAX_VIRTUAL_POLLS; poll++) {
             touched = engine.pollTouchedFiles();
             if (touched.contains(expected)) {
                 return touched;
             }
-            Thread.sleep(25L);
+            advanceVirtualClock();
         }
         return touched;
     }
 
-    private ConfigHotloadEngine.StableContentSnapshot awaitTouchedSnapshot(
-            ConfigHotloadEngine engine,
-            File expected,
-            long timeoutMs
-    ) throws InterruptedException {
-        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs);
-        while (System.nanoTime() < deadline) {
+    private ConfigHotloadEngine.StableContentSnapshot awaitTouchedSnapshot(ConfigHotloadEngine engine, File expected) {
+        for (int poll = 0; poll < MAX_VIRTUAL_POLLS; poll++) {
             Set<ConfigHotloadEngine.StableContentSnapshot> snapshots = engine.pollTouchedSnapshots();
             for (ConfigHotloadEngine.StableContentSnapshot snapshot : snapshots) {
                 if (snapshot.file().equals(expected.getAbsoluteFile())) {
                     return snapshot;
                 }
             }
-            Thread.sleep(25L);
+            advanceVirtualClock();
         }
         throw new AssertionError("Timed out waiting for stable snapshot of " + expected);
+    }
+
+    private void advanceVirtualClock() {
+        clock.addAndGet(TimeUnit.MILLISECONDS.toNanos(VIRTUAL_POLL_STEP_MILLIS));
     }
 
     private String readFile(File file) {

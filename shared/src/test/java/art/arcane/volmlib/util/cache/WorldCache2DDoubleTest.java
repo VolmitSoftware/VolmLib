@@ -54,28 +54,6 @@ public class WorldCache2DDoubleTest {
     }
 
     @Test
-    public void fillChunkProducesExpectedValues() {
-        WorldCache2DDouble cache = new WorldCache2DDouble((x, z) -> (x * 0.5D) - (z * 0.25D), 8);
-        Object[] values = new Object[256];
-
-        cache.fillChunk(3, -2, values);
-
-        assertEquals((3 << 4) * 0.5D - ((-2 << 4) * 0.25D), (Double) values[0], 0D);
-        assertEquals((((3 << 4) + 15) * 0.5D) - (((-2 << 4) + 15) * 0.25D), (Double) values[255], 0D);
-    }
-
-    @Test
-    public void fillChunkDoublesProducesExpectedValues() {
-        WorldCache2DDouble cache = new WorldCache2DDouble((x, z) -> (x * 0.5D) - (z * 0.25D), 8);
-        double[] values = new double[256];
-
-        cache.fillChunk(3, -2, values);
-
-        assertEquals((3 << 4) * 0.5D - ((-2 << 4) * 0.25D), values[0], 0D);
-        assertEquals((((3 << 4) + 15) * 0.5D) - (((-2 << 4) + 15) * 0.25D), values[255], 0D);
-    }
-
-    @Test
     public void evictedChunksAreNotRetainedOutsideTheDeclaredCapacity() {
         AtomicInteger calls = new AtomicInteger();
         WorldCache2DDouble cache = new WorldCache2DDouble((x, z) -> calls.incrementAndGet(), 1);

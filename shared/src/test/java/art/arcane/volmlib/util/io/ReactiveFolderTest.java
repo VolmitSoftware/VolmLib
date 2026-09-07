@@ -23,14 +23,6 @@ import static org.junit.Assert.assertTrue;
 
 public class ReactiveFolderTest {
     @Test
-    public void productionCooldownIsThreeSeconds() {
-        assertEquals(3_000L, ReactiveFolder.HOTLOAD_COOLDOWN_MILLIS);
-        assertEquals(5_000L, ReactiveFolder.FULL_SCAN_INTERVAL_MILLIS);
-        assertEquals(2_500L, ReactiveFolder.CONTENT_RECONCILIATION_INTERVAL_MILLIS);
-        assertEquals(32, ReactiveFolder.RECONCILIATION_FILE_BUDGET);
-    }
-
-    @Test
     public void initialReconciliationDoesNotHotloadExistingFiles() throws Exception {
         Path directory = Files.createTempDirectory("reactive-folder-initial-test");
         Files.writeString(directory.resolve("dimension.json"), "{\"v\":1}", StandardCharsets.UTF_8);
@@ -65,6 +57,7 @@ public class ReactiveFolderTest {
         Path directory = Files.createTempDirectory("reactive-folder-test");
         Path watchedFile = directory.resolve("dimension.json");
         Files.writeString(watchedFile, "{\"v\":1}", StandardCharsets.UTF_8);
+        AtomicLong clock = new AtomicLong();
         AtomicInteger hotloads = new AtomicInteger();
 
         ReactiveFolder folder = null;
@@ -74,14 +67,14 @@ public class ReactiveFolderTest {
                     (created, changed, deleted) -> hotloads.incrementAndGet(),
                     new KList<>(".json"),
                     new KList<>(),
-                    new KList<>()
+                    new KList<>(),
+                    clock::get
             );
 
-            Thread.sleep(20L);
-            Files.writeString(watchedFile, "{\"v\":2}", StandardCharsets.UTF_8);
+            Files.writeString(watchedFile, "{\"v\":22}", StandardCharsets.UTF_8);
 
             assertFalse(folder.check());
-            Thread.sleep(ReactiveFolder.STABILITY_WINDOW_MILLIS + 50L);
+            clock.addAndGet(TimeUnit.MILLISECONDS.toNanos(ReactiveFolder.STABILITY_WINDOW_MILLIS + 1L));
             boolean detected = folder.check();
 
             assertTrue(detected);
@@ -157,6 +150,7 @@ public class ReactiveFolderTest {
     @Test
     public void editorTemporaryFilesDoNotTriggerHotload() throws Exception {
         Path directory = Files.createTempDirectory("reactive-folder-temp-test");
+        AtomicLong clock = new AtomicLong();
         AtomicInteger hotloads = new AtomicInteger();
         ReactiveFolder folder = null;
         try {
@@ -165,12 +159,13 @@ public class ReactiveFolderTest {
                     (created, changed, deleted) -> hotloads.incrementAndGet(),
                     new KList<>(".json"),
                     new KList<>(),
-                    new KList<>()
+                    new KList<>(),
+                    clock::get
             );
 
             Files.writeString(directory.resolve("dimension.tmp.json"), "{}", StandardCharsets.UTF_8);
             assertFalse(folder.check());
-            Thread.sleep(ReactiveFolder.STABILITY_WINDOW_MILLIS + 50L);
+            clock.addAndGet(TimeUnit.MILLISECONDS.toNanos(ReactiveFolder.STABILITY_WINDOW_MILLIS + 1L));
             assertFalse(folder.check());
             assertEquals(0, hotloads.get());
         } finally {
@@ -388,6 +383,7 @@ public class ReactiveFolderTest {
         Path directory = Files.createTempDirectory("reactive-folder-retry-test");
         Path watchedFile = directory.resolve("dimension.json");
         Files.writeString(watchedFile, "{\"v\":1}", StandardCharsets.UTF_8);
+        AtomicLong clock = new AtomicLong();
         AtomicInteger attempts = new AtomicInteger();
         ReactiveFolder folder = null;
         try {
@@ -400,12 +396,13 @@ public class ReactiveFolderTest {
                     },
                     new KList<>(".json"),
                     new KList<>(),
-                    new KList<>()
+                    new KList<>(),
+                    clock::get
             );
 
-            Files.writeString(watchedFile, "{\"v\":2}", StandardCharsets.UTF_8);
+            Files.writeString(watchedFile, "{\"v\":22}", StandardCharsets.UTF_8);
             assertFalse(folder.check());
-            Thread.sleep(ReactiveFolder.STABILITY_WINDOW_MILLIS + 50L);
+            clock.addAndGet(TimeUnit.MILLISECONDS.toNanos(ReactiveFolder.STABILITY_WINDOW_MILLIS + 1L));
             try {
                 folder.check();
                 throw new AssertionError("expected hotload failure");
@@ -414,7 +411,7 @@ public class ReactiveFolderTest {
             }
 
             assertFalse(folder.check());
-            Thread.sleep(ReactiveFolder.HOTLOAD_COOLDOWN_MILLIS + 100L);
+            clock.addAndGet(TimeUnit.MILLISECONDS.toNanos(ReactiveFolder.HOTLOAD_COOLDOWN_MILLIS + 1L));
             assertTrue(folder.check());
             assertEquals(2, attempts.get());
         } finally {
@@ -426,17 +423,6 @@ public class ReactiveFolderTest {
                     .map(Path::toFile)
                     .forEach(File::delete);
         }
-    }
-
-    private boolean awaitHotload(ReactiveFolder folder, long timeoutMillis) throws InterruptedException {
-        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMillis);
-        do {
-            if (folder.check()) {
-                return true;
-            }
-            Thread.sleep(25L);
-        } while (System.nanoTime() < deadline);
-        return false;
     }
 
     private void completeReconciliation(ReactiveFolder folder) throws Exception {

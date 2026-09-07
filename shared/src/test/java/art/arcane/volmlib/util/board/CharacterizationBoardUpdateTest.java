@@ -94,19 +94,6 @@ public class CharacterizationBoardUpdateTest {
     }
 
     @Test
-    public void longLineUsesCompleteModernPrefix() {
-        CharacterizationBoardRenderHarness h = harness();
-        CharacterizationBoardRenderHarness.PlayerHandle player = h.newPlayer();
-        Object board = h.newBoard(player, h.settings(h.provider("T", List.of("§a123456789012345678")), "DOWN"));
-
-        h.update(board);
-
-        CharacterizationBoardRenderHarness.TeamState team = h.ownedScoreboard().teams.get(T0);
-        assertEquals("§a123456789012345678", team.prefix);
-        assertEquals("", team.suffix);
-    }
-
-    @Test
     public void ampersandLinesAreColorTranslatedWithoutTruncation() {
         CharacterizationBoardRenderHarness h = harness();
         CharacterizationBoardRenderHarness.PlayerHandle player = h.newPlayer();

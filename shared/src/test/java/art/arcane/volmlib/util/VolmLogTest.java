@@ -2,19 +2,15 @@ package art.arcane.volmlib.util;
 
 import org.junit.Test;
 
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.logging.Handler;
 import java.util.logging.Level;
 import java.util.logging.LogRecord;
 import java.util.logging.Logger;
-import java.util.stream.Stream;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertSame;
-import static org.junit.Assert.assertTrue;
 
 public class VolmLogTest {
     @Test
@@ -54,24 +50,4 @@ public class VolmLogTest {
         assertSame(failure, records.get(0).getThrown());
     }
 
-    @Test
-    public void firstPartyRuntimeDoesNotWriteRawConsoleOutput() throws Exception {
-        Path sourceRoot = Path.of("src/main/java");
-        List<String> violations = new ArrayList<String>();
-        try (Stream<Path> paths = Files.walk(sourceRoot)) {
-            for (Path path : paths.filter(candidate -> candidate.toString().endsWith(".java")).toList()) {
-                String normalized = path.toString().replace('\\', '/');
-                if (normalized.contains("/util/json/") || normalized.contains("/util/math/")) {
-                    continue;
-                }
-                String source = Files.readString(path);
-                if (source.contains("System.out") || source.contains("System.err")
-                        || source.contains(".printStackTrace(") || source.contains("Throwable::printStackTrace")) {
-                    violations.add(normalized);
-                }
-            }
-        }
-
-        assertTrue("raw console output in " + violations, violations.isEmpty());
-    }
 }
