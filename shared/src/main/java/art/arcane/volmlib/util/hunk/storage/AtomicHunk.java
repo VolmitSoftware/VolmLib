@@ -4,10 +4,14 @@ import java.util.concurrent.atomic.AtomicReferenceArray;
 
 public class AtomicHunk<T> extends StorageHunk<T> {
     private final AtomicReferenceArray<T> data;
+    private final int xStride;
+    private final int zStride;
 
     public AtomicHunk(int w, int h, int d) {
         super(w, h, d);
         data = new AtomicReferenceArray<>(w * h * d);
+        xStride = w;
+        zStride = w * h;
     }
 
     public AtomicReferenceArray<T> getData() {
@@ -30,6 +34,6 @@ public class AtomicHunk<T> extends StorageHunk<T> {
     }
 
     protected int index(int x, int y, int z) {
-        return (z * getWidth() * getHeight()) + (y * getWidth()) + x;
+        return (z * zStride) + (y * xStride) + x;
     }
 }
