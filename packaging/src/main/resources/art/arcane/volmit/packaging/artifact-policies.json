@@ -282,8 +282,7 @@
       ],
       "shrink_dontwarn": [
         "ca.spottedleaf.**",
-        "art.arcane.volmlib.util.documentation.**",
-        "art.arcane.iris.util.common.plugin.VolmitSender"
+        "art.arcane.volmlib.util.documentation.**"
       ]
     },
     {
