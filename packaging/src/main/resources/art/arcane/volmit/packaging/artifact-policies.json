@@ -35,7 +35,7 @@
     {
       "name": "BileTools",
       "filename": "BileTools-*.jar",
-      "max_bytes": 1101004,
+      "max_bytes": 905000,
       "forbidden_prefixes": [
         "org/bukkit/",
         "io/papermc/",
@@ -100,7 +100,7 @@
     {
       "name": "HiddenOre",
       "filename": "HiddenOre-*.jar",
-      "max_bytes": 838860,
+      "max_bytes": 755000,
       "forbidden_prefixes": [
         "org/bukkit/",
         "io/papermc/",
@@ -163,7 +163,7 @@
     {
       "name": "ShapedPortals",
       "filename": "ShapedPortals-*.jar",
-      "max_bytes": 1153433,
+      "max_bytes": 990000,
       "forbidden_prefixes": [
         "org/bukkit/",
         "io/papermc/",
