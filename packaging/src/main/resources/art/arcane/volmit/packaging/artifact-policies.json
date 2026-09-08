@@ -3,7 +3,7 @@
     {
       "name": "Adapt",
       "filename": "Adapt-*.jar",
-      "max_bytes": 6553600,
+      "max_bytes": 6000000,
       "forbidden_prefixes": [
         "org/bukkit/",
         "io/papermc/",
@@ -28,7 +28,9 @@
         "-keep class art.arcane.adapt.api.value.MaterialValue** { *; }",
         "-keep class art.arcane.adapt.api.item.** { *; }"
       ],
-      "shrink_dontwarn": []
+      "shrink_dontwarn": [
+        "org.sqlite.**"
+      ]
     },
     {
       "name": "BileTools",
@@ -62,7 +64,7 @@
     {
       "name": "Gloss",
       "filename": "Gloss-*.jar",
-      "max_bytes": 2778726,
+      "max_bytes": 2650000,
       "forbidden_prefixes": [
         "org/bukkit/",
         "io/papermc/",
@@ -126,7 +128,7 @@
     {
       "name": "React",
       "filename": "React-*.jar",
-      "max_bytes": 3984588,
+      "max_bytes": 3600000,
       "forbidden_prefixes": [
         "org/bukkit/",
         "io/papermc/",
@@ -194,7 +196,7 @@
     {
       "name": "Wormholes",
       "filename": "Wormholes-*.jar",
-      "max_bytes": 3250585,
+      "max_bytes": 3120000,
       "forbidden_prefixes": [
         "org/bukkit/",
         "io/papermc/",

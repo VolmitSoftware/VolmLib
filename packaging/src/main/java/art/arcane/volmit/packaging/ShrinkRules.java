@@ -49,7 +49,8 @@ public final class ShrinkRules {
             "dalvik.**",
             "org.apache.logging.log4j.**",
             "java.lang.invoke.**",
-            "me.clip.placeholderapi.**");
+            "me.clip.placeholderapi.**",
+            "lombok.**");
     private static final List<String> SHARED_KEEPS = List.of(
             "-keep @interface * { *; }",
             "-keepclassmembers class * { <init>(...); }",
