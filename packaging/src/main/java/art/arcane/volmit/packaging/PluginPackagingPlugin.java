@@ -4,7 +4,11 @@ import org.gradle.api.GradleException;
 import org.gradle.api.Plugin;
 import org.gradle.api.Project;
 import org.gradle.api.Task;
+import org.gradle.api.artifacts.Configuration;
+import org.gradle.api.file.FileCollection;
 import org.gradle.api.plugins.JavaPluginExtension;
+import org.gradle.api.provider.ProviderFactory;
+import org.gradle.api.tasks.PathSensitivity;
 import org.gradle.api.tasks.SourceSet;
 import org.gradle.api.tasks.TaskProvider;
 import org.gradle.api.tasks.bundling.AbstractArchiveTask;
@@ -18,6 +22,9 @@ import java.util.Locale;
 import java.util.Set;
 
 public class PluginPackagingPlugin implements Plugin<Project> {
+    private static final String SHRINK_PROPERTY = "volmitShrink";
+    private static final String SHRINK_VARIABLE = "VOLMIT_SHRINK";
+
     @Override
     public void apply(Project project) {
         PluginPackagingExtension extension = project.getExtensions().create(
@@ -92,12 +99,28 @@ public class PluginPackagingPlugin implements Plugin<Project> {
         if (policy.getMaximumBytes() <= 0) {
             throw new GradleException("A positive jar budget is required for " + policy.getName());
         }
+        if (!policy.isModded() && policy.getMaximumBytes() > PackagingArtifact.SPIGOT_CAP_BYTES) {
+            throw new GradleException("Jar budget for " + policy.getName() + " is " + policy.getMaximumBytes()
+                    + " bytes, above the " + PackagingArtifact.SPIGOT_CAP_BYTES
+                    + " byte Spigot cap; only modded profiles may exceed it");
+        }
+        String skipReason = shrinkSkipReason(project, policy);
         TaskProvider<AbstractArchiveTask> producer = project.getTasks().named(policy.getTaskName(), AbstractArchiveTask.class);
-        File report = project.getLayout().getBuildDirectory().file(
-                "reports/packaging/" + policy.getName() + ".json").get().getAsFile();
+        File reports = project.getLayout().getBuildDirectory().dir("reports/packaging").get().getAsFile();
+        File report = new File(reports, policy.getName() + ".json");
+        File libraryCache = new File(project.getGradle().getGradleUserHomeDir(), "caches/volmit-packaging");
+        File libraryWork = project.getLayout().getBuildDirectory().dir("tmp/packaging/shrink-libraries").get().getAsFile();
+        List<Object> librarySources = new ArrayList<>();
+        Configuration compileClasspath = project.getConfigurations().findByName("compileClasspath");
+        if (compileClasspath != null) {
+            librarySources.add(compileClasspath);
+        }
+        librarySources.add(policy.getShrinkLibraries());
+        FileCollection libraries = project.files(librarySources);
         producer.configure(task -> {
             task.getOutputs().file(report);
             task.getInputs().property("packaging.maximumBytes", policy.getMaximumBytes());
+            task.getInputs().property("packaging.modded", policy.isModded());
             task.getInputs().property("packaging.stripDirectories", policy.isStripDirectories());
             task.getInputs().property("packaging.stripLocalVariables", policy.isStripLocalVariables());
             task.getInputs().property("packaging.releaseCompression", policy.isReleaseCompression());
@@ -105,7 +128,16 @@ public class PluginPackagingPlugin implements Plugin<Project> {
             task.getInputs().property("packaging.keepPrefixes", policy.getKeepPrefixes());
             task.getInputs().property("packaging.requiredEntries", policy.getRequiredEntries());
             task.getInputs().property("packaging.forbiddenPrefixes", policy.getForbiddenPrefixes());
-            task.doLast(ignored -> optimize(task, policy, report));
+            task.getInputs().property("packaging.shrink", skipReason == null ? "on" : skipReason);
+            task.getInputs().property("packaging.shrinkKeep", policy.getShrinkKeep());
+            task.getInputs().property("packaging.shrinkDontwarn", policy.getShrinkDontwarn());
+            task.getInputs().property("packaging.shrinkRelocations", policy.getShrinkRelocations());
+            if (skipReason == null) {
+                task.getInputs().files(policy.getShrinkRules()).withPathSensitivity(PathSensitivity.NONE);
+                task.getInputs().files(libraries).withPathSensitivity(PathSensitivity.NONE);
+                task.dependsOn(libraries);
+            }
+            task.doLast(ignored -> optimize(task, policy, report, skipReason, libraries, libraryCache, libraryWork));
         });
         TaskProvider<Task> check = project.getTasks().register("verify" + capitalize(policy.getName()) + "Packaging", task -> {
             task.setGroup("verification");
@@ -117,10 +149,31 @@ public class PluginPackagingPlugin implements Plugin<Project> {
         producer.configure(task -> task.finalizedBy(check));
     }
 
-    private void optimize(AbstractArchiveTask task, PackagingArtifact policy, File report) {
+    private String shrinkSkipReason(Project project, PackagingArtifact policy) {
+        if (policy.isModded()) {
+            return "modded profile";
+        }
+        ProviderFactory providers = project.getProviders();
+        if ("false".equalsIgnoreCase(providers.gradleProperty(SHRINK_PROPERTY).getOrElse("true"))) {
+            return SHRINK_PROPERTY + "=false";
+        }
+        if ("false".equalsIgnoreCase(providers.environmentVariable(SHRINK_VARIABLE).getOrElse("true"))) {
+            return SHRINK_VARIABLE + "=false";
+        }
+        if (!policy.isShrink()) {
+            return "shrink=false";
+        }
+        return null;
+    }
+
+    private void optimize(AbstractArchiveTask task, PackagingArtifact policy, File report, String skipReason,
+                          FileCollection libraries, File libraryCache, File libraryWork) {
         File artifact = task.getArchiveFile().get().getAsFile();
         long before = artifact.length();
         try {
+            JarShrinker.ShrinkResult shrink = skipReason == null
+                    ? shrink(artifact, policy, report.getParentFile(), libraries, libraryCache, libraryWork)
+                    : JarShrinker.ShrinkResult.skipped(skipReason, before);
             List<String> roots = new ArrayList<>(policy.getKeepPrefixes());
             for (String required : policy.getRequiredEntries()) {
                 if (required.endsWith(".class")) {
@@ -130,12 +183,33 @@ public class PluginPackagingPlugin implements Plugin<Project> {
             Set<String> removed = JarReachability.unusedClasses(artifact, policy.getPrunePrefixes(), roots);
             JarCompactor.compact(artifact, new JarCompactor.CompactionOptions(removed, policy.isStripDirectories(),
                     policy.isStripLocalVariables(), policy.isReleaseCompression()));
-            JarArtifactAudit.write(artifact, policy, report, before, removed);
-            task.getLogger().lifecycle("{}: {} -> {} bytes; {} unused dependency classes removed",
-                    artifact.getName(), before, artifact.length(), removed.size());
+            JarArtifactAudit.write(artifact, policy, report, before, removed, shrink);
+            task.getLogger().lifecycle("{}: {} -> {} bytes; shrink {} ({} classes, {} tolerated warnings); {} unused dependency classes removed",
+                    artifact.getName(), before, artifact.length(), shrink.applied() ? "applied" : shrink.reason(),
+                    shrink.removedClasses(), shrink.toleratedWarnings().size(), removed.size());
         } catch (IOException exception) {
             throw new GradleException("Cannot thin " + artifact, exception);
         }
+    }
+
+    private JarShrinker.ShrinkResult shrink(File artifact, PackagingArtifact policy, File reports,
+                                            FileCollection libraries, File libraryCache, File libraryWork)
+            throws IOException {
+        List<File> resolved = new ArrayList<>();
+        Set<String> bundled = JarShrinker.classEntries(artifact);
+        for (File library : libraries.getFiles()) {
+            if (library.exists() && !JarShrinker.overlaps(library, bundled)) {
+                resolved.add(library);
+            }
+        }
+        List<File> libraryFiles = new ArrayList<>();
+        libraryFiles.add(JdkClassLibrary.export(libraryCache));
+        libraryFiles.addAll(LibraryRelocator.relocate(resolved, policy.getShrinkRelocations(), libraryWork));
+        File output = new File(artifact.getParentFile(), artifact.getName() + ".shrink.jar");
+        List<String> dontwarn = new ArrayList<>(ShrinkRules.SHARED_DONTWARN);
+        dontwarn.addAll(policy.getShrinkDontwarn());
+        return JarShrinker.shrink(new ShrinkRules.ShrinkRequest(artifact, output, policy, libraryFiles, reports,
+                policy.getName()), dontwarn);
     }
 
     private void validate(File artifact, PackagingArtifact policy) {

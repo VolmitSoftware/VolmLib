@@ -16,6 +16,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Random;
+import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -25,12 +27,14 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class PluginPackagingPluginTest {
+    private static final long SPIGOT_CAP = 7_600_000L;
+
     @TempDir
     Path directory;
 
     @Test
     void normalArchiveBuildThinsDependenciesAndKeepsRuntimeMetadata() throws IOException {
-        fixture(1_000_000);
+        fixture(1_000_000, "", false);
         BuildResult result = runner("jar", "stage").build();
         assertEquals(TaskOutcome.SUCCESS, result.task(":verifyDistributionPackaging").getOutcome());
         try (ZipFile jar = new ZipFile(directory.resolve("build/libs/example.jar").toFile())) {
@@ -71,8 +75,8 @@ class PluginPackagingPluginTest {
             assertTrue(metadata.containsAll(List.of("Main.java", "count", "line")), metadata.toString());
             assertFalse(metadata.contains("local"));
         }
-        assertTrue(Files.readString(directory.resolve("build/reports/packaging/distribution.json"))
-                .contains("lib/Unused.class"));
+        assertTrue(Files.readString(directory.resolve("build/reports/packaging/distribution-shrink-usage.txt"))
+                .contains("lib.Unused"));
         BuildResult cached = runner("jar", "verifyPluginJars").build();
         assertEquals(TaskOutcome.UP_TO_DATE, cached.task(":jar").getOutcome());
         assertEquals(TaskOutcome.SUCCESS, cached.task(":verifyDistributionPackaging").getOutcome());
@@ -83,8 +87,81 @@ class PluginPackagingPluginTest {
     }
 
     @Test
+    void shrinkRemovesDeadCodeAndKeepsReflectiveRoots() throws IOException {
+        fixture(1_000_000, "", false);
+        BuildResult result = runner("jar").build();
+        assertEquals(TaskOutcome.SUCCESS, result.task(":jar").getOutcome());
+        try (ZipFile jar = new ZipFile(directory.resolve("build/libs/example.jar").toFile())) {
+            assertNull(jar.getEntry("owned/Unused.class"));
+            assertNotNull(jar.getEntry("owned/Main.class"));
+            assertNotNull(jar.getEntry("lib/Prefixed.class"));
+            assertNotNull(jar.getEntry("owned/ServiceImpl.class"));
+            assertNotNull(jar.getEntry("META-INF/services/owned.Service"));
+            List<String> helperMethods = methods(jar, "owned/Helper.class");
+            assertTrue(helperMethods.contains("used"), helperMethods.toString());
+            assertFalse(helperMethods.contains("unused"), helperMethods.toString());
+            List<String> commandMethods = methods(jar, "owned/Commands.class");
+            assertTrue(commandMethods.contains("run"), commandMethods.toString());
+        }
+        String report = Files.readString(directory.resolve("build/reports/packaging/distribution.json"));
+        assertTrue(report.contains("\"applied\": true"), report);
+        assertTrue(report.contains("\"removedClasses\": 2"), report);
+        Path reports = directory.resolve("build/reports/packaging");
+        assertTrue(Files.exists(reports.resolve("distribution-shrink-seeds.txt")));
+        assertTrue(Files.exists(reports.resolve("distribution-shrink-configuration.txt")));
+        assertTrue(Files.exists(reports.resolve("distribution-shrink-rules.txt")));
+        String usage = Files.readString(reports.resolve("distribution-shrink-usage.txt"));
+        assertTrue(usage.contains("owned.Unused"), usage);
+        assertTrue(usage.contains("unused()"), usage);
+    }
+
+    @Test
+    void shrinkPropertyDisablesThePassAndReportsIt() throws IOException {
+        fixture(1_000_000, "", false);
+        BuildResult result = runner("jar", "-PvolmitShrink=false").build();
+        assertEquals(TaskOutcome.SUCCESS, result.task(":jar").getOutcome());
+        try (ZipFile jar = new ZipFile(directory.resolve("build/libs/example.jar").toFile())) {
+            assertNotNull(jar.getEntry("owned/Unused.class"));
+            assertTrue(methods(jar, "owned/Helper.class").contains("unused"));
+        }
+        String report = Files.readString(directory.resolve("build/reports/packaging/distribution.json"));
+        assertTrue(report.contains("\"applied\": false"), report);
+        assertTrue(report.contains("\"reason\": \"volmitShrink=false\""), report);
+    }
+
+    @Test
+    void moddedProfileSkipsShrinkAndIgnoresTheSpigotCap() throws IOException {
+        fixture(9_000_000, "modded = true", true);
+        BuildResult result = runner("jar", "verifyPluginJars").build();
+        assertEquals(TaskOutcome.SUCCESS, result.task(":verifyDistributionPackaging").getOutcome());
+        assertTrue(directory.resolve("build/libs/example.jar").toFile().length() > SPIGOT_CAP);
+        try (ZipFile jar = new ZipFile(directory.resolve("build/libs/example.jar").toFile())) {
+            assertNotNull(jar.getEntry("owned/Unused.class"));
+        }
+        String report = Files.readString(directory.resolve("build/reports/packaging/distribution.json"));
+        assertTrue(report.contains("\"applied\": false"), report);
+        assertTrue(report.contains("\"reason\": \"modded profile\""), report);
+    }
+
+    @Test
+    void nonModdedBudgetAboveTheSpigotCapFailsConfiguration() throws IOException {
+        fixture(8_000_000, "", false);
+        BuildResult result = runner("jar").buildAndFail();
+        assertTrue(result.getOutput().contains("7600000"), result.getOutput());
+        assertFalse(Files.exists(directory.resolve("build/libs/example.jar")));
+    }
+
+    @Test
+    void finalJarAboveTheSpigotCapFailsTheAudit() throws IOException {
+        fixture(SPIGOT_CAP, "", true);
+        BuildResult result = runner("jar").buildAndFail();
+        assertTrue(result.getOutput().contains("byte budget"), result.getOutput());
+        assertTrue(result.getOutput().contains("7600000"), result.getOutput());
+    }
+
+    @Test
     void releaseCompressionIsAnArchiveInput() throws IOException {
-        fixture(1_000_000);
+        fixture(1_000_000, "", false);
         BuildResult release = runner("jar", "-PcompactRelease=true").build();
         assertEquals(TaskOutcome.SUCCESS, release.task(":jar").getOutcome());
         assertTrue(Files.readString(directory.resolve("build/reports/packaging/distribution.json"))
@@ -99,10 +176,25 @@ class PluginPackagingPluginTest {
 
     @Test
     void sizeFailurePreventsArtifactStaging() throws IOException {
-        fixture(1);
+        fixture(1, "", false);
         BuildResult result = runner("stage").buildAndFail();
         assertTrue(result.getOutput().contains("byte budget"), result.getOutput());
         assertFalse(Files.exists(directory.resolve("build/staged/example.jar")));
+    }
+
+    private List<String> methods(ZipFile jar, String entry) throws IOException {
+        ZipEntry classEntry = jar.getEntry(entry);
+        assertNotNull(classEntry, entry);
+        List<String> names = new ArrayList<>();
+        new ClassReader(jar.getInputStream(classEntry)).accept(new ClassVisitor(Opcodes.ASM9) {
+            @Override
+            public MethodVisitor visitMethod(int access, String name, String descriptor,
+                                             String signature, String[] exceptions) {
+                names.add(name);
+                return null;
+            }
+        }, ClassReader.SKIP_CODE);
+        return names;
     }
 
     private GradleRunner runner(String... tasks) {
@@ -112,7 +204,7 @@ class PluginPackagingPluginTest {
         return GradleRunner.create().withProjectDir(directory.toFile()).withPluginClasspath().withArguments(arguments);
     }
 
-    private void fixture(long maximumBytes) throws IOException {
+    private void fixture(long maximumBytes, String artifactExtras, boolean oversized) throws IOException {
         Files.writeString(directory.resolve("settings.gradle"), "rootProject.name = 'example'\n");
         Files.writeString(directory.resolve("build.gradle"), """
                 plugins {
@@ -125,9 +217,11 @@ class PluginPackagingPluginTest {
                             taskName = 'jar'
                             maximumBytes = %d
                             prunePrefixes = ['lib/']
+                            keepPrefixes = ['lib/Prefixed']
                             stripLocalVariables = true
                             releaseCompression = providers.gradleProperty('compactRelease').map { it.toBoolean() }.getOrElse(false)
                             requiredEntries = ['plugin.yml', 'lib/Kept.class']
+                            %s
                         }
                     }
                 }
@@ -135,14 +229,27 @@ class PluginPackagingPluginTest {
                     from(tasks.named('jar'))
                     into(layout.buildDirectory.dir('staged'))
                 }
-                """.formatted(maximumBytes));
-        source("owned/Main.java", "package owned; public class Main { public int plus(int count) { int result = count + 1; return result; } }");
+                """.formatted(maximumBytes, artifactExtras));
+        source("owned/Main.java", "package owned; public class Main { public int plus(int count) { int result = count + new Helper().used(); return result; } }");
+        source("owned/Helper.java", "package owned; public class Helper { public int used() { return 1; } public String unused() { return \"unused\"; } }");
+        source("owned/Unused.java", "package owned; public class Unused {}");
+        source("owned/Service.java", "package owned; public interface Service { void serve(); }");
+        source("owned/ServiceImpl.java", "package owned; public class ServiceImpl implements Service { public void serve() {} }");
+        source("owned/Commands.java", "package owned; public class Commands { @fixture.director.annotations.Director public void run() {} }");
+        source("fixture/director/annotations/Director.java", "package fixture.director.annotations; import java.lang.annotation.*; @Retention(RetentionPolicy.RUNTIME) @Target({ElementType.METHOD, ElementType.TYPE}) public @interface Director {}");
         source("lib/Kept.java", "package lib; public class Kept {}");
+        source("lib/Prefixed.java", "package lib; public class Prefixed {}");
         source("lib/Unused.java", "package lib; public class Unused {}");
         Path resources = directory.resolve("src/main/resources");
-        Files.createDirectories(resources.resolve("META-INF"));
+        Files.createDirectories(resources.resolve("META-INF/services"));
         Files.writeString(resources.resolve("plugin.yml"), "name: Example\nmain: owned.Main\n");
         Files.writeString(resources.resolve("META-INF/LICENSE"), "License text\n");
+        Files.writeString(resources.resolve("META-INF/services/owned.Service"), "owned.ServiceImpl\n");
+        if (oversized) {
+            byte[] noise = new byte[8_000_000];
+            new Random(7).nextBytes(noise);
+            Files.write(resources.resolve("noise.bin"), noise);
+        }
     }
 
     private void source(String path, String contents) throws IOException {

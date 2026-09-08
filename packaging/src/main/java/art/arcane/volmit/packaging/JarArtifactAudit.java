@@ -23,14 +23,23 @@ public final class JarArtifactAudit {
     private JarArtifactAudit() {
     }
 
-    public static void write(File artifact, PackagingArtifact policy, File report, long before, Set<String> removed)
-            throws IOException {
+    public static void write(File artifact, PackagingArtifact policy, File report, long before, Set<String> removed,
+                             JarShrinker.ShrinkResult shrink) throws IOException {
         Map<String, Object> result = inspect(artifact, policy);
         result.put("beforeBytes", before);
         result.put("savedBytes", before - artifact.length());
         result.put("removedClasses", removed.stream().sorted().toList());
+        Map<String, Object> shrinkReport = new LinkedHashMap<>();
+        shrinkReport.put("applied", shrink.applied());
+        shrinkReport.put("reason", shrink.reason());
+        shrinkReport.put("beforeBytes", shrink.beforeBytes());
+        shrinkReport.put("afterBytes", shrink.afterBytes());
+        shrinkReport.put("savedBytes", shrink.beforeBytes() - shrink.afterBytes());
+        shrinkReport.put("removedClasses", shrink.removedClasses());
+        shrinkReport.put("toleratedWarnings", shrink.toleratedWarnings());
+        result.put("shrink", shrinkReport);
         Files.createDirectories(report.toPath().getParent());
-        Files.writeString(report.toPath(), new GsonBuilder().setPrettyPrinting().create().toJson(result) + "\n",
+        Files.writeString(report.toPath(), new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create().toJson(result) + "\n",
                 StandardCharsets.UTF_8);
         rejectErrors(result);
     }
@@ -41,8 +50,10 @@ public final class JarArtifactAudit {
 
     private static Map<String, Object> inspect(File artifact, PackagingArtifact policy) throws IOException {
         List<String> errors = new ArrayList<>();
-        if (artifact.length() > policy.getMaximumBytes()) {
-            errors.add("Jar exceeds " + policy.getMaximumBytes() + " byte budget: " + artifact.length());
+        long budget = policy.getEffectiveMaximumBytes();
+        if (artifact.length() > budget) {
+            errors.add("Jar exceeds " + budget + " byte budget: " + artifact.length()
+                    + (budget == PackagingArtifact.SPIGOT_CAP_BYTES ? " (Spigot cap)" : ""));
         }
         Set<String> names = new HashSet<>();
         Map<String, Long> packages = new HashMap<>();
@@ -89,6 +100,8 @@ public final class JarArtifactAudit {
         result.put("artifact", artifact.getAbsolutePath());
         result.put("bytes", artifact.length());
         result.put("maximumBytes", policy.getMaximumBytes());
+        result.put("effectiveMaximumBytes", budget);
+        result.put("modded", policy.isModded());
         result.put("stripLocalVariables", policy.isStripLocalVariables());
         result.put("releaseCompression", policy.isReleaseCompression());
         result.put("classCompressedBytes", classes);

@@ -20,7 +20,15 @@
         "slimjar.dat",
         "slimjar-resolutions.dat",
         "io/github/slimjar/app/builder/SpigotApplicationBuilder.class"
-      ]
+      ],
+      "shrink_keep": [
+        "-keep class art.arcane.adapt.service.** { *; }",
+        "-keep class art.arcane.adapt.AdaptConfig** { *; }",
+        "-keep class art.arcane.adapt.api.world.PlayerData** { *; }",
+        "-keep class art.arcane.adapt.api.value.MaterialValue** { *; }",
+        "-keep class art.arcane.adapt.api.item.** { *; }"
+      ],
+      "shrink_dontwarn": []
     },
     {
       "name": "BileTools",
@@ -45,7 +53,11 @@
         "slimjar.dat",
         "slimjar-resolutions.dat",
         "com/volmit/bile/libs/slimjar/app/builder/SpigotApplicationBuilder.class"
-      ]
+      ],
+      "shrink_keep": [
+        "-keep class com.volmit.bile.**Config* { *; }"
+      ],
+      "shrink_dontwarn": []
     },
     {
       "name": "Gloss",
@@ -70,7 +82,18 @@
         "slimjar-resolutions.dat",
         "art/arcane/gloss/libs/slimjar/app/builder/SpigotApplicationBuilder.class",
         "paper-plugin.yml"
-      ]
+      ],
+      "shrink_keep": [
+        "-keep class art.arcane.gloss.api.** { *; }",
+        "-keep class art.arcane.gloss.config.** { *; }",
+        "-keep class art.arcane.gloss.doc.** { *; }",
+        "-keep class art.arcane.gloss.editor.sync.** { *; }",
+        "-keep class art.arcane.gloss.panel.PanelDefinition** { *; }",
+        "-keep class art.arcane.gloss.chat.*TabComplete* { *; }",
+        "-keepclassmembers class art.arcane.gloss.panel.** { <fields>; }",
+        "-keepclassmembers class art.arcane.gloss.importer.** { <fields>; }"
+      ],
+      "shrink_dontwarn": []
     },
     {
       "name": "HiddenOre",
@@ -93,7 +116,12 @@
         "slimjar.dat",
         "slimjar-resolutions.dat",
         "art/arcane/hiddenore/libs/slimjar/app/builder/SpigotApplicationBuilder.class"
-      ]
+      ],
+      "shrink_keep": [
+        "-keep class art.arcane.hiddenore.**Config* { *; }",
+        "-keep class art.arcane.hiddenore.service.HiddenOrePlaceholderExpansion { *; }"
+      ],
+      "shrink_dontwarn": []
     },
     {
       "name": "React",
@@ -115,7 +143,20 @@
         "slimjar.dat",
         "slimjar-resolutions.dat",
         "art/arcane/react/util/arcane/slimjar/app/builder/SpigotApplicationBuilder.class"
-      ]
+      ],
+      "shrink_keep": [
+        "-keep class art.arcane.react.nms.** { *; }",
+        "-keep class art.arcane.react.core.bridge.** { *; }",
+        "-keep class art.arcane.react.core.controller.** { *; }",
+        "-keep class art.arcane.react.content.action.** { *; }",
+        "-keep class art.arcane.react.content.feature.** { *; }",
+        "-keep class art.arcane.react.content.sampler.** { *; }",
+        "-keep class art.arcane.react.content.tweak.** { *; }",
+        "-keep class art.arcane.react.util.project.config.** { *; }",
+        "-keep class art.arcane.react.model.PlayerSettings** { *; }",
+        "-keep class art.arcane.react.util.project.value.MaterialValue** { *; }"
+      ],
+      "shrink_dontwarn": []
     },
     {
       "name": "ShapedPortals",
@@ -141,7 +182,14 @@
         "slimjar.dat",
         "slimjar-resolutions.dat",
         "com/volmit/shapedportals/libs/slimjar/app/builder/SpigotApplicationBuilder.class"
-      ]
+      ],
+      "shrink_keep": [
+        "-keep class com.volmit.shapedportals.metrics.** { *; }",
+        "-keep class com.volmit.shapedportals.portal.PortalStore** { *; }",
+        "-keep class com.volmit.shapedportals.portal.PortalRecord** { *; }",
+        "-keepclassmembers class com.volmit.shapedportals.portal.** { <fields>; }"
+      ],
+      "shrink_dontwarn": []
     },
     {
       "name": "Wormholes",
@@ -167,7 +215,15 @@
         "art/arcane/wormholes/libs/slimjar/app/builder/SpigotApplicationBuilder.class",
         "paper-plugin.yml",
         "art/arcane/wormholes/survival/doors/dimension/WormholesBootstrap.class"
-      ]
+      ],
+      "shrink_keep": [
+        "-keep class art.arcane.wormholes.config.** { *; }",
+        "-keep class art.arcane.wormholes.util.project.config.** { *; }",
+        "-keep class art.arcane.wormholes.door.PaperLivingEntityMoveListener { *; }",
+        "-keepclassmembers class art.arcane.wormholes.portal.** { <fields>; }",
+        "-keepclassmembers class art.arcane.wormholes.door.** { <fields>; }"
+      ],
+      "shrink_dontwarn": []
     },
     {
       "name": "Iris Bukkit",
@@ -202,12 +258,37 @@
         "art/arcane/iris/IrisPluginLoader.class",
         "META-INF/iris/generation-kernels/catalog.tsv",
         "agent.jar"
+      ],
+      "shrink_keep": [
+        "-keep class art.arcane.iris.engine.object.** { *; }",
+        "-keep class art.arcane.iris.core.nms.** { *; }",
+        "-keep class art.arcane.iris.core.link.** { *; }",
+        "-keep class art.arcane.iris.engine.history.** { *; }",
+        "-keep class art.arcane.iris.core.tools.** { *; }",
+        "-keep class art.arcane.iris.core.service.** { *; }",
+        "-keep class art.arcane.iris.core.loader.** { *; }",
+        "-keep class art.arcane.iris.core.IrisSettings** { *; }",
+        "-keep class art.arcane.iris.core.lifecycle.WorldLifecycleStaging { *; }",
+        "-keep class art.arcane.iris.engine.mantle.components.** { *; }",
+        "-keep class art.arcane.iris.engine.platform.PlatformChunkGenerator { *; }",
+        "-keep class art.arcane.iris.util.simd.** { *; }",
+        "-keep class art.arcane.iris.util.project.agent.** { *; }",
+        "-keep class art.arcane.iris.util.common.misc.getHardware { *; }",
+        "-keep class art.arcane.volmlib.util.io.JarScanner { *; }",
+        "-keep class art.arcane.volmlib.util.mantle.io.Lz4IOWorkerCodecSupport { *; }",
+        "-keep class art.arcane.volmlib.util.matter.Matter { *; }"
+      ],
+      "shrink_dontwarn": [
+        "ca.spottedleaf.**",
+        "art.arcane.volmlib.util.documentation.**",
+        "art.arcane.iris.util.common.plugin.VolmitSender"
       ]
     },
     {
       "name": "Iris Fabric",
       "filename": "Iris v* [[]Fabric] *.jar",
       "max_bytes": 12478054,
+      "modded": true,
       "forbidden_prefixes": [
         "org/bukkit/",
         "io/papermc/",
@@ -232,6 +313,7 @@
       "name": "Iris Forge",
       "filename": "Iris v* [[]Forge] *.jar",
       "max_bytes": 11639193,
+      "modded": true,
       "forbidden_prefixes": [
         "org/bukkit/",
         "io/papermc/",
@@ -256,6 +338,7 @@
       "name": "Iris NeoForge",
       "filename": "Iris v* [[]NeoForge] *.jar",
       "max_bytes": 11639193,
+      "modded": true,
       "forbidden_prefixes": [
         "org/bukkit/",
         "io/papermc/",
