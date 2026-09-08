@@ -98,7 +98,7 @@ public final class JarArtifactAudit {
             }
         }
         Map<String, Object> result = new LinkedHashMap<>();
-        result.put("artifact", artifact.getAbsolutePath());
+        result.put("artifact", artifact.getName());
         result.put("bytes", artifact.length());
         result.put("maximumBytes", policy.getMaximumBytes());
         result.put("effectiveMaximumBytes", budget);

@@ -20,6 +20,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
+import java.util.stream.Stream;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
@@ -35,6 +36,9 @@ class PluginPackagingPluginTest {
 
     @TempDir
     Path directory;
+
+    @TempDir
+    Path workspace;
 
     @Test
     void normalArchiveBuildThinsDependenciesAndKeepsRuntimeMetadata() throws IOException {
@@ -234,6 +238,37 @@ class PluginPackagingPluginTest {
         assertFalse(Files.exists(directory.resolve("build/staged/example.jar")));
     }
 
+    @Test
+    void cachedArchiveReportIdentifiesTheArtifactInARelocatedCheckout() throws IOException {
+        fixture(1_000_000, "", false);
+        Path cache = workspace.resolve("build-cache");
+        Files.createDirectories(cache);
+        Files.writeString(directory.resolve("settings.gradle"), """
+                rootProject.name = 'example'
+                buildCache {
+                    local {
+                        directory = new File('%s')
+                    }
+                }
+                """.formatted(cache.toAbsolutePath()));
+        Files.writeString(directory.resolve("build.gradle"), Files.readString(directory.resolve("build.gradle"))
+                + "tasks.named('jar') { outputs.cacheIf { true } }\n");
+        BuildResult origin = runner(directory, "jar", "--build-cache").build();
+        assertEquals(TaskOutcome.SUCCESS, origin.task(":jar").getOutcome());
+        Path checkout = workspace.resolve("checkout");
+        copyCheckout(directory, checkout);
+        BuildResult relocated = runner(checkout, "jar", "--build-cache").build();
+        assertEquals(TaskOutcome.FROM_CACHE, relocated.task(":jar").getOutcome(), relocated.getOutput());
+        Path archive = checkout.resolve("build/libs/example.jar");
+        JsonObject report = JsonParser.parseString(
+                Files.readString(checkout.resolve("build/reports/packaging/distribution.json"))).getAsJsonObject();
+        String artifact = report.get("artifact").getAsString();
+        assertEquals("example.jar", artifact, report.toString());
+        assertTrue(Files.isRegularFile(archive.getParent().resolve(artifact)), report.toString());
+        assertEquals(Files.size(archive), report.get("bytes").getAsLong(), report.toString());
+        assertFalse(report.toString().contains(directory.toAbsolutePath().toString()), report.toString());
+    }
+
     private List<String> methods(ZipFile jar, String entry) throws IOException {
         ZipEntry classEntry = jar.getEntry(entry);
         assertNotNull(classEntry, entry);
@@ -267,10 +302,33 @@ class PluginPackagingPluginTest {
     }
 
     private GradleRunner runner(String... tasks) {
+        return runner(directory, tasks);
+    }
+
+    private GradleRunner runner(Path projectDirectory, String... tasks) {
         List<String> arguments = new ArrayList<>(List.of(tasks));
         arguments.add("--stacktrace");
         arguments.add("--no-configuration-cache");
-        return GradleRunner.create().withProjectDir(directory.toFile()).withPluginClasspath().withArguments(arguments);
+        return GradleRunner.create().withProjectDir(projectDirectory.toFile()).withPluginClasspath()
+                .withArguments(arguments);
+    }
+
+    private void copyCheckout(Path source, Path destination) throws IOException {
+        try (Stream<Path> files = Files.walk(source)) {
+            for (Path file : (Iterable<Path>) files::iterator) {
+                Path relative = source.relativize(file);
+                if (relative.getNameCount() > 0 && List.of("build", ".gradle").contains(relative.getName(0).toString())) {
+                    continue;
+                }
+                Path target = destination.resolve(relative);
+                if (Files.isDirectory(file)) {
+                    Files.createDirectories(target);
+                    continue;
+                }
+                Files.createDirectories(target.getParent());
+                Files.copy(file, target);
+            }
+        }
     }
 
     private void fixture(long maximumBytes, String artifactExtras, boolean oversized) throws IOException {
