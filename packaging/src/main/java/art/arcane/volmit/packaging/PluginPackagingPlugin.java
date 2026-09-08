@@ -6,6 +6,7 @@ import org.gradle.api.Project;
 import org.gradle.api.Task;
 import org.gradle.api.artifacts.Configuration;
 import org.gradle.api.file.FileCollection;
+import org.gradle.api.logging.Logger;
 import org.gradle.api.plugins.JavaPluginExtension;
 import org.gradle.api.provider.ProviderFactory;
 import org.gradle.api.tasks.PathSensitivity;
@@ -49,9 +50,10 @@ public class PluginPackagingPlugin implements Plugin<Project> {
                 });
         project.getTasks().matching(task -> task.getName().equals("check"))
                 .configureEach(task -> task.dependsOn(verify, loggingPolicy));
+        PackagingMode mode = PackagingMode.resolve(project.getProviders());
         project.afterEvaluate(ignored -> {
             for (PackagingArtifact artifact : extension.getArtifacts()) {
-                configureArtifact(project, artifact, verify);
+                configureArtifact(project, artifact, mode, verify);
             }
             configureLoggingPolicy(project, extension.getLoggingPolicy(), loggingPolicy);
         });
@@ -95,7 +97,8 @@ public class PluginPackagingPlugin implements Plugin<Project> {
         return new ArrayList<>(main.getJava().getSrcDirs());
     }
 
-    private void configureArtifact(Project project, PackagingArtifact policy, TaskProvider<Task> verify) {
+    private void configureArtifact(Project project, PackagingArtifact policy, PackagingMode mode,
+                                   TaskProvider<Task> verify) {
         if (policy.getMaximumBytes() <= 0) {
             throw new GradleException("A positive jar budget is required for " + policy.getName());
         }
@@ -104,7 +107,7 @@ public class PluginPackagingPlugin implements Plugin<Project> {
                     + " bytes, above the " + PackagingArtifact.SPIGOT_CAP_BYTES
                     + " byte Spigot cap; only modded profiles may exceed it");
         }
-        String skipReason = shrinkSkipReason(project, policy);
+        String skipReason = shrinkSkipReason(project, policy, mode);
         TaskProvider<AbstractArchiveTask> producer = project.getTasks().named(policy.getTaskName(), AbstractArchiveTask.class);
         File reports = project.getLayout().getBuildDirectory().dir("reports/packaging").get().getAsFile();
         File report = new File(reports, policy.getName() + ".json");
@@ -119,6 +122,7 @@ public class PluginPackagingPlugin implements Plugin<Project> {
         FileCollection libraries = project.files(librarySources);
         producer.configure(task -> {
             task.getOutputs().file(report);
+            task.getInputs().property("packaging.mode", mode.label());
             task.getInputs().property("packaging.maximumBytes", policy.getMaximumBytes());
             task.getInputs().property("packaging.modded", policy.isModded());
             task.getInputs().property("packaging.stripDirectories", policy.isStripDirectories());
@@ -137,21 +141,25 @@ public class PluginPackagingPlugin implements Plugin<Project> {
                 task.getInputs().files(libraries).withPathSensitivity(PathSensitivity.NONE);
                 task.dependsOn(libraries);
             }
-            task.doLast(ignored -> optimize(task, policy, report, skipReason, libraries, libraryCache, libraryWork));
+            task.doLast(ignored -> optimize(task, policy, mode, report, skipReason, libraries, libraryCache, libraryWork));
         });
         TaskProvider<Task> check = project.getTasks().register("verify" + capitalize(policy.getName()) + "Packaging", task -> {
             task.setGroup("verification");
             task.dependsOn(producer);
             task.getInputs().file(producer.flatMap(AbstractArchiveTask::getArchiveFile));
-            task.doLast(ignored -> validate(producer.get().getArchiveFile().get().getAsFile(), policy));
+            task.doLast(verification -> validate(producer.get().getArchiveFile().get().getAsFile(), policy, mode,
+                    verification.getLogger()));
         });
         verify.configure(task -> task.dependsOn(check));
         producer.configure(task -> task.finalizedBy(check));
     }
 
-    private String shrinkSkipReason(Project project, PackagingArtifact policy) {
+    private String shrinkSkipReason(Project project, PackagingArtifact policy, PackagingMode mode) {
         if (policy.isModded()) {
             return "modded profile";
+        }
+        if (mode.development()) {
+            return mode.source();
         }
         ProviderFactory providers = project.getProviders();
         if ("false".equalsIgnoreCase(providers.gradleProperty(SHRINK_PROPERTY).getOrElse("true"))) {
@@ -166,8 +174,8 @@ public class PluginPackagingPlugin implements Plugin<Project> {
         return null;
     }
 
-    private void optimize(AbstractArchiveTask task, PackagingArtifact policy, File report, String skipReason,
-                          FileCollection libraries, File libraryCache, File libraryWork) {
+    private void optimize(AbstractArchiveTask task, PackagingArtifact policy, PackagingMode mode, File report,
+                          String skipReason, FileCollection libraries, File libraryCache, File libraryWork) {
         File artifact = task.getArchiveFile().get().getAsFile();
         long before = artifact.length();
         try {
@@ -183,7 +191,7 @@ public class PluginPackagingPlugin implements Plugin<Project> {
             Set<String> removed = JarReachability.unusedClasses(artifact, policy.getPrunePrefixes(), roots);
             JarCompactor.compact(artifact, new JarCompactor.CompactionOptions(removed, policy.isStripDirectories(),
                     policy.isStripLocalVariables(), policy.isReleaseCompression()));
-            JarArtifactAudit.write(artifact, policy, report, before, removed, shrink);
+            JarArtifactAudit.write(artifact, policy, mode, report, before, removed, shrink);
             task.getLogger().lifecycle("{}: {} -> {} bytes; shrink {} ({} classes, {} tolerated warnings, {} advice classes restored); {} unused dependency classes removed",
                     artifact.getName(), before, artifact.length(), shrink.applied() ? "applied" : shrink.reason(),
                     shrink.removedClasses(), shrink.toleratedWarnings().size(), shrink.restoredClasses().size(),
@@ -213,9 +221,16 @@ public class PluginPackagingPlugin implements Plugin<Project> {
                 policy.getName()), dontwarn);
     }
 
-    private void validate(File artifact, PackagingArtifact policy) {
+    private void validate(File artifact, PackagingArtifact policy, PackagingMode mode, Logger logger) {
         try {
-            JarArtifactAudit.verify(artifact, policy);
+            List<String> warnings = JarArtifactAudit.verify(artifact, policy, mode);
+            if (mode.development()) {
+                logger.lifecycle("{}: DEVELOPMENT packaging via {}. The ProGuard shrink is skipped and the {} byte size budget is advisory. Not a release jar.",
+                        artifact.getName(), mode.source(), policy.getEffectiveMaximumBytes());
+            }
+            for (String warning : warnings) {
+                logger.warn("{}: {}", artifact.getName(), warning);
+            }
         } catch (IOException exception) {
             throw new GradleException("Invalid plugin artifact " + artifact, exception);
         }

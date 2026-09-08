@@ -18,7 +18,9 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Random;
 import java.util.stream.Stream;
 import java.util.zip.ZipEntry;
@@ -216,6 +218,76 @@ class PluginPackagingPluginTest {
     }
 
     @Test
+    void developmentModeKeepsAnOverCapJarAndRecordsTheSizeWarning() throws IOException {
+        fixture(SPIGOT_CAP, "", true);
+        BuildResult result = runner("jar", "verifyPluginJars", "-PvolmitPackaging=dev").build();
+        assertEquals(TaskOutcome.SUCCESS, result.task(":verifyDistributionPackaging").getOutcome());
+        assertTrue(directory.resolve("build/libs/example.jar").toFile().length() > SPIGOT_CAP);
+        try (ZipFile jar = new ZipFile(directory.resolve("build/libs/example.jar").toFile())) {
+            assertNotNull(jar.getEntry("owned/Unused.class"));
+            assertNotNull(jar.getEntry("plugin.yml"));
+        }
+        JsonObject report = report();
+        assertEquals("dev", report.get("mode").getAsString(), report.toString());
+        JsonObject shrink = report.getAsJsonObject("shrink");
+        assertFalse(shrink.get("applied").getAsBoolean(), report.toString());
+        assertEquals("volmitPackaging=dev", shrink.get("reason").getAsString(), report.toString());
+        assertTrue(strings(report, "errors").isEmpty(), report.toString());
+        List<String> warnings = strings(report, "warnings");
+        assertEquals(1, warnings.size(), report.toString());
+        assertTrue(warnings.get(0).contains("byte budget"), report.toString());
+        assertTrue(result.getOutput().contains("DEVELOPMENT packaging via volmitPackaging=dev"), result.getOutput());
+        assertTrue(result.getOutput().contains("Not a release jar."), result.getOutput());
+    }
+
+    @Test
+    void developmentModeEnvironmentVariableSkipsTheShrinkAndTheSizeFailure() throws IOException {
+        fixture(SPIGOT_CAP, "", true);
+        Map<String, String> environment = new HashMap<>(System.getenv());
+        environment.put("VOLMIT_PACKAGING", "dev");
+        BuildResult result = runner("jar").withEnvironment(environment).build();
+        assertEquals(TaskOutcome.SUCCESS, result.task(":jar").getOutcome());
+        JsonObject report = report();
+        assertEquals("dev", report.get("mode").getAsString(), report.toString());
+        assertEquals("VOLMIT_PACKAGING=dev", report.getAsJsonObject("shrink").get("reason").getAsString(), report.toString());
+        assertEquals(1, strings(report, "warnings").size(), report.toString());
+        assertTrue(strings(report, "errors").isEmpty(), report.toString());
+    }
+
+    @Test
+    void developmentModeStillFailsAMissingRequiredEntry() throws IOException {
+        fixture(1_000_000, "requiredEntries = ['plugin.yml', 'missing.yml']", false);
+        BuildResult result = runner("jar", "-PvolmitPackaging=dev").buildAndFail();
+        assertTrue(result.getOutput().contains("Missing required entry: missing.yml"), result.getOutput());
+    }
+
+    @Test
+    void defaultModeFailsTheOverCapJarAndRecordsReleaseMode() throws IOException {
+        fixture(SPIGOT_CAP, "", true);
+        BuildResult result = runner("jar").buildAndFail();
+        assertTrue(result.getOutput().contains("byte budget"), result.getOutput());
+        JsonObject report = report();
+        assertEquals("release", report.get("mode").getAsString(), report.toString());
+        assertTrue(strings(report, "warnings").isEmpty(), report.toString());
+        assertEquals(1, strings(report, "errors").size(), report.toString());
+    }
+
+    @Test
+    void unknownPackagingModeFailsTheBuild() throws IOException {
+        fixture(1_000_000, "", false);
+        BuildResult result = runner("jar", "-PvolmitPackaging=development").buildAndFail();
+        assertTrue(result.getOutput().contains("Unknown packaging mode"), result.getOutput());
+    }
+
+    @Test
+    void developmentModeCannotBeDeclaredByAnArtifactPolicy() throws IOException {
+        fixture(1_000_000, "mode = 'dev'", false);
+        BuildResult result = runner("jar").buildAndFail();
+        assertTrue(result.getOutput().contains("mode"), result.getOutput());
+        assertFalse(Files.exists(directory.resolve("build/libs/example.jar")));
+    }
+
+    @Test
     void releaseCompressionIsAnArchiveInput() throws IOException {
         fixture(1_000_000, "", false);
         BuildResult release = runner("jar", "-PcompactRelease=true").build();
@@ -267,6 +339,19 @@ class PluginPackagingPluginTest {
         assertTrue(Files.isRegularFile(archive.getParent().resolve(artifact)), report.toString());
         assertEquals(Files.size(archive), report.get("bytes").getAsLong(), report.toString());
         assertFalse(report.toString().contains(directory.toAbsolutePath().toString()), report.toString());
+    }
+
+    private JsonObject report() throws IOException {
+        return JsonParser.parseString(
+                Files.readString(directory.resolve("build/reports/packaging/distribution.json"))).getAsJsonObject();
+    }
+
+    private List<String> strings(JsonObject report, String member) {
+        List<String> values = new ArrayList<>();
+        for (JsonElement element : report.getAsJsonArray(member)) {
+            values.add(element.getAsString());
+        }
+        return values;
     }
 
     private List<String> methods(ZipFile jar, String entry) throws IOException {
