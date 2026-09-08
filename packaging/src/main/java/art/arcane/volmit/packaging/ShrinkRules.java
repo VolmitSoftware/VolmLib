@@ -80,7 +80,15 @@ public final class ShrinkRules {
                     + " java.lang.Object writeReplace(); java.lang.Object readResolve(); }",
             "-keepclassmembers class * implements org.bukkit.configuration.serialization.ConfigurationSerializable {"
                     + " public static ** deserialize(java.util.Map); public static ** valueOf(java.util.Map);"
-                    + " <init>(java.util.Map); }");
+                    + " <init>(java.util.Map); }",
+            "-keepclassmembers class * extends org.bukkit.event.Event {"
+                    + " public static org.bukkit.event.HandlerList getHandlerList();"
+                    + " public org.bukkit.event.HandlerList getHandlers(); }",
+            "-keep class **.integration.IntegrationServiceContract { *; }",
+            "-keep class * implements **.integration.IntegrationServiceContract { *; }",
+            "-keep class **.volmlib.integration.** { *; }",
+            "-keep public class art.arcane.**.api.** { public protected *; }",
+            "-keep public class com.volmit.**.api.** { public protected *; }");
 
     private ShrinkRules() {
     }

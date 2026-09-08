@@ -116,6 +116,24 @@ class PluginPackagingPluginTest {
     }
 
     @Test
+    void shrinkKeepsEventHandlersIntegrationContractsAndPublicApi() throws IOException {
+        fixture(1_000_000, "", false);
+        BuildResult result = runner("jar").build();
+        assertEquals(TaskOutcome.SUCCESS, result.task(":jar").getOutcome());
+        try (ZipFile jar = new ZipFile(directory.resolve("build/libs/example.jar").toFile())) {
+            List<String> eventMethods = methods(jar, "owned/CustomEvent.class");
+            assertTrue(eventMethods.contains("getHandlerList"), eventMethods.toString());
+            assertTrue(eventMethods.contains("getHandlers"), eventMethods.toString());
+            assertNotNull(jar.getEntry("fixture/volmlib/integration/IntegrationServiceContract.class"));
+            assertNotNull(jar.getEntry("fixture/volmlib/integration/IntegrationPayload.class"));
+            List<String> bridgeMethods = methods(jar, "owned/IntegrationBridge.class");
+            assertTrue(bridgeMethods.contains("describe"), bridgeMethods.toString());
+            List<String> apiMethods = methods(jar, "art/arcane/example/api/PublicSurface.class");
+            assertTrue(apiMethods.contains("describe"), apiMethods.toString());
+        }
+    }
+
+    @Test
     void shrinkPropertyDisablesThePassAndReportsIt() throws IOException {
         fixture(1_000_000, "", false);
         BuildResult result = runner("jar", "-PvolmitShrink=false").build();
@@ -230,13 +248,20 @@ class PluginPackagingPluginTest {
                     into(layout.buildDirectory.dir('staged'))
                 }
                 """.formatted(maximumBytes, artifactExtras));
-        source("owned/Main.java", "package owned; public class Main { public int plus(int count) { int result = count + new Helper().used(); return result; } }");
+        source("owned/Main.java", "package owned; public class Main { public int plus(int count) { int result = count + new Helper().used(); return result; } public Object fire() { return new CustomEvent(); } }");
         source("owned/Helper.java", "package owned; public class Helper { public int used() { return 1; } public String unused() { return \"unused\"; } }");
         source("owned/Unused.java", "package owned; public class Unused {}");
         source("owned/Service.java", "package owned; public interface Service { void serve(); }");
         source("owned/ServiceImpl.java", "package owned; public class ServiceImpl implements Service { public void serve() {} }");
         source("owned/Commands.java", "package owned; public class Commands { @fixture.director.annotations.Director public void run() {} }");
         source("fixture/director/annotations/Director.java", "package fixture.director.annotations; import java.lang.annotation.*; @Retention(RetentionPolicy.RUNTIME) @Target({ElementType.METHOD, ElementType.TYPE}) public @interface Director {}");
+        source("org/bukkit/event/HandlerList.java", "package org.bukkit.event; public class HandlerList {}");
+        source("org/bukkit/event/Event.java", "package org.bukkit.event; public abstract class Event { public abstract HandlerList getHandlers(); }");
+        source("owned/CustomEvent.java", "package owned; import org.bukkit.event.Event; import org.bukkit.event.HandlerList; public class CustomEvent extends Event { private static final HandlerList HANDLERS = new HandlerList(); public static HandlerList getHandlerList() { return HANDLERS; } public HandlerList getHandlers() { return HANDLERS; } }");
+        source("fixture/volmlib/integration/IntegrationServiceContract.java", "package fixture.volmlib.integration; public interface IntegrationServiceContract { IntegrationPayload describe(); }");
+        source("fixture/volmlib/integration/IntegrationPayload.java", "package fixture.volmlib.integration; public record IntegrationPayload(String label) {}");
+        source("owned/IntegrationBridge.java", "package owned; import fixture.volmlib.integration.IntegrationPayload; import fixture.volmlib.integration.IntegrationServiceContract; public class IntegrationBridge implements IntegrationServiceContract { public IntegrationPayload describe() { return new IntegrationPayload(\"bridge\"); } }");
+        source("art/arcane/example/api/PublicSurface.java", "package art.arcane.example.api; public class PublicSurface { public String describe() { return \"surface\"; } }");
         source("lib/Kept.java", "package lib; public class Kept {}");
         source("lib/Prefixed.java", "package lib; public class Prefixed {}");
         source("lib/Unused.java", "package lib; public class Unused {}");
