@@ -19,6 +19,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Enumeration;
@@ -47,10 +48,11 @@ public final class JarShrinker {
         Files.deleteIfExists(output);
         File rules = request.report("rules");
         Files.createDirectories(rules.toPath().getParent());
-        Files.writeString(rules.toPath(), ShrinkRules.generate(request), StandardCharsets.UTF_8);
+        Set<String> advice = AdviceClasses.scan(artifact);
+        Files.writeString(rules.toPath(), ShrinkRules.generate(request, advice), StandardCharsets.UTF_8);
         List<String> messages = execute(rules);
         List<Warning> warnings = classify(messages, dontwarn);
-        writeWarnings(request.report("warnings"), warnings);
+        writeWarnings(request.report("warnings"), warnings, advice);
         List<String> rejected = new ArrayList<>();
         List<String> tolerated = new ArrayList<>();
         for (Warning warning : warnings) {
@@ -69,14 +71,16 @@ public final class JarShrinker {
         if (!Files.isRegularFile(output)) {
             throw new IOException("ProGuard produced no output for " + artifact.getName());
         }
+        AdviceClasses.restore(artifact, output.toFile(), advice);
+        appendRestored(request.report("usage"), advice);
         int removed = classCount(artifact) - classCount(output.toFile());
         long after = Files.size(output);
         if (after >= before) {
             Files.deleteIfExists(output);
-            return new ShrinkResult(false, "shrunk archive was not smaller", before, before, 0, tolerated);
+            return new ShrinkResult(false, "shrunk archive was not smaller", before, before, 0, tolerated, List.of());
         }
         Files.move(output, artifact.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-        return new ShrinkResult(true, "shrunk", before, after, removed, tolerated);
+        return new ShrinkResult(true, "shrunk", before, after, removed, tolerated, new ArrayList<>(advice));
     }
 
     private static List<String> execute(File rules) throws IOException {
@@ -177,14 +181,28 @@ public final class JarShrinker {
         return Pattern.compile(regex.toString());
     }
 
-    private static void writeWarnings(File report, List<Warning> warnings) throws IOException {
-        List<String> lines = new ArrayList<>(warnings.size());
+    private static void writeWarnings(File report, List<Warning> warnings, Set<String> restored) throws IOException {
+        List<String> lines = new ArrayList<>(warnings.size() + restored.size());
         for (Warning warning : warnings) {
             lines.add((warning.pattern() == null ? "rejected  " : "tolerated ") + warning.message()
                     + (warning.pattern() == null ? "" : " [" + warning.pattern() + "]"));
         }
+        for (String name : restored) {
+            lines.add("restored  " + name + " (original class file kept for advice inlining)");
+        }
         Files.writeString(report.toPath(), String.join("\n", lines) + (lines.isEmpty() ? "" : "\n"),
                 StandardCharsets.UTF_8);
+    }
+
+    private static void appendRestored(File usage, Set<String> restored) throws IOException {
+        if (restored.isEmpty() || !usage.isFile()) {
+            return;
+        }
+        StringBuilder text = new StringBuilder("\nRestored original class files (advice inlining):\n");
+        for (String name : restored) {
+            text.append(name).append('\n');
+        }
+        Files.writeString(usage.toPath(), text, StandardCharsets.UTF_8, StandardOpenOption.APPEND);
     }
 
     public static Set<String> classEntries(File archive) throws IOException {
@@ -230,13 +248,14 @@ public final class JarShrinker {
     }
 
     public record ShrinkResult(boolean applied, String reason, long beforeBytes, long afterBytes,
-                               int removedClasses, List<String> toleratedWarnings) {
+                               int removedClasses, List<String> toleratedWarnings, List<String> restoredClasses) {
         public ShrinkResult {
             toleratedWarnings = List.copyOf(toleratedWarnings);
+            restoredClasses = List.copyOf(restoredClasses);
         }
 
         public static ShrinkResult skipped(String reason, long bytes) {
-            return new ShrinkResult(false, reason, bytes, bytes, 0, List.of());
+            return new ShrinkResult(false, reason, bytes, bytes, 0, List.of(), List.of());
         }
     }
 

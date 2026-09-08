@@ -36,6 +36,7 @@ public final class JarArtifactAudit {
         shrinkReport.put("afterBytes", shrink.afterBytes());
         shrinkReport.put("savedBytes", shrink.beforeBytes() - shrink.afterBytes());
         shrinkReport.put("removedClasses", shrink.removedClasses());
+        shrinkReport.put("restoredClasses", shrink.restoredClasses());
         shrinkReport.put("toleratedWarnings", shrink.toleratedWarnings());
         result.put("shrink", shrinkReport);
         Files.createDirectories(report.toPath().getParent());

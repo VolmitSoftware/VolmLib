@@ -1,5 +1,8 @@
 package art.arcane.volmit.packaging;
 
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import org.gradle.testkit.runner.BuildResult;
 import org.gradle.testkit.runner.GradleRunner;
 import org.gradle.testkit.runner.TaskOutcome;
@@ -20,6 +23,7 @@ import java.util.Random;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -134,6 +138,36 @@ class PluginPackagingPluginTest {
     }
 
     @Test
+    void shrinkRestoresOriginalAdviceClassBytes() throws IOException {
+        fixture(1_000_000, "", false);
+        BuildResult result = runner("jar").build();
+        assertEquals(TaskOutcome.SUCCESS, result.task(":jar").getOutcome());
+        byte[] compiled = Files.readAllBytes(directory.resolve("build/classes/java/main/owned/Hooks$EnterAdvice.class"));
+        List<Integer> compiledFrames = frames(compiled);
+        assertFalse(compiledFrames.isEmpty(), compiledFrames.toString());
+        assertFalse(compiledFrames.contains(Opcodes.F_CHOP), compiledFrames.toString());
+        try (ZipFile jar = new ZipFile(directory.resolve("build/libs/example.jar").toFile())) {
+            ZipEntry entry = jar.getEntry("owned/Hooks$EnterAdvice.class");
+            assertNotNull(entry);
+            byte[] packaged = jar.getInputStream(entry).readAllBytes();
+            List<Integer> packagedFrames = frames(packaged);
+            assertFalse(packagedFrames.contains(Opcodes.F_CHOP), packagedFrames.toString());
+            assertArrayEquals(compiled, packaged);
+            assertNotNull(jar.getEntry("owned/Hooks.class"));
+        }
+        Path reports = directory.resolve("build/reports/packaging");
+        JsonObject report = JsonParser.parseString(Files.readString(reports.resolve("distribution.json"))).getAsJsonObject();
+        List<String> restored = new ArrayList<>();
+        for (JsonElement element : report.getAsJsonObject("shrink").getAsJsonArray("restoredClasses")) {
+            restored.add(element.getAsString());
+        }
+        assertEquals(List.of("owned.Hooks", "owned.Hooks$EnterAdvice"), restored, report.toString());
+        assertTrue(Files.readString(reports.resolve("distribution-shrink-usage.txt")).contains("owned.Hooks$EnterAdvice"));
+        assertTrue(Files.readString(reports.resolve("distribution-shrink-warnings.txt"))
+                .contains("restored  owned.Hooks$EnterAdvice"));
+    }
+
+    @Test
     void shrinkPropertyDisablesThePassAndReportsIt() throws IOException {
         fixture(1_000_000, "", false);
         BuildResult result = runner("jar", "-PvolmitShrink=false").build();
@@ -215,6 +249,23 @@ class PluginPackagingPluginTest {
         return names;
     }
 
+    private List<Integer> frames(byte[] bytes) {
+        List<Integer> types = new ArrayList<>();
+        new ClassReader(bytes).accept(new ClassVisitor(Opcodes.ASM9) {
+            @Override
+            public MethodVisitor visitMethod(int access, String name, String descriptor,
+                                             String signature, String[] exceptions) {
+                return new MethodVisitor(Opcodes.ASM9) {
+                    @Override
+                    public void visitFrame(int type, int numLocal, Object[] local, int numStack, Object[] stack) {
+                        types.add(type);
+                    }
+                };
+            }
+        }, 0);
+        return types;
+    }
+
     private GradleRunner runner(String... tasks) {
         List<String> arguments = new ArrayList<>(List.of(tasks));
         arguments.add("--stacktrace");
@@ -248,7 +299,9 @@ class PluginPackagingPluginTest {
                     into(layout.buildDirectory.dir('staged'))
                 }
                 """.formatted(maximumBytes, artifactExtras));
-        source("owned/Main.java", "package owned; public class Main { public int plus(int count) { int result = count + new Helper().used(); return result; } public Object fire() { return new CustomEvent(); } }");
+        source("owned/Main.java", "package owned; public class Main { public int plus(int count) { int result = count + new Helper().used(); return result; } public Object fire() { return new CustomEvent(); } public boolean hook(int count) { return Hooks.EnterAdvice.enter(this, count); } }");
+        source("owned/Hooks.java", "package owned; public final class Hooks { private Hooks() {} public static final class EnterAdvice { @fixture.bytebuddy.asm.Advice.OnMethodEnter public static boolean enter(Object target, int value) { if (value > 0) { return true; } return false; } } }");
+        source("fixture/bytebuddy/asm/Advice.java", "package fixture.bytebuddy.asm; import java.lang.annotation.*; public final class Advice { private Advice() {} @Retention(RetentionPolicy.RUNTIME) @Target(ElementType.METHOD) public @interface OnMethodEnter {} }");
         source("owned/Helper.java", "package owned; public class Helper { public int used() { return 1; } public String unused() { return \"unused\"; } }");
         source("owned/Unused.java", "package owned; public class Unused {}");
         source("owned/Service.java", "package owned; public interface Service { void serve(); }");

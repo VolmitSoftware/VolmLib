@@ -184,9 +184,10 @@ public class PluginPackagingPlugin implements Plugin<Project> {
             JarCompactor.compact(artifact, new JarCompactor.CompactionOptions(removed, policy.isStripDirectories(),
                     policy.isStripLocalVariables(), policy.isReleaseCompression()));
             JarArtifactAudit.write(artifact, policy, report, before, removed, shrink);
-            task.getLogger().lifecycle("{}: {} -> {} bytes; shrink {} ({} classes, {} tolerated warnings); {} unused dependency classes removed",
+            task.getLogger().lifecycle("{}: {} -> {} bytes; shrink {} ({} classes, {} tolerated warnings, {} advice classes restored); {} unused dependency classes removed",
                     artifact.getName(), before, artifact.length(), shrink.applied() ? "applied" : shrink.reason(),
-                    shrink.removedClasses(), shrink.toleratedWarnings().size(), removed.size());
+                    shrink.removedClasses(), shrink.toleratedWarnings().size(), shrink.restoredClasses().size(),
+                    removed.size());
         } catch (IOException exception) {
             throw new GradleException("Cannot thin " + artifact, exception);
         }

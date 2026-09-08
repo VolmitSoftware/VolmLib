@@ -94,7 +94,7 @@ public final class ShrinkRules {
     private ShrinkRules() {
     }
 
-    public static String generate(ShrinkRequest request) throws IOException {
+    public static String generate(ShrinkRequest request, Set<String> adviceClasses) throws IOException {
         List<String> lines = new ArrayList<>();
         lines.add("-injars " + quote(request.artifact()));
         lines.add("-outjars " + quote(request.output()));
@@ -107,6 +107,9 @@ public final class ShrinkRules {
         lines.add("-printconfiguration " + quote(request.report("configuration")));
         lines.addAll(SHARED_KEEPS);
         lines.addAll(archiveKeeps(request.artifact()));
+        for (String name : adviceClasses) {
+            lines.add(keepAll(name));
+        }
         for (String prefix : request.policy().getKeepPrefixes()) {
             lines.add(keepAll(prefix.replace('/', '.') + "**"));
         }
