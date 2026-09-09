@@ -3,6 +3,13 @@ package art.arcane.volmlib.util.localization;
 import art.arcane.volmlib.util.director.DirectorTextResolver;
 import art.arcane.volmlib.util.director.help.DirectorMiniMenu;
 import art.arcane.volmlib.util.scheduling.FoliaScheduler;
+import net.kyori.adventure.key.Key;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.ComponentIteratorType;
+import net.kyori.adventure.text.event.ClickEvent;
+import net.kyori.adventure.text.format.TextColor;
+import net.kyori.adventure.text.format.TextDecoration;
+import net.kyori.adventure.text.minimessage.MiniMessage;
 import org.bukkit.Bukkit;
 import org.bukkit.Server;
 import org.bukkit.command.CommandSender;
@@ -28,6 +35,7 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
+import java.util.function.Predicate;
 import java.util.logging.Logger;
 import java.util.regex.Pattern;
 
@@ -97,14 +105,16 @@ public class BukkitLanguageSwitcherTest {
         switcher.command(player, new String[]{"self"});
         String rendered = String.join("\n", richMessages());
 
-        assertTrue(rendered.contains("<gradient:#8b0000:#ff4d4d>"));
+        assertTrue(hasColor(0x8B0000));
+        assertTrue(hasColor(0xFF4D4D));
         assertTrue(rendered.contains("/adapt language self"));
-        assertTrue(rendered.contains("<click:run_command:'/adapt language self fr_FR'>"));
+        assertTrue(hasRunCommand("/adapt language self fr_FR"));
         assertTrue(rendered.contains("/adapt language self page=2"));
-        assertTrue(rendered.contains("</strikethrough>"));
+        assertTrue(hasComponent(component -> component.decoration(TextDecoration.STRIKETHROUGH)
+                == TextDecoration.State.TRUE));
         assertFalse(rendered.contains("/adapt language server"));
         assertFalse(rendered.contains("Use server default"));
-        assertTrue(rendered.contains("<font:minecraft:uniform>"));
+        assertTrue(hasComponent(component -> Key.key("minecraft:uniform").equals(component.font())));
         assertTrue(rendered.contains("Command: /adapt language self fr_FR"));
     }
 
@@ -115,9 +125,10 @@ public class BukkitLanguageSwitcherTest {
         switcher.updateTheme(updated);
         switcher.command(player, new String[]{"self"});
 
-        String rendered = String.join("\n", richMessages());
-        assertTrue(rendered.contains("<gradient:#003366:#00BFFF>"));
-        assertFalse(rendered.contains("<gradient:#8b0000:#ff4d4d>"));
+        assertTrue(hasColor(0x003366));
+        assertTrue(hasColor(0x00BFFF));
+        assertFalse(hasColor(0x8B0000));
+        assertFalse(hasColor(0xFF4D4D));
         verify(editors.constructed().get(0)).updateTheme(updated);
     }
 
@@ -347,20 +358,20 @@ public class BukkitLanguageSwitcherTest {
 
         switcher.commandVolmit(player, new String[0]);
         String root = String.join("\n", richMessages());
-        assertTrue(root.contains("<click:run_command:'/volmit plugins'>"));
+        assertTrue(hasRunCommand("/volmit plugins"));
         assertFalse(root.contains("〈 Back"));
 
         clearInvocations(player);
         switcher.commandVolmit(player, new String[]{"plugins"});
-        assertTrue(String.join("\n", richMessages()).contains("<click:run_command:/volmit>"));
+        assertTrue(hasRunCommand("/volmit"));
 
         clearInvocations(player);
         switcher.commandVolmit(player, new String[]{"plugins", "languages"});
-        assertTrue(String.join("\n", richMessages()).contains("<click:run_command:/volmit plugins>"));
+        assertTrue(hasRunCommand("/volmit plugins"));
 
         clearInvocations(player);
         switcher.commandVolmit(player, new String[]{"plugins", "debug"});
-        assertTrue(String.join("\n", richMessages()).contains("<click:run_command:/volmit plugins>"));
+        assertTrue(hasRunCommand("/volmit plugins"));
     }
 
     @Test
@@ -594,6 +605,28 @@ public class BukkitLanguageSwitcherTest {
         when(service.selectPlayer(any(UUID.class), anyString())).thenReturn(new CompletableFuture<>());
         when(service.selectDefault(anyString())).thenReturn(new CompletableFuture<>());
         return service;
+    }
+
+    private boolean hasColor(int rgb) {
+        TextColor expected = TextColor.color(rgb);
+        return hasComponent(component -> expected.equals(component.color()));
+    }
+
+    private boolean hasRunCommand(String command) {
+        ClickEvent expected = ClickEvent.runCommand(command);
+        return hasComponent(component -> expected.equals(component.clickEvent()));
+    }
+
+    private boolean hasComponent(Predicate<Component> predicate) {
+        for (String message : richMessages()) {
+            Component root = MiniMessage.miniMessage().deserialize(message);
+            for (Component component : root.iterable(ComponentIteratorType.DEPTH_FIRST)) {
+                if (predicate.test(component)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private List<String> richMessages() {

@@ -4,6 +4,11 @@ import art.arcane.volmlib.util.director.DirectorTextResolver;
 import art.arcane.volmlib.util.director.help.DirectorMiniMenu;
 import art.arcane.volmlib.util.scheduling.FoliaScheduler;
 import art.arcane.volmlib.util.web.MclogsClient;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.ComponentIteratorType;
+import net.kyori.adventure.text.event.ClickEvent;
+import net.kyori.adventure.text.format.TextColor;
+import net.kyori.adventure.text.minimessage.MiniMessage;
 import org.bukkit.Bukkit;
 import org.bukkit.Server;
 import org.bukkit.command.CommandSender;
@@ -195,10 +200,13 @@ public class BukkitDebugDumpTest {
         Path copiedPath = Path.of(pathAction.group(1));
         assertTrue(copiedPath.isAbsolute());
         assertEquals(files.get(0).getFileName(), copiedPath.getFileName());
-        assertTrue(rendered.contains("<gradient:#003366:#00BFFF>"));
-        assertFalse(rendered.contains("<gradient:#8b0000:#ff4d4d>"));
+        List<Component> components = renderedComponents();
+        assertTrue(hasColor(components, TextColor.color(0x003366)));
+        assertTrue(hasColor(components, TextColor.color(0x00BFFF)));
+        assertFalse(hasColor(components, TextColor.color(0x8B0000)));
+        assertFalse(hasColor(components, TextColor.color(0xFF4D4D)));
         assertTrue(rendered.contains("/shapedportals debug dump"));
-        assertTrue(rendered.contains("<click:run_command:/shapedportals debug>"));
+        assertTrue(hasRunCommand(components, "/shapedportals debug"));
         assertTrue(rendered.contains("〈 Back"));
         verify(clients.constructed().get(0), never()).publish(anyString(), anyString(), anyString());
     }
@@ -468,6 +476,36 @@ public class BukkitDebugDumpTest {
         assertEquals("sentinel", Files.readString(victim));
         Path report = output.resolve("shapedportals-v2.0.0-debugdump-2026-09-03-00-00-00-2.txt");
         assertEquals("Diagnostic report\n", Files.readString(report));
+    }
+
+    private List<Component> renderedComponents() {
+        List<Component> components = new ArrayList<>();
+        for (String message : messages) {
+            for (Component component : MiniMessage.miniMessage().deserialize(message)
+                    .iterable(ComponentIteratorType.DEPTH_FIRST)) {
+                components.add(component);
+            }
+        }
+        return components;
+    }
+
+    private boolean hasColor(List<Component> components, TextColor color) {
+        for (Component component : components) {
+            if (color.equals(component.color())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean hasRunCommand(List<Component> components, String command) {
+        ClickEvent expected = ClickEvent.runCommand(command);
+        for (Component component : components) {
+            if (expected.equals(component.clickEvent())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private List<Path> savedReports() throws IOException {

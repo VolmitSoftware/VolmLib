@@ -322,7 +322,7 @@ class PluginPackagingPluginTest {
                         directory = new File('%s')
                     }
                 }
-                """.formatted(cache.toAbsolutePath()));
+                """.formatted(cache.toAbsolutePath().toString().replace("\\", "\\\\").replace("'", "\\'")));
         Files.writeString(directory.resolve("build.gradle"), Files.readString(directory.resolve("build.gradle"))
                 + "tasks.named('jar') { outputs.cacheIf { true } }\n");
         BuildResult origin = runner(directory, "jar", "--build-cache").build();
