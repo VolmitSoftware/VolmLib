@@ -1,0 +1,37 @@
+import org.gradle.api.publish.maven.MavenPublication
+import org.gradle.api.tasks.compile.JavaCompile
+import org.gradle.jvm.toolchain.JavaLanguageVersion
+
+plugins {
+    id 'java-library'
+    id 'maven-publish'
+}
+
+group = 'com.github.VolmitSoftware.VolmLib'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(25)
+    }
+    withSourcesJar()
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.compilerArgs.add('-parameters')
+    options.encoding = 'UTF-8'
+    options.release.set(17)
+}
+
+dependencies {
+    compileOnly('org.spigotmc:spigot-api:1.20.1-R0.1-SNAPSHOT')
+    testImplementation('junit:junit:4.13.2')
+}
+
+publishing {
+    publications {
+        create('mavenJava', MavenPublication) {
+            artifactId = 'native-bukkit'
+            from(components.java)
+        }
+    }
+}

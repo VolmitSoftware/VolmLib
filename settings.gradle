@@ -2,3 +2,4 @@ rootProject.name = 'VolmLib'
 
 include(':shared')
 include(':packaging')
+include(':native-bukkit')

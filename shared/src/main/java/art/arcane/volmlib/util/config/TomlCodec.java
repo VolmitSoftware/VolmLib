@@ -17,6 +17,9 @@ import java.util.List;
 import java.util.Map;
 
 public final class TomlCodec {
+    private static final char SURROGATE_FIRST = '\uD800';
+    private static final char SURROGATE_LAST = '\uDBFF';
+
     private TomlCodec() {
     }
 
@@ -89,22 +92,26 @@ public final class TomlCodec {
     }
 
     private static Object parseToml(String raw) {
-        Toml toml = new Toml().read(raw == null ? "" : raw);
+        EscapedBackslashProtection protection = protectEscapedBackslashes(raw == null ? "" : raw);
+        Toml toml = new Toml().read(protection.source());
         Map<String, Object> map = toml.toMap();
         if (map == null) {
             return new LinkedHashMap<String, Object>();
         }
-        return normalizeKeys(map);
+        return normalizeKeys(map, protection.marker());
     }
 
-    private static Object normalizeKeys(Object value) {
+    private static Object normalizeKeys(Object value, char escapedBackslashMarker) {
         if (value instanceof Map<?, ?> map) {
             Map<String, Object> out = new LinkedHashMap<>();
             for (Map.Entry<?, ?> entry : map.entrySet()) {
                 if (entry.getKey() == null) {
                     continue;
                 }
-                out.put(normalizeKey(String.valueOf(entry.getKey())), normalizeKeys(entry.getValue()));
+                out.put(
+                        normalizeKey(String.valueOf(entry.getKey()), escapedBackslashMarker),
+                        normalizeKeys(entry.getValue(), escapedBackslashMarker)
+                );
             }
             return out;
         }
@@ -112,23 +119,153 @@ public final class TomlCodec {
         if (value instanceof Collection<?> collection) {
             List<Object> out = new ArrayList<>(collection.size());
             for (Object item : collection) {
-                out.add(normalizeKeys(item));
+                out.add(normalizeKeys(item, escapedBackslashMarker));
             }
             return out;
+        }
+
+        if (value instanceof String string) {
+            return restoreEscapedBackslashes(string, escapedBackslashMarker);
         }
 
         return value;
     }
 
-    private static String normalizeKey(String key) {
+    private static String normalizeKey(String key, char escapedBackslashMarker) {
         if (key.length() < 2) {
-            return key;
+            return restoreEscapedBackslashes(key, escapedBackslashMarker);
         }
 
         if (key.charAt(0) == '"' && key.charAt(key.length() - 1) == '"') {
-            return unescape(key.substring(1, key.length() - 1));
+            return restoreEscapedBackslashes(
+                    unescape(key.substring(1, key.length() - 1)),
+                    escapedBackslashMarker
+            );
         }
-        return key;
+        return restoreEscapedBackslashes(key, escapedBackslashMarker);
+    }
+
+    private static EscapedBackslashProtection protectEscapedBackslashes(String source) {
+        if (!source.contains("\\\\")) {
+            return new EscapedBackslashProtection(source, '\0');
+        }
+        char marker = unusedSurrogate(source);
+        StringBuilder protectedSource = new StringBuilder(source.length());
+        TomlStringState state = TomlStringState.PLAIN;
+        boolean changed = false;
+        for (int index = 0; index < source.length(); ) {
+            char current = source.charAt(index);
+            if (state == TomlStringState.COMMENT) {
+                protectedSource.append(current);
+                index++;
+                if (current == '\n' || current == '\r') {
+                    state = TomlStringState.PLAIN;
+                }
+                continue;
+            }
+            if (state == TomlStringState.LITERAL) {
+                protectedSource.append(current);
+                index++;
+                if (current == '\'') {
+                    state = TomlStringState.PLAIN;
+                }
+                continue;
+            }
+            if (state == TomlStringState.MULTILINE_LITERAL) {
+                int quotes = quoteRun(source, index, '\'');
+                if (quotes >= 3) {
+                    protectedSource.append(source, index, index + quotes);
+                    index += quotes;
+                    state = TomlStringState.PLAIN;
+                } else {
+                    protectedSource.append(current);
+                    index++;
+                }
+                continue;
+            }
+            if (state == TomlStringState.BASIC || state == TomlStringState.MULTILINE_BASIC) {
+                if (current == '\\' && index + 1 < source.length()) {
+                    char next = source.charAt(index + 1);
+                    if (next == '\\') {
+                        protectedSource.append(marker);
+                        changed = true;
+                    } else {
+                        protectedSource.append(current).append(next);
+                    }
+                    index += 2;
+                    continue;
+                }
+                if (current == '"') {
+                    int quotes = quoteRun(source, index, '"');
+                    protectedSource.append(source, index, index + quotes);
+                    index += quotes;
+                    if (state == TomlStringState.BASIC || quotes >= 3) {
+                        state = TomlStringState.PLAIN;
+                    }
+                    continue;
+                }
+                protectedSource.append(current);
+                index++;
+                continue;
+            }
+            if (current == '#') {
+                protectedSource.append(current);
+                index++;
+                state = TomlStringState.COMMENT;
+                continue;
+            }
+            if (startsWith(source, index, "\"\"\"")) {
+                protectedSource.append("\"\"\"");
+                index += 3;
+                state = TomlStringState.MULTILINE_BASIC;
+                continue;
+            }
+            if (startsWith(source, index, "'''")) {
+                protectedSource.append("'''");
+                index += 3;
+                state = TomlStringState.MULTILINE_LITERAL;
+                continue;
+            }
+            protectedSource.append(current);
+            index++;
+            if (current == '"') {
+                state = TomlStringState.BASIC;
+            } else if (current == '\'') {
+                state = TomlStringState.LITERAL;
+            }
+        }
+        if (!changed) {
+            return new EscapedBackslashProtection(source, '\0');
+        }
+        return new EscapedBackslashProtection(protectedSource.toString(), marker);
+    }
+
+    private static char unusedSurrogate(String source) {
+        for (char marker = SURROGATE_FIRST; marker <= SURROGATE_LAST; marker++) {
+            if (source.indexOf(marker) < 0) {
+                return marker;
+            }
+        }
+        throw new IllegalArgumentException("TOML source exhausts the surrogate markers required for safe parsing");
+    }
+
+    private static int quoteRun(String source, int index, char quote) {
+        int end = index;
+        while (end < source.length() && source.charAt(end) == quote) {
+            end++;
+        }
+        return end - index;
+    }
+
+    private static boolean startsWith(String source, int index, String expected) {
+        return index + expected.length() <= source.length() && source.startsWith(expected, index);
+    }
+
+    private static String restoreEscapedBackslashes(String value, char marker) {
+        if (marker == '\0' || value.indexOf(marker) < 0) {
+            return value;
+        }
+        return value.replace(marker, '\\');
     }
 
     private static String unescape(String input) {
@@ -315,6 +452,18 @@ public final class TomlCodec {
         return normalized;
     }
 
+    private record EscapedBackslashProtection(String source, char marker) {
+    }
+
+    private enum TomlStringState {
+        PLAIN,
+        COMMENT,
+        BASIC,
+        MULTILINE_BASIC,
+        LITERAL,
+        MULTILINE_LITERAL
+    }
+
     private static final class ReflectiveTomlWriter {
         private final StringBuilder out = new StringBuilder();
         private final String sourceTag;
@@ -377,6 +526,10 @@ public final class TomlCodec {
                 }
 
                 String childPath = joinPath(path, field.getName());
+                if (value instanceof Collection<?> || value.getClass().isArray()) {
+                    writeArraySections(childPath, value);
+                    continue;
+                }
                 if (value instanceof Map<?, ?> map) {
                     writeMapSection(childPath, map, field);
                     continue;
@@ -422,7 +575,9 @@ public final class TomlCodec {
                 }
 
                 String childPath = joinPath(sectionPath, String.valueOf(entry.getKey()));
-                if (value instanceof Map<?, ?> nested) {
+                if (value instanceof Collection<?> || value.getClass().isArray()) {
+                    writeArraySections(childPath, value);
+                } else if (value instanceof Map<?, ?> nested) {
                     writeSectionHeader(childPath, List.of());
                     writeMapBody(childPath, nested);
                 } else {
@@ -451,7 +606,9 @@ public final class TomlCodec {
             for (Map.Entry<?, ?> entry : deferred) {
                 String childPath = joinPath(sectionPath, String.valueOf(entry.getKey()));
                 Object value = entry.getValue();
-                if (value instanceof Map<?, ?> nested) {
+                if (value instanceof Collection<?> || value.getClass().isArray()) {
+                    writeArraySections(childPath, value);
+                } else if (value instanceof Map<?, ?> nested) {
                     writeSectionHeader(childPath, List.of());
                     writeMapBody(childPath, nested);
                 } else {
@@ -468,6 +625,30 @@ public final class TomlCodec {
                     continue;
                 }
                 out.append("# ").append(comment.strip()).append('\n');
+            }
+        }
+
+        private void writeArraySections(String path, Object values) {
+            if (values instanceof Collection<?> collection) {
+                for (Object entry : collection) {
+                    writeArrayEntry(path, entry);
+                }
+                return;
+            }
+            for (int index = 0; index < Array.getLength(values); index++) {
+                writeArrayEntry(path, Array.get(values, index));
+            }
+        }
+
+        private void writeArrayEntry(String path, Object value) {
+            if (value == null || isInlineValue(value) || value instanceof Collection<?> || value.getClass().isArray()) {
+                throw new IllegalArgumentException("TOML table arrays must contain only objects: " + path);
+            }
+            out.append('\n').append("[[").append(renderPath(path)).append("]]\n");
+            if (value instanceof Map<?, ?> map) {
+                writeMapBody(path, map);
+            } else {
+                writePojoSection(path, value);
             }
         }
 
@@ -501,8 +682,9 @@ public final class TomlCodec {
                 writeMapSection(List.of(), map);
                 return normalize(out.toString());
             }
-
-            out.append("value = ").append(formatInlineValue(root)).append('\n');
+            Map<String, Object> wrapped = new LinkedHashMap<>();
+            wrapped.put("value", root);
+            writeMapSection(List.of(), wrapped);
             return normalize(out.toString());
         }
 
@@ -512,6 +694,10 @@ public final class TomlCodec {
                 writeSectionHeader(path);
             }
 
+            writeMapBody(path, map);
+        }
+
+        private void writeMapBody(List<String> path, Map<?, ?> map) {
             List<Map.Entry<?, ?>> deferred = new ArrayList<>();
             for (Map.Entry<?, ?> entry : map.entrySet()) {
                 if (entry == null || entry.getKey() == null || entry.getValue() == null) {
@@ -536,11 +722,26 @@ public final class TomlCodec {
                 Object value = entry.getValue();
                 if (value instanceof Map<?, ?> nested) {
                     writeMapSection(childPath, nested);
+                } else if (value instanceof Collection<?> collection) {
+                    writeArraySections(childPath, collection);
                 } else {
-                    Map<String, Object> wrapper = new LinkedHashMap<>();
-                    wrapper.put("value", value);
-                    writeMapSection(childPath, wrapper);
+                    throw new IllegalArgumentException("Unsupported TOML table value: " + childPath);
                 }
+            }
+        }
+
+        private void writeArraySections(List<String> path, Collection<?> values) {
+            for (Object value : values) {
+                if (!(value instanceof Map<?, ?> map)) {
+                    throw new IllegalArgumentException("TOML table arrays must contain only objects: " + path);
+                }
+                if (!out.isEmpty()) {
+                    out.append('\n');
+                }
+                out.append('[');
+                appendSectionPath(path);
+                out.append("]\n");
+                writeMapBody(path, map);
             }
         }
 
@@ -559,6 +760,11 @@ public final class TomlCodec {
                 out.append('\n');
             }
 
+            appendSectionPath(path);
+            out.append('\n');
+        }
+
+        private void appendSectionPath(List<String> path) {
             out.append('[');
             for (int index = 0; index < path.size(); index++) {
                 if (index > 0) {
@@ -566,7 +772,7 @@ public final class TomlCodec {
                 }
                 out.append(formatKey(path.get(index)));
             }
-            out.append(']').append('\n');
+            out.append(']');
         }
     }
 }

@@ -23,6 +23,16 @@ public class TomlLanguageParserTest {
     }
 
     @Test
+    public void preservesEscapedBackslashBeforeEscapeLetters() throws Exception {
+        String source = "[editor]\nguidance = \"Type \\\\n for a new line and \\\\t for a tab token.\"\n";
+
+        assertEquals(
+                "Type \\n for a new line and \\t for a tab token.",
+                TomlLanguageParser.parseText(source).get("editor.guidance")
+        );
+    }
+
+    @Test
     public void rejectsNonTextValues() {
         IOException failure = assertThrows(IOException.class,
                 () -> TomlLanguageParser.parseText("[runtime]\nprefix = 42\n"));

@@ -123,6 +123,33 @@ public class IntegrationMetricSchemaTest {
     }
 
     @Test
+    public void exposesFoundationRuntimeSchema() {
+        Set<String> keys = IntegrationMetricSchema.foundationKeys();
+
+        assertEquals(10, keys.size());
+        assertTrue(IntegrationMetricSchema.allKeys().containsAll(keys));
+        for (String key : keys) {
+            IntegrationMetricDescriptor descriptor = IntegrationMetricSchema.descriptor(key);
+            assertTrue(key.startsWith("foundation."));
+            assertEquals("foundation", descriptor.tags().get("plugin"));
+        }
+
+        IntegrationMetricDescriptor failures = IntegrationMetricSchema.descriptor(
+                IntegrationMetricSchema.FOUNDATION_PROFILE_SAVE_FAILURES_TOTAL
+        );
+        assertEquals(IntegrationMetricType.LONG, failures.type());
+        assertEquals("failures", failures.unit());
+        assertEquals("persistence", failures.tags().get("domain"));
+
+        IntegrationMetricDescriptor entries = IntegrationMetricSchema.descriptor(
+                IntegrationMetricSchema.FOUNDATION_WORTH_ENTRIES
+        );
+        assertEquals(IntegrationMetricType.INTEGER, entries.type());
+        assertEquals("items", entries.unit());
+        assertEquals("economy", entries.tags().get("domain"));
+    }
+
+    @Test
     public void metricGroupsAreImmutableAndRejectDescriptorMismatches() {
         long now = System.currentTimeMillis();
         String key = IntegrationMetricSchema.IRIS_LOADED_CHUNKS;

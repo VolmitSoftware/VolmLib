@@ -1,25 +1,15 @@
 package art.arcane.volmlib.util.localization;
 
 import java.io.IOException;
-import java.io.Reader;
-import java.nio.ByteBuffer;
-import java.nio.channels.FileChannel;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.LinkOption;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
-import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.Properties;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CancellationException;
@@ -39,7 +29,6 @@ import java.util.regex.Pattern;
 public final class PluginLanguageService implements AutoCloseable {
     private static final Pattern LOCALE_PATTERN = Pattern.compile("[A-Za-z0-9_-]{2,32}");
     private static final long RETRY_NANOS = TimeUnit.SECONDS.toNanos(30L);
-    private static final long MAXIMUM_PREFERENCE_BYTES = 2L * 1024L * 1024L;
 
     private final Options options;
     private final ExecutorService worker;
@@ -188,10 +177,10 @@ public final class PluginLanguageService implements AutoCloseable {
 
     @Override
     public void close() {
+        closed = true;
+        generation.incrementAndGet();
+        worker.shutdownNow();
         synchronized (commitLock) {
-            closed = true;
-            generation.incrementAndGet();
-            worker.shutdownNow();
             for (CompletableFuture<?> future : pending) {
                 future.completeExceptionally(new IllegalStateException("Language service is closed"));
             }
@@ -378,71 +367,39 @@ public final class PluginLanguageService implements AutoCloseable {
     }
 
     private void readPreferences() {
-        Path file = options.preferencesFile();
-        if (!Files.exists(file, LinkOption.NOFOLLOW_LINKS)) {
-            return;
-        }
         try {
-            requireRegularPreferences(file);
-            Properties data = new Properties();
-            try (Reader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
-                data.load(reader);
-            }
+            Map<UUID, String> stored = Objects.requireNonNull(
+                    options.preferenceStore().load(),
+                    "Language preference store result"
+            );
             Map<UUID, String> loaded = new HashMap<>();
-            for (String key : data.stringPropertyNames()) {
-                loaded.put(UUID.fromString(key), requireLocale(data.getProperty(key)));
+            for (Map.Entry<UUID, String> entry : stored.entrySet()) {
+                loaded.put(Objects.requireNonNull(entry.getKey(), "Language preference player"),
+                        requireLocale(entry.getValue()));
             }
             preferences.putAll(loaded);
         } catch (IOException | IllegalArgumentException exception) {
-            options.logger().log(Level.SEVERE, "Unable to load language preferences from " + file, exception);
+            options.logger().log(Level.SEVERE,
+                    "Unable to load language preferences from " + options.preferenceStore().description(), exception);
+        }
+    }
+
+    public <T> T commitUpdate(CommitUpdate<T> update) throws IOException {
+        Objects.requireNonNull(update, "update");
+        synchronized (commitLock) {
+            requireOpen();
+            return update.apply();
         }
     }
 
     private void writePreferences(Map<UUID, String> next) throws IOException {
         requireOpen();
-        Path file = options.preferencesFile().toAbsolutePath().normalize();
-        if (Files.exists(file, LinkOption.NOFOLLOW_LINKS)) {
-            requireRegularPreferences(file);
-        }
-        Path directory = file.getParent();
-        if (Files.isSymbolicLink(directory)) {
-            throw new IOException("Language preferences directory is not a regular directory: " + directory);
-        }
-        Files.createDirectories(directory);
-        ArrayList<Map.Entry<UUID, String>> entries = new ArrayList<>(next.entrySet());
-        entries.sort(Comparator.comparing(entry -> entry.getKey().toString()));
-        StringBuilder content = new StringBuilder();
-        for (Map.Entry<UUID, String> entry : entries) {
-            content.append(entry.getKey()).append('=').append(entry.getValue()).append('\n');
-        }
-        byte[] bytes = content.toString().getBytes(StandardCharsets.UTF_8);
-        if (bytes.length > MAXIMUM_PREFERENCE_BYTES) {
-            throw new IOException("Language preferences exceed " + MAXIMUM_PREFERENCE_BYTES + " bytes");
-        }
-        Path temporary = Files.createTempFile(directory, ".language-preferences-", ".tmp");
-        try {
-            try (FileChannel output = FileChannel.open(temporary, StandardOpenOption.WRITE)) {
-                ByteBuffer buffer = ByteBuffer.wrap(bytes);
-                while (buffer.hasRemaining()) {
-                    output.write(buffer);
-                }
-                output.force(true);
-            }
-            requireOpen();
-            Files.move(temporary, file, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-        } finally {
-            Files.deleteIfExists(temporary);
-        }
-    }
-
-    private static void requireRegularPreferences(Path file) throws IOException {
-        if (!Files.isRegularFile(file) || Files.isSymbolicLink(file) || Files.size(file) > MAXIMUM_PREFERENCE_BYTES) {
-            throw new IOException("Invalid language preferences file: " + file);
-        }
+        options.preferenceStore().save(Map.copyOf(next));
+        requireOpen();
     }
 
     public record Options(
-            Path preferencesFile,
+            LanguagePreferenceStore preferenceStore,
             Supplier<? extends Collection<String>> availableLocales,
             Supplier<String> defaultLocale,
             Supplier<LocalizationSnapshot> defaultSnapshot,
@@ -450,8 +407,19 @@ public final class PluginLanguageService implements AutoCloseable {
             DefaultSelection defaultSelection,
             Logger logger
     ) {
+        public Options(Path preferencesFile,
+                       Supplier<? extends Collection<String>> availableLocales,
+                       Supplier<String> defaultLocale,
+                       Supplier<LocalizationSnapshot> defaultSnapshot,
+                       SnapshotLoader loader,
+                       DefaultSelection defaultSelection,
+                       Logger logger) {
+            this(new PropertiesLanguagePreferenceStore(preferencesFile), availableLocales, defaultLocale,
+                    defaultSnapshot, loader, defaultSelection, logger);
+        }
+
         public Options {
-            Objects.requireNonNull(preferencesFile, "preferencesFile");
+            Objects.requireNonNull(preferenceStore, "preferenceStore");
             Objects.requireNonNull(availableLocales, "availableLocales");
             Objects.requireNonNull(defaultLocale, "defaultLocale");
             Objects.requireNonNull(defaultSnapshot, "defaultSnapshot");
@@ -464,6 +432,11 @@ public final class PluginLanguageService implements AutoCloseable {
     @FunctionalInterface
     public interface SnapshotLoader {
         LocalizationSnapshot load(String locale) throws Exception;
+    }
+
+    @FunctionalInterface
+    public interface CommitUpdate<T> {
+        T apply() throws IOException;
     }
 
     @FunctionalInterface

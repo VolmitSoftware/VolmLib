@@ -17,6 +17,10 @@ import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.util.HexFormat;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -300,6 +304,102 @@ public class RemoteLanguageCatalogTest {
                     temporaryFolder.newFolder("invalid-cache").toPath(),
                     loader
             ));
+        }
+    }
+
+    @Test
+    public void closingRejectsABlockingCacheDownloadAfterValidation() throws Exception {
+        assertCloseRejectsPublication(false, false);
+    }
+
+    @Test
+    public void closingRejectsABlockingDirectInstallAfterValidation() throws Exception {
+        assertCloseRejectsPublication(true, false);
+    }
+
+    @Test
+    public void closingRejectsAnAsynchronousCacheDownloadAfterValidation() throws Exception {
+        assertCloseRejectsPublication(false, true);
+    }
+
+    @Test
+    public void closingRejectsAnAsynchronousDirectInstallAfterValidation() throws Exception {
+        assertCloseRejectsPublication(true, true);
+    }
+
+    private void assertCloseRejectsPublication(boolean directInstall, boolean asynchronous) throws Exception {
+        byte[] content = "downloaded language".getBytes(StandardCharsets.UTF_8);
+        byte[] previous = "previous cache".getBytes(StandardCharsets.UTF_8);
+        HttpServer server = server(content);
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch released = new CountDownLatch(1);
+        ExecutorService workers = Executors.newFixedThreadPool(2);
+        AtomicReference<Thread> validationThread = new AtomicReference<>();
+        AtomicInteger callbacks = new AtomicInteger();
+        try (URLClassLoader resources = resources(hash(content));
+             RemoteLanguageCatalog catalog = catalog(server, resources)) {
+            Path target = directInstall
+                    ? temporaryFolder.newFolder("closing-install").toPath().resolve("fr_FR.toml")
+                    : catalog.cacheFile("fr_FR");
+            if (!directInstall) {
+                Files.createDirectories(target.getParent());
+                Files.write(target, previous);
+            }
+            RemoteLanguageCatalog.ContentValidator validator = (locale, raw) -> {
+                validationThread.set(Thread.currentThread());
+                entered.countDown();
+                awaitRelease(released);
+            };
+            Future<String> blocking = null;
+            if (asynchronous) {
+                RemoteLanguageCatalog.RequestState state = directInstall
+                        ? catalog.requestInstallIfMissing("fr_FR", target, validator, result -> callbacks.incrementAndGet())
+                        : catalog.request("fr_FR", validator, result -> callbacks.incrementAndGet());
+                assertEquals(RemoteLanguageCatalog.RequestState.SCHEDULED, state);
+            } else {
+                blocking = workers.submit(() -> directInstall
+                        ? catalog.readOrInstall("fr_FR", target, validator)
+                        : catalog.readOrDownload("fr_FR", validator));
+            }
+            assertTrue(entered.await(2L, TimeUnit.SECONDS));
+            Future<?> closed = workers.submit(catalog::close);
+            closed.get(1L, TimeUnit.SECONDS);
+            released.countDown();
+            if (asynchronous) {
+                validationThread.get().join(2_000L);
+                assertFalse(validationThread.get().isAlive());
+            } else {
+                Future<String> download = blocking;
+                ExecutionException failure = assertThrows(ExecutionException.class,
+                        () -> download.get(2L, TimeUnit.SECONDS));
+                assertTrue(failure.getCause() instanceof IOException);
+            }
+            assertEquals(0, callbacks.get());
+            if (directInstall) {
+                assertFalse(Files.exists(target));
+            } else {
+                assertArrayEquals(previous, Files.readAllBytes(target));
+            }
+            assertEquals(RemoteLanguageCatalog.RequestState.CLOSED,
+                    catalog.request("fr_FR", validator, result -> callbacks.incrementAndGet()));
+            assertEquals(RemoteLanguageCatalog.RequestState.CLOSED,
+                    catalog.requestInstallIfMissing("fr_FR", target, validator, result -> callbacks.incrementAndGet()));
+        } finally {
+            released.countDown();
+            workers.shutdownNow();
+            assertTrue(workers.awaitTermination(2L, TimeUnit.SECONDS));
+            server.stop(0);
+        }
+    }
+
+    private void awaitRelease(CountDownLatch released) {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10L);
+        while (released.getCount() != 0L) {
+            try {
+                assertTrue(released.await(Math.max(1L, deadline - System.nanoTime()), TimeUnit.NANOSECONDS));
+            } catch (InterruptedException interrupted) {
+                assertTrue(System.nanoTime() < deadline);
+            }
         }
     }
 

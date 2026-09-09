@@ -9,6 +9,8 @@ import art.arcane.volmlib.util.director.runtime.DirectorRuntimeNode;
 import art.arcane.volmlib.util.localization.MessageArgs;
 import art.arcane.volmlib.util.localization.MessageArgument;
 import art.arcane.volmlib.util.localization.TextKey;
+import art.arcane.volmlib.util.plugin.ComponentMessenger;
+import org.bukkit.command.CommandSender;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -102,6 +104,10 @@ public final class DirectorMiniMenu {
     }
 
     private static void deliverRaw(Object sender, String message) {
+        if (sender instanceof CommandSender commandSender) {
+            ComponentMessenger.sendLiteral(commandSender, message);
+            return;
+        }
         try {
             sender.getClass().getMethod("sendRichMessage", String.class).invoke(sender, message);
             return;
@@ -119,6 +125,10 @@ public final class DirectorMiniMenu {
             return;
         }
 
+        if (sender instanceof CommandSender commandSender) {
+            ComponentMessenger.sendMarkup(commandSender, line);
+            return;
+        }
         try {
             sender.getClass().getMethod("sendRichMessage", String.class).invoke(sender, line);
             return;

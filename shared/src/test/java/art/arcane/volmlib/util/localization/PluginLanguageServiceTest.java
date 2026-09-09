@@ -34,6 +34,68 @@ public class PluginLanguageServiceTest {
     public TemporaryFolder temporaryFolder = new TemporaryFolder();
 
     @Test
+    public void coordinatedReloadWaitsForSelectionBeforeTakingPublicationMonitor() throws Exception {
+        Path file = temporaryFolder.getRoot().toPath().resolve("coordinated.properties");
+        Object publication = new Object();
+        AtomicReference<String> locale = new AtomicReference<>("en_US");
+        AtomicReference<LocalizationSnapshot> active = new AtomicReference<>(ENGLISH);
+        CountDownLatch selectionEntered = new CountDownLatch(1);
+        CountDownLatch releaseSelection = new CountDownLatch(1);
+        CountDownLatch reloadEntered = new CountDownLatch(1);
+        PluginLanguageService.Options options = new PluginLanguageService.Options(file, () -> List.of("en_US", "de_DE"),
+                locale::get, active::get, PluginLanguageServiceTest::snapshot, (selected, prepared) -> {
+                    selectionEntered.countDown();
+                    assertTrue(releaseSelection.await(2, TimeUnit.SECONDS));
+                    synchronized (publication) {
+                        locale.set(selected);
+                        active.set(prepared);
+                    }
+                }, Logger.getLogger("CoordinatedLanguageTest"));
+        try (PluginLanguageService service = new PluginLanguageService(options)) {
+            CompletableFuture<Void> selection = service.selectDefault("de_DE");
+            assertTrue(selectionEntered.await(2, TimeUnit.SECONDS));
+            CompletableFuture<Void> reload = CompletableFuture.runAsync(() -> {
+                reloadEntered.countDown();
+                try {
+                    service.commitUpdate(() -> {
+                        synchronized (publication) {
+                            locale.set("en_US");
+                            active.set(ENGLISH);
+                            service.invalidate();
+                            service.cache("en_US", ENGLISH);
+                        }
+                        return null;
+                    });
+                } catch (IOException exception) {
+                    throw new AssertionError(exception);
+                }
+            });
+            assertTrue(reloadEntered.await(2, TimeUnit.SECONDS));
+            releaseSelection.countDown();
+            selection.get(2, TimeUnit.SECONDS);
+            reload.get(2, TimeUnit.SECONDS);
+            assertEquals("en_US", service.defaultLocale());
+            assertSame(ENGLISH, service.snapshot());
+        } finally {
+            releaseSelection.countDown();
+        }
+    }
+
+    @Test
+    public void closedServiceRejectsCoordinatedPublication() throws Exception {
+        Path file = temporaryFolder.getRoot().toPath().resolve("closed-update.properties");
+        AtomicReference<String> locale = new AtomicReference<>("en_US");
+        AtomicReference<LocalizationSnapshot> active = new AtomicReference<>(ENGLISH);
+        PluginLanguageService service = service(file, locale, active, PluginLanguageServiceTest::snapshot);
+        service.close();
+        assertThrows(IllegalStateException.class, () -> service.commitUpdate(() -> {
+            locale.set("de_DE");
+            return null;
+        }));
+        assertEquals("en_US", locale.get());
+    }
+
+    @Test
     public void playerOverridesRemainIndependentOfServerAndOtherPlayers() throws Exception {
         Path file = temporaryFolder.getRoot().toPath().resolve("preferences.properties");
         AtomicReference<String> locale = new AtomicReference<>("en_US");
@@ -344,6 +406,29 @@ public class PluginLanguageServiceTest {
             service.close();
         }
         assertFalse(closer.isAlive());
+    }
+
+    @Test
+    public void closingInterruptsAnEnteredDefaultWriterBeforeWaitingForItsCommitLock() throws Exception {
+        Path file = temporaryFolder.getRoot().toPath().resolve("preferences.properties");
+        CountDownLatch writerEntered = new CountDownLatch(1);
+        CountDownLatch neverReleased = new CountDownLatch(1);
+        PluginLanguageService service = new PluginLanguageService(new PluginLanguageService.Options(file,
+                () -> List.of("en_US", "fr_FR"), () -> "en_US", () -> ENGLISH,
+                PluginLanguageServiceTest::snapshot,
+                (selected, prepared) -> {
+                    writerEntered.countDown();
+                    neverReleased.await();
+                }, Logger.getLogger("language-test")));
+        CompletableFuture<Void> selection = service.selectDefault("fr_FR");
+        assertTrue(writerEntered.await(2, TimeUnit.SECONDS));
+
+        Thread closer = new Thread(service::close, "language-interrupting-close-test");
+        closer.start();
+        closer.join(2_000L);
+
+        assertFalse(closer.isAlive());
+        assertTrue(selection.isCompletedExceptionally());
     }
 
     @Test

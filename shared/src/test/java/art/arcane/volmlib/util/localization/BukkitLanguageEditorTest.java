@@ -1,9 +1,22 @@
 package art.arcane.volmlib.util.localization;
 
+import art.arcane.volmlib.util.director.DirectorTextResolver;
+import art.arcane.volmlib.util.director.help.DirectorMiniMenu;
+import art.arcane.volmlib.util.inventorygui.BukkitInventoryShutdown;
+import art.arcane.volmlib.util.scheduling.FoliaScheduler;
 import org.bukkit.ChatColor;
+import org.bukkit.Server;
+import org.bukkit.command.CommandSender;
+import org.bukkit.entity.Entity;
+import org.bukkit.entity.Player;
+import org.bukkit.event.player.AsyncPlayerChatEvent;
+import org.bukkit.event.server.PluginDisableEvent;
 import org.bukkit.inventory.Inventory;
+import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.InventoryView;
+import org.bukkit.plugin.Plugin;
 import org.junit.Test;
+import org.mockito.MockedStatic;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassVisitor;
 import org.objectweb.asm.MethodVisitor;
@@ -11,17 +24,31 @@ import org.objectweb.asm.Opcodes;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
+import java.util.function.Consumer;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertSame;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.same;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.withSettings;
 
 public class BukkitLanguageEditorTest {
     private static final String INVENTORY_VIEW_INTERNAL_NAME = "org/bukkit/inventory/InventoryView";
@@ -61,11 +88,87 @@ public class BukkitLanguageEditorTest {
     }
 
     @Test
-    public void variablesIncludeThePluralSelectorAndAreSorted() {
+    public void variableNamesIncludeThePluralSelectorAndAreSorted() {
         PluralKey key = PluralKey.of("test.plural", "count", Map.of("other", "Hello {name}"));
 
-        assertEquals("{count} {name}", BukkitLanguageEditor.variables(key));
-        assertEquals("None", BukkitLanguageEditor.variables(TextKey.of("test.text", "Hello")));
+        assertEquals("{count} {name}", BukkitLanguageEditor.variableNames(key));
+        assertEquals("", BukkitLanguageEditor.variableNames(TextKey.of("test.text", "Hello")));
+    }
+
+    @Test
+    public void editorChromeUsesThePlayersSelectedLocalizationSnapshot() {
+        TextKey key = BukkitLanguageMessages.EDITOR_BACK;
+        MessageCatalog catalog = MessageCatalog.of("en_US", key);
+        LocaleOverlay french = LocaleOverlay.builder("fr_FR")
+                .text(key.id(), "<gold>Retour</gold>")
+                .build();
+        LocalizationSnapshot snapshot = LocalizationSnapshot.create(new LocalizationCandidate(
+                catalog,
+                List.of(french),
+                PluralSelector.oneOther()
+        ));
+        PluginLanguageService languages = mock(PluginLanguageService.class);
+        Plugin plugin = mock(Plugin.class);
+        Player player = mock(Player.class);
+        UUID playerId = UUID.randomUUID();
+        when(player.getUniqueId()).thenReturn(playerId);
+        when(languages.snapshot(playerId)).thenReturn(snapshot);
+        PluginLanguageEditor.Options editorOptions = new PluginLanguageEditor.Options(
+                locale -> snapshot,
+                edit -> snapshot
+        );
+        BukkitLanguageSwitcher.Options switcher = new BukkitLanguageSwitcher.Options(
+                "test",
+                "test.language.admin",
+                DirectorMiniMenu.Theme.adaptRed(),
+                DirectorTextResolver.ENGLISH,
+                editorOptions
+        );
+        BukkitLanguageEditor editor = new BukkitLanguageEditor(
+                plugin,
+                new BukkitLanguageEditor.Options(languages, switcher, ignored -> {
+                })
+        );
+
+        assertTrue(editor.localized(player, key).legacy().contains("§6Retour"));
+    }
+
+    @Test
+    public void nativeInventoryTitleUsesUnformattedLocalizedTextAcrossThemeChanges() {
+        TextKey key = BukkitLanguageMessages.EDITOR_LANGUAGES;
+        LocalizationSnapshot snapshot = LocalizationSnapshot.create(new LocalizationCandidate(
+                MessageCatalog.of("en_US", key),
+                List.of(LocaleOverlay.builder("fr_FR").text(key.id(), "<gold>Langues</gold>").build()),
+                PluralSelector.oneOther()
+        ));
+        PluginLanguageService languages = mock(PluginLanguageService.class);
+        Plugin plugin = mock(Plugin.class);
+        Server server = mock(Server.class);
+        Player player = mock(Player.class, withSettings().extraInterfaces(Entity.class, CommandSender.class));
+        UUID playerId = UUID.randomUUID();
+        when(player.getUniqueId()).thenReturn(playerId);
+        when(((CommandSender) player).hasPermission("volmit.language.admin")).thenReturn(true);
+        when(languages.snapshot(playerId)).thenReturn(snapshot);
+        when(languages.availableLocales()).thenReturn(List.of("fr_FR"));
+        when(plugin.isEnabled()).thenReturn(true);
+        when(plugin.getName()).thenReturn("Test<green>");
+        when(plugin.getServer()).thenReturn(server);
+        IllegalStateException inventoryBoundary = new IllegalStateException("Inventory factory boundary");
+        List<String> titles = new ArrayList<>();
+        when(server.createInventory(any(InventoryHolder.class), eq(54), anyString())).thenAnswer(invocation -> {
+            titles.add(invocation.getArgument(2, String.class));
+            throw inventoryBoundary;
+        });
+        BukkitLanguageEditor editor = editor(plugin, languages);
+
+        try (MockedStatic<FoliaScheduler> scheduler = mockStatic(FoliaScheduler.class)) {
+            scheduler.when(() -> FoliaScheduler.isOwnedByCurrentRegion((Entity) player)).thenReturn(true);
+            assertSame(inventoryBoundary, assertThrows(IllegalStateException.class, () -> editor.open(player, null)));
+            editor.updateTheme(DirectorMiniMenu.Theme.irisGreen());
+            assertSame(inventoryBoundary, assertThrows(IllegalStateException.class, () -> editor.open(player, null)));
+        }
+
+        assertEquals(List.of("Test<green> › Langues", "Test<green> › Langues"), titles);
     }
 
     @Test
@@ -173,5 +276,167 @@ public class BukkitLanguageEditorTest {
 
         assertTrue("Direct InventoryView calls bind bytecode to either the class or interface ABI: " + directCalls,
                 directCalls.isEmpty());
+    }
+
+    @Test
+    public void rejectedChatContinuationRetiresThePromptAndView() throws Exception {
+        PluginLanguageService languages = mock(PluginLanguageService.class);
+        Plugin plugin = mock(Plugin.class);
+        Player player = mock(Player.class, withSettings().extraInterfaces(Entity.class));
+        Entity entity = (Entity) player;
+        UUID playerId = UUID.randomUUID();
+        when(player.getUniqueId()).thenReturn(playerId);
+        BukkitLanguageSwitcher.Options switcher = new BukkitLanguageSwitcher.Options(
+                "test",
+                "test.language.admin",
+                DirectorMiniMenu.Theme.adaptRed(),
+                DirectorTextResolver.ENGLISH,
+                new PluginLanguageEditor.Options(locale -> null, edit -> null)
+        );
+        BukkitLanguageEditor editor = new BukkitLanguageEditor(
+                plugin,
+                new BukkitLanguageEditor.Options(languages, switcher, ignored -> {
+                })
+        );
+        Constructor<?> viewConstructor = nested("View").getDeclaredConstructors()[0];
+        viewConstructor.setAccessible(true);
+        Object view = viewConstructor.newInstance(
+                null, null, null, "", 1, null, (Consumer<Player>) ignored -> {
+                }
+        );
+        Constructor<?> promptConstructor = nested("Prompt").getDeclaredConstructors()[0];
+        promptConstructor.setAccessible(true);
+        Object prompt = promptConstructor.newInstance(view, null, null, null);
+        views(editor).put(playerId, view);
+        prompts(editor).put(playerId, prompt);
+        AsyncPlayerChatEvent event = mock(AsyncPlayerChatEvent.class);
+        when(event.getPlayer()).thenReturn(player);
+        when(event.getMessage()).thenReturn("value");
+
+        try (MockedStatic<FoliaScheduler> scheduler = mockStatic(FoliaScheduler.class)) {
+            scheduler.when(() -> FoliaScheduler.runEntity(
+                    same(plugin), same(entity), any(Runnable.class), eq(0L), any(Runnable.class)
+            )).thenReturn(false);
+            editor.onChat(event);
+        }
+
+        verify(event).setCancelled(true);
+        assertTrue(prompts(editor).isEmpty());
+        assertTrue(views(editor).isEmpty());
+    }
+
+    @Test
+    public void pluginDisableDrainsEditorInventoryWithTheStillEnabledOwner() throws Exception {
+        PluginLanguageService languages = mock(PluginLanguageService.class);
+        Plugin plugin = mock(Plugin.class);
+        Server server = mock(Server.class);
+        Player player = mock(Player.class, withSettings().extraInterfaces(Entity.class));
+        Entity entity = (Entity) player;
+        Inventory inventory = mock(Inventory.class);
+        InventoryView inventoryView = mock(InventoryView.class);
+        PluginDisableEvent disableEvent = mock(PluginDisableEvent.class);
+        BukkitLanguageEditor editor = editor(plugin, languages);
+        InventoryHolder holder = holder(editor);
+        when(plugin.getServer()).thenReturn(server);
+        when(plugin.isEnabled()).thenReturn(true);
+        doReturn(List.of(player)).when(server).getOnlinePlayers();
+        when(player.getOpenInventory()).thenReturn(inventoryView);
+        when(inventoryView.getTopInventory()).thenReturn(inventory);
+        when(inventory.getHolder()).thenReturn(holder);
+        when(disableEvent.getPlugin()).thenReturn(plugin);
+        openInventories(editor).put(UUID.randomUUID(), new BukkitInventoryShutdown.View(player, inventory));
+
+        try (MockedStatic<FoliaScheduler> scheduler = mockStatic(FoliaScheduler.class)) {
+            scheduler.when(() -> FoliaScheduler.isOwnedByCurrentRegion(entity)).thenReturn(false);
+            scheduler.when(() -> FoliaScheduler.runEntity(
+                    same(plugin), same(entity), any(Runnable.class), eq(0L), any(Runnable.class)
+            )).thenAnswer(invocation -> {
+                assertTrue(plugin.isEnabled());
+                invocation.getArgument(2, Runnable.class).run();
+                return true;
+            });
+
+            editor.onPluginDisable(disableEvent);
+        }
+
+        verify(player).closeInventory();
+    }
+
+    @Test
+    public void rejectedPreDisableCloseRetiresWithoutOffOwnerInventoryAccess() throws Exception {
+        PluginLanguageService languages = mock(PluginLanguageService.class);
+        Plugin plugin = mock(Plugin.class);
+        Server server = mock(Server.class);
+        Player player = mock(Player.class, withSettings().extraInterfaces(Entity.class));
+        Entity entity = (Entity) player;
+        PluginDisableEvent disableEvent = mock(PluginDisableEvent.class);
+        BukkitLanguageEditor editor = editor(plugin, languages);
+        openInventories(editor).put(UUID.randomUUID(), new BukkitInventoryShutdown.View(player, mock(Inventory.class)));
+        when(plugin.getServer()).thenReturn(server);
+        doReturn(List.of(player)).when(server).getOnlinePlayers();
+        when(disableEvent.getPlugin()).thenReturn(plugin);
+
+        try (MockedStatic<FoliaScheduler> scheduler = mockStatic(FoliaScheduler.class)) {
+            scheduler.when(() -> FoliaScheduler.isOwnedByCurrentRegion(entity)).thenReturn(false);
+            scheduler.when(() -> FoliaScheduler.runEntity(
+                    same(plugin), same(entity), any(Runnable.class), eq(0L), any(Runnable.class)
+            )).thenReturn(false);
+
+            editor.onPluginDisable(disableEvent);
+        }
+
+        verify(player, never()).getOpenInventory();
+        verify(player, never()).closeInventory();
+    }
+
+    private BukkitLanguageEditor editor(Plugin plugin, PluginLanguageService languages) {
+        BukkitLanguageSwitcher.Options switcher = new BukkitLanguageSwitcher.Options(
+                "test",
+                "test.language.admin",
+                DirectorMiniMenu.Theme.adaptRed(),
+                DirectorTextResolver.ENGLISH,
+                new PluginLanguageEditor.Options(locale -> null, edit -> null)
+        );
+        return new BukkitLanguageEditor(
+                plugin,
+                new BukkitLanguageEditor.Options(languages, switcher, ignored -> {
+                })
+        );
+    }
+
+    private InventoryHolder holder(BukkitLanguageEditor editor) throws Exception {
+        Constructor<?> constructor = nested("Holder").getDeclaredConstructors()[0];
+        constructor.setAccessible(true);
+        return (InventoryHolder) constructor.newInstance(editor, null);
+    }
+
+    private Class<?> nested(String name) {
+        for (Class<?> nested : BukkitLanguageEditor.class.getDeclaredClasses()) {
+            if (nested.getSimpleName().equals(name)) {
+                return nested;
+            }
+        }
+        throw new AssertionError("Missing nested type " + name);
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<UUID, BukkitInventoryShutdown.View> openInventories(BukkitLanguageEditor editor) throws Exception {
+        Field field = BukkitLanguageEditor.class.getDeclaredField("openInventories");
+        field.setAccessible(true);
+        return (Map<UUID, BukkitInventoryShutdown.View>) field.get(editor);
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<UUID, Object> views(BukkitLanguageEditor editor) throws Exception {
+        Field field = BukkitLanguageEditor.class.getDeclaredField("views");
+        field.setAccessible(true);
+        return (Map<UUID, Object>) field.get(editor);
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<UUID, Object> prompts(BukkitLanguageEditor editor) throws Exception {
+        Field field = BukkitLanguageEditor.class.getDeclaredField("prompts");
+        field.setAccessible(true);
+        return (Map<UUID, Object>) field.get(editor);
     }
 }

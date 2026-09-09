@@ -44,7 +44,7 @@ public final class BukkitLanguageSwitcher implements AutoCloseable, Listener {
 
     private final Plugin plugin;
     private final PluginLanguageService languages;
-    private final Options options;
+    private volatile Options options;
     private final Map<String, Object> provider;
     private final BukkitVolmitCommand commandRegistration;
     private final BukkitLanguageEditor editor;
@@ -89,6 +89,23 @@ public final class BukkitLanguageSwitcher implements AutoCloseable, Listener {
 
     public void openEditor(Player player, Consumer<Player> back) {
         editor.open(player, null, back);
+    }
+
+    public synchronized void updateTheme(DirectorMiniMenu.Theme theme) {
+        if (closed) {
+            return;
+        }
+        DirectorMiniMenu.Theme requiredTheme = Objects.requireNonNull(theme, "theme");
+        Options current = options;
+        options = new Options(
+                current.command(),
+                current.adminPermission(),
+                requiredTheme,
+                current.textResolver(),
+                current.editor(),
+                current.editorFeedback()
+        );
+        editor.updateTheme(requiredTheme);
     }
 
     public boolean command(CommandSender sender, String[] arguments) {
@@ -147,17 +164,18 @@ public final class BukkitLanguageSwitcher implements AutoCloseable, Listener {
             }
             if (arguments[1].equalsIgnoreCase("languages")) {
                 if (selected.isEmpty()) {
-                    message(sender, "No Volmit language providers are available.");
+                    message(sender, BukkitLanguageMessages.NO_PROVIDERS);
                     return true;
                 }
                 if (arguments.length > 3 || !allowed(sender, "server", selected)) {
                     if (arguments.length > 3) {
-                        message(sender, "Usage: /volmit plugins languages [locale]");
+                        message(sender, BukkitLanguageMessages.VOLMIT_SELECTION_USAGE);
                     }
                     return true;
                 }
                 Selection selection = new Selection(
-                        "server", selected, "/volmit plugins languages", "all Volmit plugins", false);
+                        "server", selected, "/volmit plugins languages",
+                        localized(BukkitLanguageMessages.ALL_VOLMIT_PLUGINS), false);
                 executeSelection(sender, selection, arguments.length == 3 ? arguments[2] : null);
                 return true;
             }
@@ -253,7 +271,7 @@ public final class BukkitLanguageSwitcher implements AutoCloseable, Listener {
 
     private boolean execute(CommandSender sender, String[] arguments) {
         if (closed) {
-            message(sender, "Language selection is unavailable while the plugin is stopping.");
+            message(sender, BukkitLanguageMessages.STOPPING);
             return true;
         }
         List<Endpoint> selected = List.of(endpoint(provider));
@@ -267,9 +285,10 @@ public final class BukkitLanguageSwitcher implements AutoCloseable, Listener {
                 return true;
             }
             if (!(sender instanceof Player player)) {
-                message(sender, "Open the language editor in game.");
+                message(sender, BukkitLanguageMessages.EDITOR_PLAYER_ONLY);
             } else if (arguments.length > 3) {
-                message(sender, "Usage: /" + options.command() + " language server edit [locale]");
+                message(sender, BukkitLanguageMessages.EDITOR_USAGE,
+                        MessageArgument.untrusted("command", options.command()));
             } else {
                 editor.open(player, arguments.length == 3 ? arguments[2] : null);
             }
@@ -277,7 +296,8 @@ public final class BukkitLanguageSwitcher implements AutoCloseable, Listener {
         }
         String scope = arguments[0].toLowerCase(Locale.ROOT);
         if ((!scope.equals("self") && !scope.equals("server")) || arguments.length > 2) {
-            message(sender, "Usage: /" + options.command() + " language self [locale|reset] or server [locale]");
+            message(sender, BukkitLanguageMessages.SELECTION_USAGE,
+                    MessageArgument.untrusted("command", options.command()));
             return true;
         }
         if (!allowed(sender, scope, selected)) {
@@ -296,7 +316,7 @@ public final class BukkitLanguageSwitcher implements AutoCloseable, Listener {
             try {
                 showLocales(sender, selection, Integer.parseInt(value.substring(5)));
             } catch (NumberFormatException exception) {
-                message(sender, "Use a numeric language page.");
+                message(sender, BukkitLanguageMessages.NUMERIC_PAGE);
             }
         } else {
             select(sender, selection, value);
@@ -306,16 +326,17 @@ public final class BukkitLanguageSwitcher implements AutoCloseable, Listener {
     private boolean allowed(CommandSender sender, String scope, List<Endpoint> endpoints) {
         if (scope.equals("self")) {
             if (!(sender instanceof Player)) {
-                message(sender, "Player language preferences must be selected in game.");
+                message(sender, BukkitLanguageMessages.PERSONAL_PLAYER_ONLY);
                 return false;
             }
             if (!sender.hasPermission("volmit.language.self")) {
-                message(sender, "You do not have permission to select your language.");
+                message(sender, BukkitLanguageMessages.PERSONAL_PERMISSION);
                 return false;
             }
             for (Endpoint endpoint : endpoints) {
                 if (!sender.hasPermission(selfPermission(endpoint.name()))) {
-                    message(sender, "You do not have permission to select your language for " + endpoint.name() + ".");
+                    message(sender, BukkitLanguageMessages.PLUGIN_PERSONAL_PERMISSION,
+                            MessageArgument.untrusted("plugin", endpoint.name()));
                     return false;
                 }
             }
@@ -323,7 +344,8 @@ public final class BukkitLanguageSwitcher implements AutoCloseable, Listener {
         }
         for (Endpoint endpoint : endpoints) {
             if (!sender.hasPermission("volmit.language.admin") && !sender.hasPermission(endpoint.permission())) {
-                message(sender, "You do not have permission to change the server language for " + endpoint.name() + ".");
+                message(sender, BukkitLanguageMessages.PLUGIN_SERVER_PERMISSION,
+                        MessageArgument.untrusted("plugin", endpoint.name()));
                 return false;
             }
         }
@@ -732,16 +754,19 @@ public final class BukkitLanguageSwitcher implements AutoCloseable, Listener {
 
     private void select(CommandSender sender, Selection selection, String locale) {
         if (selection.scope().equals("server") && locale.equalsIgnoreCase("reset")) {
-            message(sender, "Select a locale such as en_US for the server default.");
+            message(sender, BukkitLanguageMessages.SERVER_LOCALE_REQUIRED);
             return;
         }
         if (!locale.equalsIgnoreCase("reset") && commonLocales(selection.endpoints()).stream().noneMatch(candidate ->
                 sameLocale(candidate, locale))) {
-            message(sender, "Language " + locale + " is not available for every selected plugin.");
+            message(sender, BukkitLanguageMessages.UNAVAILABLE_FOR_ALL,
+                    MessageArgument.untrusted("locale", locale));
             return;
         }
         UUID playerId = sender instanceof Player player ? player.getUniqueId() : null;
-        message(sender, "Preparing language " + locale + " for " + selection.label() + "...");
+        message(sender, BukkitLanguageMessages.PREPARING,
+                MessageArgument.untrusted("locale", locale),
+                MessageArgument.untrusted("target", selection.label()));
         for (Endpoint endpoint : selection.endpoints()) {
             CompletableFuture<String> pending = selection.scope().equals("self")
                     ? endpoint.self().apply(playerId, locale)
@@ -757,12 +782,23 @@ public final class BukkitLanguageSwitcher implements AutoCloseable, Listener {
 
     private void selectionFeedback(CommandSender sender, String scope, String name, String requested, String applied, Throwable failure) {
         if (failure != null) {
-            message(sender, name + ": unable to save the language selection; check the server console.");
+            message(sender, BukkitLanguageMessages.SAVE_FAILED,
+                    MessageArgument.untrusted("plugin", name));
         } else if (!sameLocale(requested, applied)) {
-            message(sender, name + ": " + requested + " is unavailable; using English (en_US).");
+            message(sender, BukkitLanguageMessages.ENGLISH_FALLBACK,
+                    MessageArgument.untrusted("plugin", name),
+                    MessageArgument.untrusted("locale", requested));
+        } else if (scope.equals("self") && applied.equalsIgnoreCase("reset")) {
+            message(sender, BukkitLanguageMessages.SERVER_DEFAULT_SELECTED,
+                    MessageArgument.untrusted("plugin", name));
+        } else if (scope.equals("self")) {
+            message(sender, BukkitLanguageMessages.PERSONAL_SELECTED,
+                    MessageArgument.untrusted("plugin", name),
+                    MessageArgument.untrusted("locale", applied));
         } else {
-            message(sender, name + ": " + (scope.equals("self") ? "your language" : "server language")
-                    + " is now " + (applied.equalsIgnoreCase("reset") ? "the server default" : applied) + ".");
+            message(sender, BukkitLanguageMessages.SERVER_SELECTED,
+                    MessageArgument.untrusted("plugin", name),
+                    MessageArgument.untrusted("locale", applied));
         }
     }
 
@@ -865,8 +901,51 @@ public final class BukkitLanguageSwitcher implements AutoCloseable, Listener {
         return first.replace('-', '_').equalsIgnoreCase(second.replace('-', '_'));
     }
 
+    private static MessageArgs messageArgs(MessageArgument... arguments) {
+        MessageArgs.Builder builder = MessageArgs.builder();
+        if (arguments != null) {
+            for (MessageArgument argument : arguments) {
+                builder.add(argument);
+            }
+        }
+        return builder.build();
+    }
+
     private void message(CommandSender sender, String text) {
         ComponentMessenger.send(sender, ComponentText.markup(styled(text, options.theme().description())));
+    }
+
+    private void message(CommandSender sender, TextKey key, MessageArgument... arguments) {
+        UUID audience = sender instanceof Player player ? player.getUniqueId() : null;
+        ComponentText content = LanguageAudience.call(
+                audience,
+                () -> localizedMessage(sender, key, messageArgs(arguments))
+        );
+        ComponentMessenger.send(sender, ComponentText.markup(
+                "<" + options.theme().description() + ">" + content.miniMessage()
+                        + "</" + options.theme().description() + ">"
+        ));
+    }
+
+    private ComponentText localizedMessage(CommandSender sender, TextKey key, MessageArgs arguments) {
+        UUID playerId = sender instanceof Player player ? player.getUniqueId() : null;
+        String template;
+        MessageArgs resolvedArguments;
+        try {
+            ResolvedText resolved = languages.snapshot(playerId).resolve(key, arguments);
+            template = resolved.template();
+            resolvedArguments = resolved.arguments();
+        } catch (RuntimeException failure) {
+            return ComponentText.literal(localized(key, arguments));
+        }
+        for (MessageArgument argument : resolvedArguments.arguments().values()) {
+            String value = String.valueOf(argument.value());
+            if (argument.kind() == MessageArgumentKind.UNTRUSTED) {
+                value = DirectorMiniMenu.escapeText(value);
+            }
+            template = template.replace("{" + argument.name() + "}", value);
+        }
+        return ComponentText.markup(template);
     }
 
     private String link(CommandSender sender, String label, String command, String hover) {
@@ -886,7 +965,10 @@ public final class BukkitLanguageSwitcher implements AutoCloseable, Listener {
 
     private String languageLink(CommandSender sender, String locale, String name, boolean selected, String command) {
         if (!(sender instanceof Player)) {
-            return styled((selected ? "[selected] " : "") + locale + " - " + name + ": " + command,
+            String selectedPrefix = selected
+                    ? "[" + localized(BukkitLanguageMessages.SELECTED) + "] "
+                    : "";
+            return styled(selectedPrefix + locale + " - " + name + ": " + command,
                     options.theme().description());
         }
         DirectorMiniMenu.Theme theme = options.theme();
@@ -933,7 +1015,13 @@ public final class BukkitLanguageSwitcher implements AutoCloseable, Listener {
                         + "<" + theme.description() + ">✎ <font:minecraft:uniform>"
                         + DirectorMiniMenu.escapeText(description) + "</font></" + theme.description() + "><reset>\n"
                         + "<" + theme.optional() + ">✒ <font:minecraft:uniform>"
-                        + DirectorMiniMenu.escapeText("Command: " + command) + "</font></" + theme.optional() + ">"
+                        + DirectorMiniMenu.escapeText(localized(
+                                BukkitLanguageMessages.COMMAND,
+                                MessageArgs.builder()
+                                        .untrusted("command", command)
+                                        .build()
+                        ))
+                        + "</font></" + theme.optional() + ">"
         );
     }
 

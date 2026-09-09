@@ -8,15 +8,16 @@ import art.arcane.volmlib.util.scheduling.FoliaScheduler;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
 import org.bukkit.event.HandlerList;
 import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
+import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.event.inventory.InventoryType;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryView;
 import org.bukkit.inventory.ItemStack;
-import org.bukkit.plugin.IllegalPluginAccessException;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.lang.reflect.InvocationTargetException;
@@ -33,7 +34,9 @@ public class UIWindow implements Window, Listener {
     private static final Map<UUID, UIWindow> ACTIVE_WINDOWS = new ConcurrentHashMap<>();
     private final JavaPlugin plugin;
     private final Player viewer;
+    private final UUID viewerId;
     private final KMap<Integer, Element> elements;
+    private final AtomicBoolean deactivationPending;
     private WindowDecorator decorator;
     private Callback<Window> eClose;
     private WindowResolution resolution;
@@ -51,7 +54,9 @@ public class UIWindow implements Window, Listener {
     public UIWindow(JavaPlugin plugin, Player viewer) {
         this.plugin = plugin;
         this.viewer = viewer;
+        this.viewerId = viewer.getUniqueId();
         this.elements = new KMap<>();
+        this.deactivationPending = new AtomicBoolean(false);
         this.clickcheck = 0;
         this.doubleclicked = false;
         setTitle("");
@@ -188,6 +193,32 @@ public class UIWindow implements Window, Listener {
         e.setCancelled(true);
     }
 
+    @EventHandler(priority = EventPriority.HIGHEST)
+    public void on(InventoryDragEvent event) {
+        if (event.getWhoClicked().equals(viewer)) {
+            LanguageAudience.run(viewerId, () -> handleDrag(event));
+        }
+    }
+
+    private void handleDrag(InventoryDragEvent event) {
+        if (!isVisible() || inventory == null) {
+            return;
+        }
+
+        Inventory topInventory = inventoryViewTopInventory(event.getView());
+        if (topInventory == null || !topInventory.equals(inventory)) {
+            return;
+        }
+
+        int topSize = topInventory.getSize();
+        for (int rawSlot : event.getRawSlots()) {
+            if (rawSlot >= 0 && rawSlot < topSize) {
+                event.setCancelled(true);
+                return;
+            }
+        }
+    }
+
     @EventHandler
     public void on(InventoryCloseEvent e) {
         if (!e.getPlayer().equals(viewer)) {
@@ -242,20 +273,7 @@ public class UIWindow implements Window, Listener {
             return false;
         }
 
-        if (FoliaScheduler.runEntity(plugin, viewer, runnable, 1L, retired)) {
-            return true;
-        }
-
-        if (FoliaScheduler.runGlobal(plugin, runnable, 1L)) {
-            return true;
-        }
-
-        try {
-            int taskId = Bukkit.getScheduler().scheduleSyncDelayedTask(plugin, runnable);
-            return taskId != -1;
-        } catch (UnsupportedOperationException | IllegalPluginAccessException ex) {
-            return false;
-        }
+        return FoliaScheduler.runEntity(plugin, viewer, runnable, 1L, retired);
     }
 
     private static Method resolveInventoryCloseGetReason() {
@@ -274,7 +292,7 @@ public class UIWindow implements Window, Listener {
         }
     }
 
-    static Inventory inventoryViewTopInventory(InventoryView view) {
+    public static Inventory inventoryViewTopInventory(InventoryView view) {
         return (Inventory) invokeInventoryViewMethod(view, INVENTORY_VIEW_GET_TOP_INVENTORY);
     }
 
@@ -334,6 +352,14 @@ public class UIWindow implements Window, Listener {
 
     @Override
     public UIWindow setVisible(boolean visible) {
+        if (visible && deactivationPending.compareAndSet(true, false)) {
+            return this;
+        }
+
+        if (!visible && deactivationPending.get()) {
+            return this;
+        }
+
         if (isVisible() == visible) {
             return this;
         }
@@ -640,18 +666,53 @@ public class UIWindow implements Window, Listener {
     }
 
     private void deactivate(boolean closeInventory) {
-        this.visible = false;
-        HandlerList.unregisterAll(this);
-
-        Inventory currentInventory = inventory;
-        if (closeInventory && currentInventory != null) {
-            Inventory topInventory = inventoryViewTopInventory(viewer.getOpenInventory());
-            if (topInventory != null && topInventory.equals(currentInventory)) {
-                viewer.closeInventory();
-            }
+        if (closeInventory && !FoliaScheduler.isOwnedByCurrentRegion(viewer)) {
+            scheduleDeactivation();
+            return;
         }
 
+        deactivationPending.set(false);
+        deactivateOwned(closeInventory);
+    }
+
+    private void scheduleDeactivation() {
+        if (!deactivationPending.compareAndSet(false, true)) {
+            return;
+        }
+
+        Runnable ownerTask = () -> {
+            if (deactivationPending.compareAndSet(true, false)) {
+                deactivateOwned(true);
+            }
+        };
+        Runnable retiredTask = () -> {
+            if (deactivationPending.compareAndSet(true, false)) {
+                deactivateRetired();
+            }
+        };
+        if (!FoliaScheduler.runEntity(plugin, viewer, ownerTask, 0L, retiredTask)) {
+            retiredTask.run();
+        }
+    }
+
+    private void deactivateOwned(boolean closeInventory) {
+        Inventory currentInventory = inventory;
+        deactivateRetired();
+
+        if (!closeInventory || currentInventory == null) {
+            return;
+        }
+
+        Inventory topInventory = inventoryViewTopInventory(viewer.getOpenInventory());
+        if (topInventory != null && topInventory.equals(currentInventory)) {
+            viewer.closeInventory();
+        }
+    }
+
+    private void deactivateRetired() {
+        this.visible = false;
+        HandlerList.unregisterAll(this);
         inventory = null;
-        ACTIVE_WINDOWS.remove(viewer.getUniqueId(), this);
+        ACTIVE_WINDOWS.remove(viewerId, this);
     }
 }

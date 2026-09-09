@@ -63,7 +63,7 @@ public class IrisBiomeStorage implements BiomeGrid {
                 for (int k = 0; k < 16; k++) {
                     Biome b = getBiome(j, i, k);
 
-                    if (b == null || b.equals(Biome.THE_VOID)) {
+                    if (b == null || b == Biome.THE_VOID) {
                         continue;
                     }
 

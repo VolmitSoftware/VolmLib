@@ -1,6 +1,7 @@
 package art.arcane.volmlib.util.localization;
 
 import art.arcane.volmlib.util.director.help.DirectorMiniMenu;
+import art.arcane.volmlib.util.inventorygui.BukkitInventoryShutdown;
 import art.arcane.volmlib.util.plugin.ComponentMessenger;
 import art.arcane.volmlib.util.plugin.ComponentText;
 import art.arcane.volmlib.util.scheduling.FoliaScheduler;
@@ -18,6 +19,7 @@ import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.event.inventory.InventoryOpenEvent;
 import org.bukkit.event.player.AsyncPlayerChatEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.event.server.PluginDisableEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.InventoryView;
@@ -25,7 +27,6 @@ import org.bukkit.inventory.ItemFlag;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.plugin.Plugin;
-import org.bukkit.plugin.RegisteredServiceProvider;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
@@ -62,14 +63,21 @@ final class BukkitLanguageEditor implements AutoCloseable, Listener {
     private final Options options;
     private final PluginLanguageEditor editor;
     private final Map<UUID, View> views = new ConcurrentHashMap<>();
+    private final Map<UUID, BukkitInventoryShutdown.View> openInventories = new ConcurrentHashMap<>();
     private final Map<UUID, Prompt> prompts = new ConcurrentHashMap<>();
     private final Map<UUID, CompletableFuture<PluginLanguageEditor.Document>> pending = new ConcurrentHashMap<>();
+    private volatile DirectorMiniMenu.Theme theme;
     private volatile boolean closed;
 
     BukkitLanguageEditor(Plugin plugin, Options options) {
         this.plugin = Objects.requireNonNull(plugin, "plugin");
         this.options = Objects.requireNonNull(options, "options");
+        theme = options.switcher().theme();
         editor = new PluginLanguageEditor(options.languages(), options.switcher().editor());
+    }
+
+    void updateTheme(DirectorMiniMenu.Theme theme) {
+        this.theme = Objects.requireNonNull(theme, "theme");
     }
 
     void open(Player player, String locale) {
@@ -135,6 +143,10 @@ final class BukkitLanguageEditor implements AutoCloseable, Listener {
     @EventHandler
     public void onClose(InventoryCloseEvent event) {
         UUID playerId = event.getPlayer().getUniqueId();
+        BukkitInventoryShutdown.View open = openInventories.get(playerId);
+        if (open != null && open.inventory() == event.getInventory()) {
+            openInventories.remove(playerId, open);
+        }
         if (event.getInventory().getHolder() instanceof Holder holder && holder.owner == this
                 && !prompts.containsKey(playerId)) {
             if (pending.containsKey(playerId)) {
@@ -161,39 +173,42 @@ final class BukkitLanguageEditor implements AutoCloseable, Listener {
         }
         event.setCancelled(true);
         String input = event.getMessage();
-        FoliaScheduler.runEntity(plugin, player, () -> submit(player, prompt, input));
+        UUID playerId = player.getUniqueId();
+        Runnable retired = () -> views.remove(playerId, prompt.view());
+        if (!FoliaScheduler.runEntity(plugin, player, () -> submit(player, prompt, input), 0L, retired)) {
+            retired.run();
+        }
     }
 
     @EventHandler
     public void onQuit(PlayerQuitEvent event) {
+        openInventories.remove(event.getPlayer().getUniqueId());
         cancel(event.getPlayer().getUniqueId());
     }
 
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onPluginDisable(PluginDisableEvent event) {
+        if (event.getPlugin() == plugin) {
+            close();
+        }
+    }
+
     @Override
-    public void close() {
+    public synchronized void close() {
+        if (closed) {
+            return;
+        }
         closed = true;
         for (CompletableFuture<PluginLanguageEditor.Document> future : pending.values()) {
             future.cancel(true);
         }
         pending.clear();
         prompts.clear();
-        views.clear();
         editor.close();
+        BukkitInventoryShutdown.drain(plugin, openInventories.values());
+        openInventories.clear();
+        views.clear();
         HandlerList.unregisterAll(this);
-        Plugin schedulerOwner = schedulerOwner();
-        for (Player player : plugin.getServer().getOnlinePlayers()) {
-            Runnable cleanup = () -> {
-                if (inventoryViewTopInventory(player.getOpenInventory()).getHolder() instanceof Holder holder
-                        && holder.owner == this) {
-                    player.closeInventory();
-                }
-            };
-            if (FoliaScheduler.isOwnedByCurrentRegion(player)) {
-                cleanup.run();
-            } else if (schedulerOwner != null) {
-                FoliaScheduler.runEntity(schedulerOwner, player, cleanup);
-            }
-        }
     }
 
     private void click(Player player, View view, int slot) {
@@ -282,7 +297,11 @@ final class BukkitLanguageEditor implements AutoCloseable, Listener {
         }
         views.remove(player.getUniqueId());
         prompts.remove(player.getUniqueId());
-        message(player, "Loading " + view.locale() + " messages...");
+        message(
+                player,
+                BukkitLanguageMessages.EDITOR_LOADING,
+                MessageArgument.untrusted("locale", view.locale())
+        );
         complete(player, view, editor.load(view.locale()), null);
     }
 
@@ -297,7 +316,12 @@ final class BukkitLanguageEditor implements AutoCloseable, Listener {
             if (closed) {
                 return;
             }
-            FoliaScheduler.runEntity(plugin, player, () -> {
+            Runnable retired = () -> {
+                if (pending.remove(playerId, future)) {
+                    views.remove(playerId, view);
+                }
+            };
+            if (!FoliaScheduler.runEntity(plugin, player, () -> {
                 if (!pending.remove(playerId, future) || !player.isOnline() || !allowed(player)) {
                     return;
                 }
@@ -312,7 +336,9 @@ final class BukkitLanguageEditor implements AutoCloseable, Listener {
                 }
                 show(player, new View(document.locale(), document, view.group(), view.filter(),
                         view.page(), view.key(), view.back()));
-            });
+            }, 0L, retired)) {
+                retired.run();
+            }
         });
     }
 
@@ -320,25 +346,42 @@ final class BukkitLanguageEditor implements AutoCloseable, Listener {
         prompts.put(player.getUniqueId(), prompt);
         player.closeInventory();
         if (prompt.key() == null) {
-            promptMenu(player, prompt.view(), List.of(ComponentText.literal(
-                    "Search message keys or text. Type cancel to return.")));
+            promptMenu(player, prompt.view(), List.of(localized(
+                    player,
+                    BukkitLanguageMessages.EDITOR_SEARCH_PROMPT
+            )));
         } else {
             String key = prompt.key().id()
-                    + (prompt.form() == null ? "" : " [" + partLabel(prompt.expected(), prompt.form()) + "]");
+                    + (prompt.form() == null ? "" : " [" + partLabel(player, prompt.expected(), prompt.form()) + "]");
             String current = clip(rawValue(prompt.expected(), prompt.form()).replace("\n", "\\n"));
             promptMenu(player, prompt.view(), List.of(
-                    ComponentText.literal("Type a new value for " + key + " in chat."),
-                    ComponentText.literal("Current Value: ").append(ComponentText.markup(current)),
-                    ComponentText.literal("Variables: " + variables(prompt.key())),
-                    ComponentText.literal("Use \\n for new lines, \\\\ for a backslash, or type cancel to return.")
+                    localized(
+                            player,
+                            BukkitLanguageMessages.EDITOR_VALUE_PROMPT,
+                            MessageArgument.untrusted("key", key)
+                    ),
+                    localized(
+                            player,
+                            BukkitLanguageMessages.EDITOR_CURRENT_VALUE,
+                            MessageArgument.trusted("value", current)
+                    ),
+                    localized(
+                            player,
+                            BukkitLanguageMessages.EDITOR_VARIABLES,
+                            MessageArgument.untrusted("variables", variables(player, prompt.key()))
+                    ),
+                    localized(player, BukkitLanguageMessages.EDITOR_INPUT_GUIDANCE)
             ));
         }
-        FoliaScheduler.runEntity(plugin, player, () -> {
+        Runnable retired = () -> cancel(player.getUniqueId());
+        if (!FoliaScheduler.runEntity(plugin, player, () -> {
             if (prompts.remove(player.getUniqueId(), prompt) && allowed(player)) {
-                message(player, "Language editor input expired.");
+                message(player, BukkitLanguageMessages.EDITOR_INPUT_EXPIRED);
                 show(player, prompt.view());
             }
-        }, 1200L, () -> cancel(player.getUniqueId()));
+        }, 1200L, retired)) {
+            retired.run();
+        }
     }
 
     private void submit(Player player, Prompt prompt, String input) {
@@ -350,7 +393,11 @@ final class BukkitLanguageEditor implements AutoCloseable, Listener {
             return;
         }
         if (input.length() > MAXIMUM_INPUT_LENGTH) {
-            message(player, "Editor input must be at most " + MAXIMUM_INPUT_LENGTH + " characters.");
+            message(
+                    player,
+                    BukkitLanguageMessages.EDITOR_INPUT_TOO_LONG,
+                    MessageArgument.trusted("maximum", MAXIMUM_INPUT_LENGTH)
+            );
             show(player, prompt.view());
             return;
         }
@@ -366,7 +413,14 @@ final class BukkitLanguageEditor implements AutoCloseable, Listener {
             complete(player, prompt.view(), editor.save(new PluginLanguageEditor.Edit(prompt.view().locale(),
                     prompt.key().id(), prompt.expected(), replacement)), change);
         } catch (IllegalArgumentException exception) {
-            message(player, "Unable to save: " + exception.getMessage());
+            message(
+                    player,
+                    BukkitLanguageMessages.EDITOR_UNABLE_TO_SAVE,
+                    MessageArgument.untrusted(
+                            "reason",
+                            Objects.requireNonNullElse(exception.getMessage(), exception.getClass().getSimpleName())
+                    )
+            );
             show(player, prompt.view());
         }
     }
@@ -390,20 +444,30 @@ final class BukkitLanguageEditor implements AutoCloseable, Listener {
         View view = new View(requested.locale(), requested.document(), requested.group(), requested.filter(),
                 page.page(), requested.key(), requested.back());
         Holder holder = new Holder(this, view);
-        String section = view.locale() == null ? "Languages" : view.group() == null
-                ? view.filter().isEmpty() ? view.locale() : view.locale() + " / Search"
-                : view.locale() + " / " + groupName(view.group());
-        DirectorMiniMenu.Theme theme = options.switcher().theme();
-        String title = ComponentText.markup(
-                "<" + theme.primaryLeft() + ">" + DirectorMiniMenu.escapeText(plugin.getName())
-                        + "</" + theme.primaryLeft() + ">"
-                        + " <" + theme.muted() + ">›</" + theme.muted() + "> "
-                        + "<" + theme.primaryRight() + ">" + DirectorMiniMenu.escapeText(section)
-                        + "</" + theme.primaryRight() + ">"
-        ).legacy();
+        String section;
+        if (view.locale() == null) {
+            section = localized(player, BukkitLanguageMessages.EDITOR_LANGUAGES).plain();
+        } else if (view.group() != null) {
+            section = localized(
+                    player,
+                    BukkitLanguageMessages.EDITOR_SECTION_GROUP,
+                    MessageArgument.untrusted("locale", view.locale()),
+                    MessageArgument.untrusted("group", groupName(view.group()))
+            ).plain();
+        } else if (!view.filter().isEmpty()) {
+            section = localized(
+                    player,
+                    BukkitLanguageMessages.EDITOR_SECTION_SEARCH,
+                    MessageArgument.untrusted("locale", view.locale())
+            ).plain();
+        } else {
+            section = view.locale();
+        }
+        DirectorMiniMenu.Theme theme = this.theme;
+        String title = ComponentText.literal(plugin.getName() + " › " + section).legacy();
         Inventory inventory = plugin.getServer().createInventory(holder, SIZE, title);
         holder.inventory = inventory;
-        ItemStack filler = item(Material.BLACK_STAINED_GLASS_PANE, " ", List.of());
+        ItemStack filler = formattedItem(Material.BLACK_STAINED_GLASS_PANE, ComponentText.literal(" "), List.of());
         for (int slot = 0; slot < SIZE; slot++) {
             inventory.setItem(slot, filler);
         }
@@ -413,63 +477,102 @@ final class BukkitLanguageEditor implements AutoCloseable, Listener {
             if (view.locale() == null) {
                 String locale = locales.get(index);
                 boolean active = locale.equalsIgnoreCase(options.languages().defaultLocale());
-                entry = localeItem(locale, VolmitLocales.displayName(locale).orElse(locale), active);
+                entry = localeItem(player, locale, VolmitLocales.displayName(locale).orElse(locale), active);
             } else if (view.group() == null && view.filter().isEmpty()) {
                 String group = groups.get(index);
-                entry = categoryItem(groupMaterial(group), groupName(group),
+                entry = categoryItem(player, groupMaterial(group), groupName(group),
                         messageCount(view.document(), group));
             } else if (view.key() == null) {
                 MessageKey key = keys.get(index);
-                entry = messageItem(key, view.document().snapshot().value(key), null);
+                entry = messageItem(player, key, view.document().snapshot().value(key), null);
             } else {
-                entry = messageItem(view.key(), view.document().snapshot().value(view.key()), parts.get(index));
+                entry = messageItem(player, view.key(), view.document().snapshot().value(view.key()), parts.get(index));
             }
             inventory.setItem(contentSlots.get(index - page.startIndex()), entry);
         }
-        inventory.setItem(BACK, formattedItem(Material.ARROW, ComponentText.markup("&eBack&r"), List.of()));
-        inventory.setItem(CLOSE, formattedItem(Material.BARRIER, ComponentText.markup("&cClose&r"), List.of()));
+        inventory.setItem(BACK, formattedItem(
+                Material.ARROW,
+                localized(player, BukkitLanguageMessages.EDITOR_BACK),
+                List.of()
+        ));
+        inventory.setItem(CLOSE, formattedItem(
+                Material.BARRIER,
+                localized(player, BukkitLanguageMessages.EDITOR_CLOSE),
+                List.of()
+        ));
         if (page.hasPrevious()) {
-            inventory.setItem(PREVIOUS, formattedItem(Material.ARROW,
-                    ComponentText.markup("&ePrevious page&r"), List.of()));
+            inventory.setItem(PREVIOUS, formattedItem(
+                    Material.ARROW,
+                    localized(player, BukkitLanguageMessages.EDITOR_PREVIOUS_PAGE),
+                    List.of()
+            ));
         }
         if (page.hasNext()) {
-            inventory.setItem(NEXT, formattedItem(Material.ARROW,
-                    ComponentText.markup("&eNext page&r"), List.of()));
+            inventory.setItem(NEXT, formattedItem(
+                    Material.ARROW,
+                    localized(player, BukkitLanguageMessages.EDITOR_NEXT_PAGE),
+                    List.of()
+            ));
         }
         if (view.document() != null && view.group() == null && view.key() == null && view.filter().isEmpty()) {
-            inventory.setItem(SEARCH, item(Material.COMPASS, "Search messages",
-                    List.of("Click to search all messages.")));
+            inventory.setItem(SEARCH, formattedItem(
+                    Material.COMPASS,
+                    themed(player, BukkitLanguageMessages.EDITOR_SEARCH_MESSAGES, theme.primaryRight()),
+                    List.of(themed(
+                            player,
+                            BukkitLanguageMessages.EDITOR_SEARCH_MESSAGES_LORE,
+                            theme.description()
+                    ))
+            ));
         }
         if (view.document() != null && view.group() == null && view.key() == null && !view.filter().isEmpty()) {
-            inventory.setItem(SEARCH, item(Material.PAPER, "Clear search", List.of()));
+            inventory.setItem(SEARCH, formattedItem(
+                    Material.PAPER,
+                    themed(player, BukkitLanguageMessages.EDITOR_CLEAR_SEARCH, theme.primaryRight()),
+                    List.of()
+            ));
         }
         views.put(player.getUniqueId(), view);
         player.openInventory(inventory);
+        if (inventoryViewTopInventory(player.getOpenInventory()) == inventory) {
+            BukkitInventoryShutdown.View opened = new BukkitInventoryShutdown.View(player, inventory);
+            openInventories.put(player.getUniqueId(), opened);
+            if (closed) {
+                player.closeInventory();
+                openInventories.remove(player.getUniqueId(), opened);
+            }
+        }
     }
 
-    private ItemStack messageItem(MessageKey key, MessageValue value, String form) {
+    private ItemStack messageItem(Player player, MessageKey key, MessageValue value, String form) {
         List<ComponentText> lore = new ArrayList<>();
-        lore.add(ComponentText.markup("&7Current Value:&r"));
-        for (String line : preview(rawValue(value, form), 44, 6)) {
+        lore.add(localized(player, BukkitLanguageMessages.EDITOR_CURRENT_VALUE_LABEL));
+        for (String line : preview(player, rawValue(value, form), 44, 6)) {
             lore.add(ComponentText.section(line));
         }
         if (!key.placeholders().isEmpty()) {
             lore.add(ComponentText.empty());
-            lore.add(ComponentText.markup("&8" + variables(key) + "&r"));
+            lore.add(localized(
+                    player,
+                    BukkitLanguageMessages.EDITOR_VARIABLE_LIST,
+                    MessageArgument.untrusted("variables", variables(player, key))
+            ));
         }
-        lore.add(ComponentText.markup(form == null && value instanceof PluralValue
-                ? "&7Click to edit a plural form.&r"
+        TextKey instruction = form == null && value instanceof PluralValue
+                ? BukkitLanguageMessages.EDITOR_EDIT_PLURAL
                 : form == null && value instanceof LinesValue
-                ? "&7Click to edit individual lines.&r" : "&7Click to edit in chat.&r"));
+                ? BukkitLanguageMessages.EDITOR_EDIT_LINES
+                : BukkitLanguageMessages.EDITOR_EDIT_CHAT;
+        lore.add(localized(player, instruction));
         return formattedItem(Material.PAPER,
                 ComponentText.markup("&f" + DirectorMiniMenu.escapeText(
-                        form == null ? key.id() : partLabel(value, form)) + "&r"), lore);
+                        form == null ? key.id() : partLabel(player, value, form)) + "&r"), lore);
     }
 
-    private ItemStack localeItem(String locale, String name, boolean active) {
+    private ItemStack localeItem(Player player, String locale, String name, boolean active) {
         return formattedItem(active ? Material.WRITABLE_BOOK : Material.BOOK,
                 localeTitle(locale, name, active),
-                List.of(ComponentText.markup("&8Click to open this language.&r")));
+                List.of(localized(player, BukkitLanguageMessages.EDITOR_OPEN_LANGUAGE)));
     }
 
     static ComponentText localeTitle(String locale, String name, boolean active) {
@@ -481,12 +584,16 @@ final class BukkitLanguageEditor implements AutoCloseable, Listener {
         );
     }
 
-    private ItemStack categoryItem(Material material, String name, int messages) {
+    private ItemStack categoryItem(Player player, Material material, String name, int messages) {
         return formattedItem(material,
                 categoryTitle(name),
                 List.of(
-                        ComponentText.markup("&7" + messages + " messages&r"),
-                        ComponentText.markup("&8Click to open this category.&r")
+                        localized(
+                                player,
+                                BukkitLanguageMessages.EDITOR_MESSAGE_COUNT,
+                                MessageArgument.trusted("count", messages)
+                        ),
+                        localized(player, BukkitLanguageMessages.EDITOR_OPEN_CATEGORY)
                 ));
     }
 
@@ -517,16 +624,6 @@ final class BukkitLanguageEditor implements AutoCloseable, Listener {
             remaining -= rowSize;
         }
         return List.copyOf(slots);
-    }
-
-    private ItemStack item(Material material, String name, List<String> lore) {
-        ComponentText title = ComponentText.markup("<" + options.switcher().theme().primaryRight() + ">"
-                + DirectorMiniMenu.escapeText(name) + "</" + options.switcher().theme().primaryRight() + ">");
-        List<ComponentText> styled = new ArrayList<>(lore.size());
-        for (String line : lore) {
-            styled.add(ComponentText.markup("&7" + DirectorMiniMenu.escapeText(line) + "&r"));
-        }
-        return formattedItem(material, title, styled);
     }
 
     private static int pageSize(View view) {
@@ -576,7 +673,11 @@ final class BukkitLanguageEditor implements AutoCloseable, Listener {
             return true;
         }
         cancel(player.getUniqueId());
-        message(player, "You do not have permission to edit " + plugin.getName() + " languages.");
+        message(
+                player,
+                BukkitLanguageMessages.EDITOR_NO_PERMISSION,
+                MessageArgument.untrusted("plugin", plugin.getName())
+        );
         player.closeInventory();
         return false;
     }
@@ -593,25 +694,54 @@ final class BukkitLanguageEditor implements AutoCloseable, Listener {
     private void failed(Player player, Throwable failure) {
         Throwable cause = failure instanceof CompletionException && failure.getCause() != null ? failure.getCause() : failure;
         plugin.getLogger().log(Level.WARNING, "Unable to edit " + plugin.getName() + " language messages", cause);
-        message(player, "Unable to edit: " + Objects.requireNonNullElse(cause.getMessage(), cause.getClass().getSimpleName()));
+        message(
+                player,
+                BukkitLanguageMessages.EDITOR_UNABLE_TO_EDIT,
+                MessageArgument.untrusted(
+                        "reason",
+                        Objects.requireNonNullElse(cause.getMessage(), cause.getClass().getSimpleName())
+                )
+        );
     }
 
-    private void message(Player player, String text) {
-        ComponentMessenger.send(player, ComponentText.markup("<" + options.switcher().theme().description() + ">"
-                + DirectorMiniMenu.escapeText(text) + "</" + options.switcher().theme().description() + ">"));
+    private void message(Player player, TextKey key, MessageArgument... arguments) {
+        ComponentMessenger.send(player, themed(player, key, theme.description(), arguments));
     }
 
-    private Plugin schedulerOwner() {
-        if (plugin.isEnabled()) {
-            return plugin;
-        }
-        for (RegisteredServiceProvider<?> registration : plugin.getServer().getServicesManager().getRegistrations(Map.class)) {
-            if (registration.getPlugin().isEnabled() && registration.getProvider() instanceof Map<?, ?> provider
-                    && "2".equals(provider.get("volmit.language.protocol"))) {
-                return registration.getPlugin();
+    private ComponentText themed(Player player,
+                                 TextKey key,
+                                 String color,
+                                 MessageArgument... arguments) {
+        ComponentText content = localized(player, key, arguments);
+        return ComponentText.markup("<" + color + ">" + content.miniMessage() + "</" + color + ">");
+    }
+
+    ComponentText localized(Player player, TextKey key, MessageArgument... arguments) {
+        MessageArgs.Builder builder = MessageArgs.builder();
+        if (arguments != null) {
+            for (MessageArgument argument : arguments) {
+                builder.add(argument);
             }
         }
-        return null;
+        MessageArgs supplied = builder.build();
+        String template;
+        MessageArgs resolvedArguments;
+        try {
+            ResolvedText resolved = options.languages().snapshot(player.getUniqueId()).resolve(key, supplied);
+            template = resolved.template();
+            resolvedArguments = resolved.arguments();
+        } catch (RuntimeException failure) {
+            template = key.english();
+            resolvedArguments = supplied;
+        }
+        for (MessageArgument argument : resolvedArguments.arguments().values()) {
+            String value = String.valueOf(argument.value());
+            if (argument.kind() == MessageArgumentKind.UNTRUSTED) {
+                value = DirectorMiniMenu.escapeText(value);
+            }
+            template = template.replace("{" + argument.name() + "}", value);
+        }
+        return ComponentText.markup(template);
     }
 
     private static Method resolveInventoryViewTopInventory() {
@@ -643,8 +773,15 @@ final class BukkitLanguageEditor implements AutoCloseable, Listener {
         return PLURAL_FORMS.stream().filter(plural.forms()::containsKey).toList();
     }
 
-    private static String partLabel(MessageValue value, String part) {
-        return value instanceof LinesValue ? "Line " + (Integer.parseInt(part) + 1) : part;
+    private String partLabel(Player player, MessageValue value, String part) {
+        if (!(value instanceof LinesValue)) {
+            return part;
+        }
+        return localized(
+                player,
+                BukkitLanguageMessages.EDITOR_LINE,
+                MessageArgument.trusted("line", Integer.parseInt(part) + 1)
+        ).plain();
     }
 
     private static List<MessageKey> keys(View view) {
@@ -676,7 +813,7 @@ final class BukkitLanguageEditor implements AutoCloseable, Listener {
         DirectorMiniMenu.ContentMenu menu = new DirectorMiniMenu.ContentMenu(
                 command, "/" + options.switcher().command() + " language server edit",
                 command, entries, "", 1, Math.max(1, entries.size()));
-        DirectorMiniMenu.deliverContent(player, menu, options.switcher().theme(), options.switcher().textResolver());
+        DirectorMiniMenu.deliverContent(player, menu, theme, options.switcher().textResolver());
     }
 
     private void saved(Player player, View view, Change change) {
@@ -693,19 +830,25 @@ final class BukkitLanguageEditor implements AutoCloseable, Listener {
                 plugin.getLogger().log(Level.WARNING, "Unable to render compact language edit feedback", exception);
             }
         }
-        ComponentText changed = ComponentText.literal(change.key() + ": “")
-                .append(ComponentText.markup(clip(change.before())))
-                .append(ComponentText.literal("” changed to “"))
-                .append(ComponentText.markup(clip(change.after())))
-                .append(ComponentText.literal("”."));
+        ComponentText changed = localized(
+                player,
+                BukkitLanguageMessages.EDITOR_CHANGED,
+                MessageArgument.untrusted("key", change.key()),
+                MessageArgument.trusted("before", clip(change.before())),
+                MessageArgument.trusted("after", clip(change.after()))
+        );
         promptMenu(player, view, List.of(
-                ComponentText.literal("Saved " + view.locale() + ". Language selections are unchanged."),
+                localized(
+                        player,
+                        BukkitLanguageMessages.EDITOR_SAVED,
+                        MessageArgument.untrusted("locale", view.locale())
+                ),
                 changed
         ));
     }
 
     private String entry(ComponentText content) {
-        DirectorMiniMenu.Theme theme = options.switcher().theme();
+        DirectorMiniMenu.Theme theme = this.theme;
         return "<" + theme.muted() + ">⇀ </" + theme.muted() + ">" + content.miniMessage();
     }
 
@@ -763,9 +906,16 @@ final class BukkitLanguageEditor implements AutoCloseable, Listener {
         };
     }
 
-    static String variables(MessageKey key) {
-        return key.placeholders().isEmpty() ? "None" : String.join(" ", key.placeholders().stream()
-                .sorted().map(name -> "{" + name + "}").toList());
+    private String variables(Player player, MessageKey key) {
+        String names = variableNames(key);
+        if (names.isEmpty()) {
+            return localized(player, BukkitLanguageMessages.EDITOR_NONE).plain();
+        }
+        return names;
+    }
+
+    static String variableNames(MessageKey key) {
+        return String.join(" ", key.placeholders().stream().sorted().map(name -> "{" + name + "}").toList());
     }
 
     static MessageValue replacement(MessageValue current, String form, String value) {
@@ -815,9 +965,22 @@ final class BukkitLanguageEditor implements AutoCloseable, Listener {
     }
 
     static List<String> preview(String text, int width, int maximumLines) {
+        return preview(text, width, maximumLines, "(empty)");
+    }
+
+    private List<String> preview(Player player, String text, int width, int maximumLines) {
+        return preview(
+                text,
+                width,
+                maximumLines,
+                localized(player, BukkitLanguageMessages.EDITOR_EMPTY).legacy()
+        );
+    }
+
+    private static List<String> preview(String text, int width, int maximumLines, String empty) {
         String rendered = ComponentText.markup(text).legacy();
         if (rendered.isEmpty()) {
-            return List.of("(empty)");
+            return List.of(empty);
         }
         int safeWidth = Math.max(1, width);
         int safeMaximumLines = Math.max(1, maximumLines);

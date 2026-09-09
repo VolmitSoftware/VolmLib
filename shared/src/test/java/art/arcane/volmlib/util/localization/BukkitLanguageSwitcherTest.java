@@ -109,6 +109,19 @@ public class BukkitLanguageSwitcherTest {
     }
 
     @Test
+    public void pickerAndEditorThemeCanRefreshWithoutReregistration() {
+        DirectorMiniMenu.Theme updated = DirectorMiniMenu.Theme.reactBlue();
+
+        switcher.updateTheme(updated);
+        switcher.command(player, new String[]{"self"});
+
+        String rendered = String.join("\n", richMessages());
+        assertTrue(rendered.contains("<gradient:#003366:#00BFFF>"));
+        assertFalse(rendered.contains("<gradient:#8b0000:#ff4d4d>"));
+        verify(editors.constructed().get(0)).updateTheme(updated);
+    }
+
+    @Test
     public void rootLanguageMenuShowsCurrentScopesResetAndEditor() {
         when(player.hasPermission("adapt.admin")).thenReturn(true);
         when(languages.playerLocale(playerId)).thenReturn(Optional.of("fr_FR"));
@@ -431,6 +444,31 @@ public class BukkitLanguageSwitcherTest {
         String rendered = String.join("\n", richMessages());
         assertTrue(rendered.contains("de_DE is unavailable; using English (en_US)."));
         assertFalse(rendered.contains("is now de_DE"));
+    }
+
+    @Test
+    public void asynchronousSelectionFeedbackRestoresThePlayerLanguageAudience() {
+        PluginLanguageService localizedService = languageService();
+        CompletableFuture<Void> pending = new CompletableFuture<>();
+        when(localizedService.selectPlayer(playerId, "fr_FR")).thenReturn(pending);
+        when(localizedService.effectiveLocale(playerId)).thenReturn("fr_FR");
+        DirectorTextResolver resolver = (key, arguments) -> {
+            if (!key.id().equals(BukkitLanguageMessages.PERSONAL_SELECTED.id())) {
+                return DirectorTextResolver.ENGLISH.resolve(key, arguments);
+            }
+            String prefix = playerId.equals(LanguageAudience.current()) ? "Audience restored" : "Wrong audience";
+            return prefix + " for " + arguments.require("plugin").value()
+                    + ": " + arguments.require("locale").value() + ".";
+        };
+        BukkitLanguageSwitcher localized = register("Localized", "localized", localizedService, resolver);
+
+        localized.command(player, new String[]{"self", "fr_FR"});
+        clearInvocations(player);
+        pending.complete(null);
+
+        String rendered = String.join("\n", richMessages());
+        assertTrue(rendered.contains("Audience restored for Localized: fr_FR."));
+        assertFalse(rendered.contains("Wrong audience"));
     }
 
     @Test

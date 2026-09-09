@@ -1,18 +1,25 @@
 package art.arcane.volmlib.integration;
 
+import art.arcane.volmlib.util.scheduling.FoliaScheduler;
 import net.milkbowl.vault.economy.Economy;
 import net.milkbowl.vault.economy.EconomyResponse;
 import org.bukkit.OfflinePlayer;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.RegisteredServiceProvider;
 
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+import java.util.Collections;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
+import java.util.WeakHashMap;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.logging.Level;
 
 public final class VaultEconomy {
     private final Plugin plugin;
+    private final Map<Plugin, Boolean> foliaSupport = Collections.synchronizedMap(new WeakHashMap<>());
 
     public VaultEconomy(Plugin plugin) {
         this.plugin = Objects.requireNonNull(plugin, "plugin");
@@ -114,7 +121,46 @@ public final class VaultEconomy {
         }
         RegisteredServiceProvider<Economy> registration =
             plugin.getServer().getServicesManager().getRegistration(Economy.class);
-        return registration == null ? null : registration.getProvider();
+        if (registration == null) {
+            return null;
+        }
+        Plugin owner = registration.getPlugin();
+        if (owner == null || !owner.isEnabled()) {
+            return null;
+        }
+        if (FoliaScheduler.isFoliaThreading(plugin.getServer()) && !foliaSupport.computeIfAbsent(owner, this::supportsFolia)) {
+            return null;
+        }
+        return registration.getProvider();
+    }
+
+    private boolean supportsFolia(Plugin owner) {
+        try {
+            Object metadata;
+            Class<?> metadataType;
+            try {
+                Method getter = owner.getClass().getMethod("getPluginMeta");
+                metadata = getter.invoke(owner);
+                metadataType = getter.getReturnType();
+            } catch (NoSuchMethodException exception) {
+                metadata = owner.getDescription();
+                metadataType = metadata == null ? Object.class : metadata.getClass();
+            }
+            if (metadata == null) {
+                throw new IllegalStateException("Economy provider returned no plugin metadata");
+            }
+            Method supported;
+            try {
+                supported = metadataType.getMethod("isFoliaSupported");
+            } catch (NoSuchMethodException exception) {
+                supported = metadata.getClass().getMethod("isFoliaSupported");
+            }
+            return Boolean.TRUE.equals(supported.invoke(metadata));
+        } catch (IllegalAccessException | InvocationTargetException | NoSuchMethodException | RuntimeException exception) {
+            plugin.getLogger().log(Level.WARNING,
+                "Could not verify Folia support for Vault economy provider " + owner.getName(), exception);
+            return false;
+        }
     }
 
     private static boolean deposit(

@@ -171,6 +171,17 @@ public final class IntegrationMetricSchema {
     public static final String SHAPEDPORTALS_REJECTED_ATTEMPTS_TOTAL = "shapedportals.rejected-attempts-total";
     public static final String SHAPEDPORTALS_CREATION_SUCCESS_PERCENT = "shapedportals.creation-success-percent";
 
+    public static final String FOUNDATION_MODULES_ACTIVE = "foundation.modules-active";
+    public static final String FOUNDATION_MODULES_AVAILABLE = "foundation.modules-available";
+    public static final String FOUNDATION_PROFILES_LOADED = "foundation.profiles-loaded";
+    public static final String FOUNDATION_PROFILES_DIRTY = "foundation.profiles-dirty";
+    public static final String FOUNDATION_PROFILES_READ_ONLY = "foundation.profiles-read-only";
+    public static final String FOUNDATION_PROFILES_ACCEPTING = "foundation.profiles-accepting";
+    public static final String FOUNDATION_PROFILE_SAVES_ACTIVE = "foundation.profile-saves-active";
+    public static final String FOUNDATION_PROFILE_SAVE_FAILURES_TOTAL = "foundation.profile-save-failures-total";
+    public static final String FOUNDATION_WORTH_ENTRIES = "foundation.worth-entries";
+    public static final String FOUNDATION_WORTH_READ_ONLY = "foundation.worth-read-only";
+
     private static final Map<String, IntegrationMetricDescriptor> DESCRIPTORS = buildDescriptors();
     private static final Set<String> IRIS_KEYS = buildIrisKeys();
     private static final Set<String> IRIS_WORLD_KEYS = buildIrisWorldKeys();
@@ -355,6 +366,21 @@ public final class IntegrationMetricSchema {
         );
     }
 
+    public static Set<String> foundationKeys() {
+        return Set.of(
+                FOUNDATION_MODULES_ACTIVE,
+                FOUNDATION_MODULES_AVAILABLE,
+                FOUNDATION_PROFILES_LOADED,
+                FOUNDATION_PROFILES_DIRTY,
+                FOUNDATION_PROFILES_READ_ONLY,
+                FOUNDATION_PROFILES_ACCEPTING,
+                FOUNDATION_PROFILE_SAVES_ACTIVE,
+                FOUNDATION_PROFILE_SAVE_FAILURES_TOTAL,
+                FOUNDATION_WORTH_ENTRIES,
+                FOUNDATION_WORTH_READ_ONLY
+        );
+    }
+
     private static Map<String, IntegrationMetricDescriptor> buildDescriptors() {
         Map<String, IntegrationMetricDescriptor> descriptors = new LinkedHashMap<>();
 
@@ -516,6 +542,17 @@ public final class IntegrationMetricSchema {
         putMetric(descriptors, SHAPEDPORTALS_CREATED_PORTALS_TOTAL, IntegrationMetricType.LONG, "portals", "shapedportals", "creation");
         putMetric(descriptors, SHAPEDPORTALS_REJECTED_ATTEMPTS_TOTAL, IntegrationMetricType.LONG, "attempts", "shapedportals", "creation");
         putMetric(descriptors, SHAPEDPORTALS_CREATION_SUCCESS_PERCENT, IntegrationMetricType.DOUBLE, "percent", "shapedportals", "creation");
+
+        putMetric(descriptors, FOUNDATION_MODULES_ACTIVE, IntegrationMetricType.INTEGER, "modules", "foundation", "modules");
+        putMetric(descriptors, FOUNDATION_MODULES_AVAILABLE, IntegrationMetricType.INTEGER, "modules", "foundation", "modules");
+        putMetric(descriptors, FOUNDATION_PROFILES_LOADED, IntegrationMetricType.INTEGER, "players", "foundation", "persistence");
+        putMetric(descriptors, FOUNDATION_PROFILES_DIRTY, IntegrationMetricType.INTEGER, "players", "foundation", "persistence");
+        putMetric(descriptors, FOUNDATION_PROFILES_READ_ONLY, IntegrationMetricType.INTEGER, "players", "foundation", "persistence");
+        putMetric(descriptors, FOUNDATION_PROFILES_ACCEPTING, IntegrationMetricType.INTEGER, "boolean", "foundation", "persistence");
+        putMetric(descriptors, FOUNDATION_PROFILE_SAVES_ACTIVE, IntegrationMetricType.INTEGER, "saves", "foundation", "persistence");
+        putMetric(descriptors, FOUNDATION_PROFILE_SAVE_FAILURES_TOTAL, IntegrationMetricType.LONG, "failures", "foundation", "persistence");
+        putMetric(descriptors, FOUNDATION_WORTH_ENTRIES, IntegrationMetricType.INTEGER, "items", "foundation", "economy");
+        putMetric(descriptors, FOUNDATION_WORTH_READ_ONLY, IntegrationMetricType.INTEGER, "boolean", "foundation", "economy");
 
         return Map.copyOf(descriptors);
     }

@@ -10,6 +10,7 @@ import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicReference;
@@ -133,7 +134,7 @@ public final class RegistryUtil {
                 .filter(field -> typeClass.isAssignableFrom(field.getType()))
                 .map(field -> {
                     try {
-                        return Map.entry(NamespacedKey.minecraft(field.getName().toLowerCase()), field.get(null));
+                        return Map.entry(NamespacedKey.minecraft(field.getName().toLowerCase(Locale.ROOT)), field.get(null));
                     } catch (Throwable e) {
                         return null;
                     }

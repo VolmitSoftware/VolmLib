@@ -1,10 +1,14 @@
 package art.arcane.volmlib.util.plugin;
 
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.serializer.gson.GsonComponentSerializer;
+import net.kyori.adventure.text.serializer.json.JSONOptions;
 import net.md_5.bungee.api.ChatMessageType;
 import net.md_5.bungee.api.chat.BaseComponent;
 import net.md_5.bungee.api.chat.ClickEvent;
 import net.md_5.bungee.api.chat.HoverEvent;
 import net.md_5.bungee.api.chat.TextComponent;
+import net.md_5.bungee.chat.ComponentSerializer;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 
@@ -139,6 +143,9 @@ public final class ComponentMessenger {
         if (sendRichMessage(requiredSender, requiredMessage.miniMessage())) {
             return;
         }
+        if (requiredSender instanceof Player player && sendSpigotMessage(player, requiredMessage)) {
+            return;
+        }
         requiredSender.sendMessage(requiredSender instanceof Player
                 ? requiredMessage.legacy()
                 : requiredMessage.plain());
@@ -213,11 +220,22 @@ public final class ComponentMessenger {
 
     private static boolean sendSpigotComponents(Player player, BaseComponent[] components) {
         try {
-            Object spigot = player.spigot();
-            Method method = spigot.getClass().getMethod("sendMessage", BaseComponent[].class);
-            method.invoke(spigot, (Object) components);
+            Player.Spigot spigot = player.spigot();
+            if (spigot == null) {
+                return false;
+            }
+            spigot.sendMessage(components);
             return true;
-        } catch (ReflectiveOperationException | LinkageError ignored) {
+        } catch (LinkageError ignored) {
+            return false;
+        }
+    }
+
+    private static boolean sendSpigotMessage(Player player, ComponentText message) {
+        try {
+            return sendSpigotComponents(player, ComponentSerializer.parse(
+                    SpigotJson.SERIALIZER.serialize((Component) message.component())));
+        } catch (LinkageError ignored) {
             return false;
         }
     }
@@ -226,5 +244,11 @@ public final class ComponentMessenger {
         Duration safeDuration = duration == null ? Duration.ZERO : duration;
         long ticks = Math.max(0L, safeDuration.toMillis() / 50L);
         return ticks > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) ticks;
+    }
+
+    private static final class SpigotJson {
+        private static final GsonComponentSerializer SERIALIZER = GsonComponentSerializer.builder()
+                .options(JSONOptions.byDataVersion().at(3465))
+                .build();
     }
 }

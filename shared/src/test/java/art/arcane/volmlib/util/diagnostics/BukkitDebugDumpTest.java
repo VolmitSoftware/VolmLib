@@ -12,6 +12,7 @@ import org.bukkit.permissions.Permission;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.PluginDescriptionFile;
 import org.bukkit.plugin.PluginManager;
+import org.bukkit.plugin.ServicesManager;
 import org.bukkit.plugin.SimpleServicesManager;
 import org.junit.After;
 import org.junit.Before;
@@ -30,7 +31,12 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiFunction;
 import java.util.logging.Logger;
 import java.util.regex.Matcher;
@@ -39,6 +45,7 @@ import java.util.stream.Stream;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -55,8 +62,9 @@ public class BukkitDebugDumpTest {
     @Rule
     public TemporaryFolder temporary = new TemporaryFolder();
 
-    private final List<String> messages = new ArrayList<>();
+    private final List<String> messages = new CopyOnWriteArrayList<>();
     private Plugin plugin;
+    private Server server;
     private PluginManager pluginManager;
     private SimpleServicesManager services;
     private TestPlayer player;
@@ -72,7 +80,7 @@ public class BukkitDebugDumpTest {
     public void setup() throws IOException {
         directory = temporary.newFolder("plugin").toPath();
         plugin = mock(Plugin.class);
-        Server server = mock(Server.class);
+        server = mock(Server.class);
         PluginDescriptionFile description = mock(PluginDescriptionFile.class);
         services = new SimpleServicesManager();
         pluginManager = mock(PluginManager.class);
@@ -172,6 +180,7 @@ public class BukkitDebugDumpTest {
                 new BukkitDebugDump.Options(() -> true, () -> () -> "Portal count: 2",
                         new BukkitDebugDump.Presentation("/shapedportals debug dump", "/shapedportals debug",
                                 DirectorMiniMenu.Theme.adaptRed(), DirectorTextResolver.ENGLISH)));
+        dumps.updateTheme(DirectorMiniMenu.Theme.reactBlue());
 
         dumps.request(player, false);
 
@@ -186,11 +195,29 @@ public class BukkitDebugDumpTest {
         Path copiedPath = Path.of(pathAction.group(1));
         assertTrue(copiedPath.isAbsolute());
         assertEquals(files.get(0).getFileName(), copiedPath.getFileName());
-        assertTrue(rendered.contains("<gradient:#8b0000:#ff4d4d>"));
+        assertTrue(rendered.contains("<gradient:#003366:#00BFFF>"));
+        assertFalse(rendered.contains("<gradient:#8b0000:#ff4d4d>"));
         assertTrue(rendered.contains("/shapedportals debug dump"));
         assertTrue(rendered.contains("<click:run_command:/shapedportals debug>"));
         assertTrue(rendered.contains("〈 Back"));
         verify(clients.constructed().get(0), never()).publish(anyString(), anyString(), anyString());
+    }
+
+    @Test
+    public void presentationResolverLocalizesDebugWorkflowMessages() {
+        DirectorTextResolver resolver = (key, arguments) ->
+                "localized:" + DirectorTextResolver.ENGLISH.resolve(key, arguments);
+        BukkitDebugDump dumps = BukkitDebugDump.create(plugin,
+                new BukkitDebugDump.Options(() -> true, () -> () -> "",
+                        new BukkitDebugDump.Presentation("/shapedportals debug dump", "/shapedportals debug",
+                                DirectorMiniMenu.Theme.adaptRed(), resolver)));
+
+        dumps.request(player, false);
+
+        String rendered = String.join("\n", messages);
+        assertTrue(rendered.contains("localized:Preparing ShapedPortals debug dump"));
+        assertTrue(rendered.contains("localized:Saved ShapedPortals debug dump"));
+        assertTrue(rendered.contains("localized:Copy local path"));
     }
 
     @Test
@@ -266,6 +293,124 @@ public class BukkitDebugDumpTest {
     }
 
     @Test
+    public void sameSecondRequestsAllocateDistinctReportsWithoutOverwrite() throws Exception {
+        reports.when(() -> DebugDumpReport.create(eq(snapshot), anyString()))
+                .thenReturn("First report", "Second report");
+        BukkitDebugDump dumps = BukkitDebugDump.create(plugin);
+
+        dumps.request(player, false);
+        dumps.request(player, false);
+
+        Path output = directory.resolve("debug");
+        Path first = output.resolve("shapedportals-v2.0.0-debugdump-2026-09-03-00-00-00.txt");
+        Path second = output.resolve("shapedportals-v2.0.0-debugdump-2026-09-03-00-00-00-2.txt");
+        assertEquals("First report", Files.readString(first));
+        assertEquals("Second report", Files.readString(second));
+        assertEquals(2, savedReports().size());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void closeInterruptsAnActiveUploadAndCompletesTheAggregate() throws Exception {
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch interrupted = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        AtomicReference<Throwable> backgroundFailure = new AtomicReference<>();
+        BukkitDebugDump dumps = BukkitDebugDump.create(plugin);
+        MclogsClient client = clients.constructed().get(0);
+        when(client.publish(anyString(), anyString(), anyString())).thenAnswer(invocation -> {
+            entered.countDown();
+            try {
+                release.await();
+                return URI.create("https://mclo.gs/too-late");
+            } catch (InterruptedException exception) {
+                interrupted.countDown();
+                throw exception;
+            }
+        });
+        Map<?, ?> provider = (Map<?, ?>) services.getRegistrations(Map.class).get(0).getProvider();
+        BiFunction<CommandSender, Boolean, CompletableFuture<Map<String, String>>> aggregate =
+                (BiFunction<CommandSender, Boolean, CompletableFuture<Map<String, String>>>)
+                        provider.get("request.aggregate");
+        ServicesManager closingServices = mock(ServicesManager.class);
+        when(server.getServicesManager()).thenReturn(closingServices);
+        Thread closer = new Thread(() -> {
+            try {
+                if (!entered.await(2L, TimeUnit.SECONDS)) {
+                    throw new AssertionError("The upload did not start");
+                }
+                dumps.close();
+            } catch (Throwable failure) {
+                backgroundFailure.set(failure);
+                release.countDown();
+            }
+        }, "VolmLib-Debug-Dump-Close-Test");
+        closer.setDaemon(true);
+        closer.start();
+
+        try {
+            CompletableFuture<Map<String, String>> result = aggregate.apply(player, true);
+            Map<String, String> closedResult = result.get(2L, TimeUnit.SECONDS);
+            assertEquals("failure", closedResult.get("status"));
+            assertTrue(closedResult.get("error").toLowerCase().contains("closed"));
+            assertTrue(interrupted.await(2L, TimeUnit.SECONDS));
+            closer.join(2_000L);
+            assertFalse(closer.isAlive());
+            assertFalse(Thread.currentThread().isInterrupted());
+            assertNull(backgroundFailure.get());
+            assertTrue(messages.isEmpty());
+        } finally {
+            release.countDown();
+            closer.join(2_000L);
+        }
+    }
+
+    @Test
+    public void closeClearsAQueuedWriterBeforeTheSchedulerRunsIt() throws Exception {
+        List<Runnable> pending = new ArrayList<>();
+        scheduler.when(() -> FoliaScheduler.runAsync(eq(plugin), any(Runnable.class)))
+                .thenAnswer(invocation -> pending.add(invocation.getArgument(1, Runnable.class)));
+        BukkitDebugDump dumps = BukkitDebugDump.create(plugin);
+        MclogsClient client = clients.constructed().get(0);
+
+        dumps.request(player, true);
+        assertEquals(1, pending.size());
+        dumps.close();
+        pending.get(0).run();
+
+        verify(client, never()).publish(anyString(), anyString(), anyString());
+        assertFalse(Files.exists(directory.resolve("debug")));
+    }
+
+    @Test
+    public void queuedFeedbackRechecksLifecycleBeforeDelivery() {
+        List<Runnable> pending = new ArrayList<>();
+        AtomicInteger scheduled = new AtomicInteger();
+        scheduler.when(() -> FoliaScheduler.runEntity(eq(plugin), any(), any(Runnable.class)))
+                .thenAnswer(invocation -> {
+                    Runnable delivery = invocation.getArgument(2, Runnable.class);
+                    if (scheduled.getAndIncrement() == 0) {
+                        delivery.run();
+                    } else {
+                        pending.add(delivery);
+                    }
+                    return true;
+                });
+        BukkitDebugDump dumps = BukkitDebugDump.create(plugin);
+
+        dumps.request(player, false);
+        assertEquals(1, pending.size());
+        assertTrue(String.join("\n", messages).contains("Preparing"));
+        assertFalse(String.join("\n", messages).contains("Saved"));
+        int messagesBeforeClose = messages.size();
+        dumps.close();
+        pending.get(0).run();
+
+        assertEquals(messagesBeforeClose, messages.size());
+        assertFalse(String.join("\n", messages).contains("Saved"));
+    }
+
+    @Test
     public void duplicateRequestIsRejectedAndClosePreventsPendingWork() {
         List<Runnable> pending = new ArrayList<>();
         scheduler.when(() -> FoliaScheduler.runGlobal(eq(plugin), any(Runnable.class)))
@@ -307,6 +452,22 @@ public class BukkitDebugDumpTest {
             assertEquals(0, files.count());
         }
         assertTrue(String.join("\n", messages).contains("Unable to write the debug dump"));
+    }
+
+    @Test
+    public void occupiedReportSymlinkIsNotFollowedOrReplaced() throws Exception {
+        Path output = Files.createDirectories(directory.resolve("debug"));
+        Path victim = temporary.newFile("victim.txt").toPath();
+        Files.writeString(victim, "sentinel");
+        Path occupied = output.resolve("shapedportals-v2.0.0-debugdump-2026-09-03-00-00-00.txt");
+        Files.createSymbolicLink(occupied, victim.toAbsolutePath());
+
+        BukkitDebugDump.create(plugin).request(player, false);
+
+        assertTrue(Files.isSymbolicLink(occupied));
+        assertEquals("sentinel", Files.readString(victim));
+        Path report = output.resolve("shapedportals-v2.0.0-debugdump-2026-09-03-00-00-00-2.txt");
+        assertEquals("Diagnostic report\n", Files.readString(report));
     }
 
     private List<Path> savedReports() throws IOException {
