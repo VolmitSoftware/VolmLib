@@ -3,6 +3,7 @@ package org.bukkit.entity;
 import net.md_5.bungee.api.ChatMessageType;
 import net.md_5.bungee.api.chat.BaseComponent;
 import org.bukkit.command.CommandSender;
+import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryView;
 import org.bukkit.metadata.MetadataValue;
 import org.bukkit.plugin.Plugin;
@@ -37,6 +38,14 @@ public interface Player {
   }
 
   default void closeInventory() {
+  }
+
+  default boolean isOnline() {
+    return false;
+  }
+
+  default InventoryView openInventory(Inventory inventory) {
+    return null;
   }
 
   class Spigot extends CommandSender.Spigot {

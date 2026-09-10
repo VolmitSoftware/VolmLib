@@ -16,6 +16,11 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -24,6 +29,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.assertThrows;
 
 public class ConfigHotloadEngineTest {
     private static final int MAX_VIRTUAL_POLLS = 200;
@@ -174,6 +180,111 @@ public class ConfigHotloadEngineTest {
             assertTrue(engine.isDirectoryEventWatchActive());
         } finally {
             engine.clear();
+            engine.clear();
+        }
+    }
+
+    @Test
+    public void acknowledgedSelectionRejectsAlreadyCapturedOldConfig() throws Exception {
+        File directory = temporaryFolder.newFolder("selected-language");
+        File file = new File(directory, "adapt.toml");
+        Files.writeString(file.toPath(), "language = \"en_US\"\n", StandardCharsets.UTF_8);
+        ConfigHotloadEngine engine = createEngine(() -> knownConfigFiles(directory));
+
+        try {
+            engine.configure(100L, 100L, List.of(file), List.of(directory));
+            Files.writeString(file.toPath(), "language = \"en_US\"\nverbose = true\n", StandardCharsets.UTF_8);
+            ConfigHotloadEngine.StableContentSnapshot oldConfig = awaitTouchedSnapshot(engine, file);
+            String selected = "language = \"fi_FI\"\nverbose = true\n";
+            Files.writeString(file.toPath(), selected, StandardCharsets.UTF_8);
+            engine.noteSelfWrite(file, selected);
+            AtomicReference<String> active = new AtomicReference<>("fi_FI");
+            AtomicInteger notifications = new AtomicInteger();
+
+            assertFalse(engine.processSnapshotChange(oldConfig, snapshot -> {
+                active.set("en_US");
+                return true;
+            }, delta -> notifications.incrementAndGet()));
+            assertEquals("fi_FI", active.get());
+            assertEquals(0, notifications.get());
+
+            Files.writeString(file.toPath(), "language = \"de_DE\"\nverbose = true\n", StandardCharsets.UTF_8);
+            ConfigHotloadEngine.StableContentSnapshot external = awaitTouchedSnapshot(engine, file);
+            assertTrue(engine.processSnapshotChange(external, snapshot -> {
+                active.set("de_DE");
+                return true;
+            }, delta -> notifications.incrementAndGet()));
+            assertEquals("de_DE", active.get());
+            assertEquals(1, notifications.get());
+        } finally {
+            engine.clear();
+        }
+    }
+
+    @Test
+    public void acknowledgedLanguageInstallDoesNotAnnounceEveryNewEntry() throws Exception {
+        File directory = temporaryFolder.newFolder("installed-language");
+        File file = new File(directory, "fi_FI.toml");
+        ConfigHotloadEngine engine = createEngine(() -> knownConfigFiles(directory));
+
+        try {
+            engine.configure(100L, 100L, List.of(), List.of(directory));
+            String installed = "[runtime]\nno_description_provided = \"Ei kuvausta\"\n";
+            Files.writeString(file.toPath(), installed, StandardCharsets.UTF_8);
+            ConfigHotloadEngine.StableContentSnapshot downloaded = awaitTouchedSnapshot(engine, file);
+            engine.noteSelfWrite(file, installed);
+            AtomicInteger notifications = new AtomicInteger();
+
+            assertFalse(engine.processSnapshotChange(downloaded, snapshot -> true,
+                    delta -> notifications.incrementAndGet()));
+            assertEquals(0, notifications.get());
+        } finally {
+            engine.clear();
+        }
+    }
+
+    @Test(timeout = 8_000L)
+    public void trackedWriteFinishesBeforeCapturedSnapshotCanApply() throws Exception {
+        File directory = temporaryFolder.newFolder("concurrent-selection");
+        File file = new File(directory, "adapt.toml");
+        Files.writeString(file.toPath(), "language = \"en_US\"\n", StandardCharsets.UTF_8);
+        ConfigHotloadEngine engine = createEngine(() -> knownConfigFiles(directory));
+        ExecutorService workers = Executors.newFixedThreadPool(2);
+        CountDownLatch written = new CountDownLatch(1);
+        CountDownLatch applyStarted = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+
+        try {
+            engine.configure(100L, 100L, List.of(file), List.of());
+            Files.writeString(file.toPath(), "language = \"en_US\"\nverbose = true\n", StandardCharsets.UTF_8);
+            ConfigHotloadEngine.StableContentSnapshot captured = awaitTouchedSnapshot(engine, file);
+            Future<String> selection = workers.submit(() -> engine.write(file, () -> {
+                String raw = "language = \"fi_FI\"\n";
+                Files.writeString(file.toPath(), raw, StandardCharsets.UTF_8);
+                written.countDown();
+                assertTrue(release.await(5L, TimeUnit.SECONDS));
+                return new ConfigHotloadEngine.Written<>(raw, "fi_FI");
+            }));
+            assertTrue(written.await(5L, TimeUnit.SECONDS));
+            AtomicInteger applies = new AtomicInteger();
+            Future<Boolean> hotload = workers.submit(() -> {
+                applyStarted.countDown();
+                return engine.processSnapshotChange(captured, snapshot -> {
+                    applies.incrementAndGet();
+                    return true;
+                }, null);
+            });
+            assertTrue(applyStarted.await(5L, TimeUnit.SECONDS));
+            assertThrows(TimeoutException.class, () -> hotload.get(100L, TimeUnit.MILLISECONDS));
+            release.countDown();
+
+            assertEquals("fi_FI", selection.get(5L, TimeUnit.SECONDS));
+            assertFalse(hotload.get(5L, TimeUnit.SECONDS));
+            assertEquals(0, applies.get());
+        } finally {
+            release.countDown();
+            workers.shutdownNow();
+            assertTrue(workers.awaitTermination(2L, TimeUnit.SECONDS));
             engine.clear();
         }
     }

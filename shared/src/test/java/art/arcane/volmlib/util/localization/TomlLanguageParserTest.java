@@ -12,6 +12,33 @@ import static org.junit.Assert.assertTrue;
 
 public class TomlLanguageParserTest {
     @Test
+    public void keepsValidTranslationsWhenOtherEntriesAreMissingOrInvalid() throws Exception {
+        MessageCatalog catalog = MessageCatalog.of("en_US",
+                TextKey.of("message.saved", "Saved {name}"),
+                TextKey.of("message.missing", "Missing"),
+                TextKey.of("message.wrongType", "Text"),
+                TextKey.of("message.wrongVariables", "Value {value}"),
+                TextKey.of("message.malformed", "Hello {name}"),
+                TextKey.ofOptional("message.optional", "{prefix}Done", "prefix"),
+                TextKey.of("message.prefix", "&6Test "));
+        String source = "[message]\nsaved = \"Enregistré {name}\"\nwrongType = 42\n"
+                + "wrongVariables = \"Valeur {wrong}\"\nmalformed = \"Bonjour {name\"\n"
+                + "optional = \"Terminé\"\nprefix = \"\"\nunknown = [1, 2]\n";
+
+        assertEquals(Map.of("message.saved", "Enregistré {name}",
+                        "message.optional", "Terminé", "message.prefix", ""),
+                TomlLanguageParser.parseValidText(source, catalog));
+    }
+
+    @Test
+    public void tolerantParsingStillRejectsUnreadableToml() {
+        MessageCatalog catalog = MessageCatalog.of("en_US", TextKey.of("message.text", "Text"));
+
+        assertThrows(IOException.class,
+                () -> TomlLanguageParser.parseValidText("[message]\ntext = \"unclosed", catalog));
+    }
+
+    @Test
     public void parsesSectionedTextValues() throws Exception {
         String source = "# Reference\n[runtime]\nprefix = \"&dPortal &8> \"\n"
                 + "[command.feedback]\nsaved = \"{prefix}&aSaved {setting}\"\n";

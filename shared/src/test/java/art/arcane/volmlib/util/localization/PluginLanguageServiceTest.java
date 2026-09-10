@@ -17,6 +17,9 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Logger;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -169,22 +172,71 @@ public class PluginLanguageServiceTest {
     }
 
     @Test
-    public void incompletePreparationFallsBackForServerAndPlayer() throws Exception {
+    public void englishFallbackLogsTheOriginalDownloadFailureAndCauseOnce() throws Exception {
+        Path file = temporaryFolder.getRoot().toPath().resolve("failed-download.properties");
+        IOException failure = new IOException("Download failed", new IllegalArgumentException("Invalid response"));
+        AtomicReference<LogRecord> warning = new AtomicReference<>();
+        AtomicInteger records = new AtomicInteger();
+        AtomicReference<String> locale = new AtomicReference<>("de_DE");
+        Logger logger = Logger.getAnonymousLogger();
+        logger.setUseParentHandlers(false);
+        logger.addHandler(new Handler() {
+            @Override
+            public void publish(LogRecord record) {
+                warning.set(record);
+                records.incrementAndGet();
+            }
+
+            @Override
+            public void flush() {
+            }
+
+            @Override
+            public void close() {
+            }
+        });
+        PluginLanguageService.Options options = new PluginLanguageService.Options(file,
+                () -> List.of("en_US", "de_DE"), locale::get, () -> ENGLISH, requested -> {
+                    if (requested.equals("de_DE")) {
+                        throw failure;
+                    }
+                    return ENGLISH;
+                }, (selected, prepared) -> locale.set(selected), logger);
+
+        try (PluginLanguageService service = new PluginLanguageService(options)) {
+            service.selectDefault("de_DE").get(2L, TimeUnit.SECONDS);
+            assertEquals("en_US", service.defaultLocale());
+            assertEquals(1, records.get());
+            assertEquals(Level.WARNING, warning.get().getLevel());
+            assertTrue(warning.get().getMessage().contains("de_DE"));
+            assertTrue(warning.get().getMessage().contains("en_US"));
+            assertSame(failure, warning.get().getThrown());
+            assertSame(failure.getCause(), warning.get().getThrown().getCause());
+        }
+    }
+
+    @Test
+    public void partialPreparationRetainsServerAndPlayerSelectionsWithEnglishForMissingEntries() throws Exception {
         Path file = temporaryFolder.getRoot().toPath().resolve("preferences.properties");
         AtomicReference<String> locale = new AtomicReference<>("fr_FR");
         AtomicReference<LocalizationSnapshot> active = new AtomicReference<>(snapshot("fr_FR"));
         UUID player = UUID.randomUUID();
-        LocalizationSnapshot incomplete = LocalizationSnapshot.create(new LocalizationCandidate(CATALOG,
-                List.of(LocaleOverlay.builder("de_DE").build()), PluralSelector.oneOther()));
+        TextKey translated = TextKey.of("test.translated", "Saved");
+        MessageCatalog partialCatalog = MessageCatalog.of("en_US", TEXT, translated);
+        LocalizationSnapshot incomplete = LocalizationSnapshot.create(new LocalizationCandidate(partialCatalog,
+                List.of(LocaleOverlay.builder("de_DE").text(translated.id(), "Gespeichert").build()),
+                PluralSelector.oneOther()));
         try (PluginLanguageService service = service(file, locale, active, requested ->
                 requested.equals("de_DE") ? incomplete : snapshot(requested))) {
             service.selectDefault("de_DE").get(2, TimeUnit.SECONDS);
             service.selectPlayer(player, "de_DE").get(2, TimeUnit.SECONDS);
-            assertEquals("en_US", service.defaultLocale());
-            assertEquals("en_US", service.effectiveLocale(player));
+            assertEquals("de_DE", service.defaultLocale());
+            assertEquals("de_DE", service.effectiveLocale(player));
             assertEquals("en_US", active.get().sourceLocale(TEXT));
             assertEquals("en_US", service.snapshot(player).sourceLocale(TEXT));
-            assertEquals(player + "=en_US\n", Files.readString(file));
+            assertEquals("Gespeichert", active.get().resolve(translated).template());
+            assertEquals("Gespeichert", service.snapshot(player).resolve(translated).template());
+            assertEquals(player + "=de_DE\n", Files.readString(file));
         }
     }
 
@@ -330,6 +382,39 @@ public class PluginLanguageServiceTest {
             release.countDown();
             service.clearPlayer(UUID.randomUUID()).get(2, TimeUnit.SECONDS);
             assertSame(ENGLISH, service.snapshot(player));
+        } finally {
+            release.countDown();
+        }
+    }
+
+    @Test
+    public void cachedUpdateDiscardsOlderInFlightLoadsWithoutEvictingOtherLocales() throws Exception {
+        Path file = temporaryFolder.getRoot().toPath().resolve("preferences.properties");
+        UUID frenchPlayer = UUID.randomUUID();
+        UUID germanPlayer = UUID.randomUUID();
+        Files.writeString(file, frenchPlayer + "=fr_FR\n" + germanPlayer + "=de_DE\n");
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        LocalizationSnapshot updated = LocalizationSnapshot.create(new LocalizationCandidate(CATALOG,
+                List.of(LocaleOverlay.builder("edited", "fr_FR").text(TEXT.id(), "Updated French").build()),
+                PluralSelector.oneOther()));
+        LocalizationSnapshot german = snapshot("de_DE");
+        try (PluginLanguageService service = service(file, new AtomicReference<>("en_US"),
+                new AtomicReference<>(ENGLISH), requested -> {
+                    entered.countDown();
+                    assertTrue(release.await(2, TimeUnit.SECONDS));
+                    return snapshot(requested);
+                })) {
+            service.cache("de_DE", german);
+            service.snapshot(frenchPlayer);
+            assertTrue(entered.await(2, TimeUnit.SECONDS));
+            service.cache("fr_FR", updated);
+            release.countDown();
+            service.clearPlayer(UUID.randomUUID()).get(2, TimeUnit.SECONDS);
+
+            assertSame(updated, service.snapshot(frenchPlayer));
+            assertSame(german, service.snapshot(germanPlayer));
+            assertEquals("fr_FR", service.playerLocale(frenchPlayer).orElseThrow());
         } finally {
             release.countDown();
         }

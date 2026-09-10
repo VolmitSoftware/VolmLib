@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 public final class LocalizationValidator {
@@ -19,53 +20,77 @@ public final class LocalizationValidator {
         return new LocalizationValidationResult(issues);
     }
 
+    public static LocaleOverlay validValues(MessageCatalog catalog, LocaleOverlay overlay) {
+        Objects.requireNonNull(catalog, "catalog");
+        Objects.requireNonNull(overlay, "overlay");
+        LocaleOverlay.Builder accepted = LocaleOverlay.builder(overlay.source(), overlay.locale());
+        List<LocalizationIssue> issues = new ArrayList<>();
+        for (Map.Entry<String, MessageValue> entry : overlay.values().entrySet()) {
+            issues.clear();
+            validateOverlayValue(catalog, overlay, entry, issues);
+            if (issues.isEmpty()) {
+                accepted.put(entry.getKey(), entry.getValue());
+            }
+        }
+        return accepted.build();
+    }
+
     private static void validateOverlayValues(
             MessageCatalog catalog,
             LocaleOverlay overlay,
             List<LocalizationIssue> issues
     ) {
         for (Map.Entry<String, MessageValue> entry : overlay.values().entrySet()) {
-            String id = entry.getKey();
-            MessageValue value = entry.getValue();
-            MessageKey definition = catalog.key(id);
-            if (definition == null) {
-                issues.add(new LocalizationIssue(
-                        LocalizationSeverity.ERROR,
-                        LocalizationIssueCode.UNUSED_KEY,
-                        overlay.source(),
-                        id,
-                        "Locale overlay key is not declared by the message catalog"
-                ));
-                continue;
-            }
+            validateOverlayValue(catalog, overlay, entry, issues);
+        }
+    }
 
-            if (definition.shape() != value.shape()) {
-                issues.add(new LocalizationIssue(
-                        LocalizationSeverity.ERROR,
-                        LocalizationIssueCode.SHAPE_MISMATCH,
-                        overlay.source(),
-                        id,
-                        "Expected " + definition.shape() + " but found " + value.shape()
-                ));
-                continue;
-            }
+    private static void validateOverlayValue(
+            MessageCatalog catalog,
+            LocaleOverlay overlay,
+            Map.Entry<String, MessageValue> entry,
+            List<LocalizationIssue> issues
+    ) {
+        String id = entry.getKey();
+        MessageValue value = entry.getValue();
+        MessageKey definition = catalog.key(id);
+        if (definition == null) {
+            issues.add(new LocalizationIssue(
+                    LocalizationSeverity.ERROR,
+                    LocalizationIssueCode.UNUSED_KEY,
+                    overlay.source(),
+                    id,
+                    "Locale overlay key is not declared by the message catalog"
+            ));
+            return;
+        }
 
-            validateValueStructure(definition, value, overlay, issues);
+        if (definition.shape() != value.shape()) {
+            issues.add(new LocalizationIssue(
+                    LocalizationSeverity.ERROR,
+                    LocalizationIssueCode.SHAPE_MISMATCH,
+                    overlay.source(),
+                    id,
+                    "Expected " + definition.shape() + " but found " + value.shape()
+            ));
+            return;
+        }
 
-            Set<String> actualPlaceholders = overlayPlaceholders(definition, value);
-            Set<String> requiredPlaceholders = new LinkedHashSet<>(definition.placeholders());
-            requiredPlaceholders.removeAll(definition.optionalPlaceholders());
-            if (!definition.placeholders().containsAll(actualPlaceholders)
-                    || !actualPlaceholders.containsAll(requiredPlaceholders)) {
-                issues.add(new LocalizationIssue(
-                        LocalizationSeverity.ERROR,
-                        LocalizationIssueCode.PLACEHOLDER_MISMATCH,
-                        overlay.source(),
-                        id,
-                        "Required " + requiredPlaceholders + ", optional "
-                                + definition.optionalPlaceholders() + " but found " + actualPlaceholders
-                ));
-            }
+        validateValueStructure(definition, value, overlay, issues);
+
+        Set<String> actualPlaceholders = overlayPlaceholders(definition, value);
+        Set<String> requiredPlaceholders = new LinkedHashSet<>(definition.placeholders());
+        requiredPlaceholders.removeAll(definition.optionalPlaceholders());
+        if (!definition.placeholders().containsAll(actualPlaceholders)
+                || !actualPlaceholders.containsAll(requiredPlaceholders)) {
+            issues.add(new LocalizationIssue(
+                    LocalizationSeverity.ERROR,
+                    LocalizationIssueCode.PLACEHOLDER_MISMATCH,
+                    overlay.source(),
+                    id,
+                    "Required " + requiredPlaceholders + ", optional "
+                            + definition.optionalPlaceholders() + " but found " + actualPlaceholders
+            ));
         }
     }
 

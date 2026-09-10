@@ -164,15 +164,14 @@ public final class PluginLanguageService implements AutoCloseable {
     public void cache(String locale, LocalizationSnapshot snapshot) {
         String requiredLocale = requireLocale(locale);
         LocalizationSnapshot requiredSnapshot = Objects.requireNonNull(snapshot, "snapshot");
-        if (closed) {
-            return;
+        synchronized (commitLock) {
+            if (closed) {
+                return;
+            }
+            generation.incrementAndGet();
+            snapshots.put(requiredLocale, requiredSnapshot);
+            failedLoads.remove(requiredLocale);
         }
-        snapshots.put(requiredLocale, requiredSnapshot);
-        if (closed) {
-            snapshots.remove(requiredLocale, requiredSnapshot);
-            return;
-        }
-        failedLoads.remove(requiredLocale);
     }
 
     @Override
@@ -246,13 +245,7 @@ public final class PluginLanguageService implements AutoCloseable {
     }
 
     private LocalizationSnapshot loadSnapshot(String locale) throws Exception {
-        LocalizationSnapshot prepared = Objects.requireNonNull(options.loader().load(locale), "Language snapshot");
-        for (MessageKey key : prepared.catalog().keys()) {
-            if (!sameLocale(locale, prepared.sourceLocale(key))) {
-                throw new IllegalArgumentException("Language " + locale + " is incomplete: " + key.id());
-            }
-        }
-        return prepared;
+        return Objects.requireNonNull(options.loader().load(locale), "Language snapshot");
     }
 
     private PreparedSelection prepareEnglish(String locale, Exception failure, CompletableFuture<Void> result)
@@ -290,8 +283,8 @@ public final class PluginLanguageService implements AutoCloseable {
 
     private void reportFallback(String locale, PreparedSelection prepared) {
         if (prepared.failure() != null) {
-            options.logger().warning("Language " + locale + " is unavailable; using English ("
-                    + VolmitLocales.ENGLISH + "): " + prepared.failure().getMessage());
+            options.logger().log(Level.WARNING, "Language " + locale + " is unavailable; using English ("
+                    + VolmitLocales.ENGLISH + ")", prepared.failure());
         }
     }
 

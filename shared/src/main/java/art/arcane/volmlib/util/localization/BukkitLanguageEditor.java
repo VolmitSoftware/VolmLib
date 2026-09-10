@@ -48,7 +48,6 @@ import java.util.logging.Level;
 
 final class BukkitLanguageEditor implements AutoCloseable, Listener {
     static final int PAGE_SIZE = 45;
-    private static final int CATEGORY_PAGE_SIZE = 16;
     private static final int SIZE = 54;
     private static final int BACK = 45;
     private static final int PREVIOUS = 48;
@@ -480,7 +479,7 @@ final class BukkitLanguageEditor implements AutoCloseable, Listener {
                 entry = localeItem(player, locale, VolmitLocales.displayName(locale).orElse(locale), active);
             } else if (view.group() == null && view.filter().isEmpty()) {
                 String group = groups.get(index);
-                entry = categoryItem(player, groupMaterial(group), groupName(group),
+                entry = categoryItem(player, group, groupName(group),
                         messageCount(view.document(), group));
             } else if (view.key() == null) {
                 MessageKey key = keys.get(index);
@@ -564,7 +563,7 @@ final class BukkitLanguageEditor implements AutoCloseable, Listener {
                 ? BukkitLanguageMessages.EDITOR_EDIT_LINES
                 : BukkitLanguageMessages.EDITOR_EDIT_CHAT;
         lore.add(localized(player, instruction));
-        return formattedItem(Material.PAPER,
+        return formattedItem(options.presentation().icon(key.id(), Material.PAPER),
                 ComponentText.markup("&f" + DirectorMiniMenu.escapeText(
                         form == null ? key.id() : partLabel(player, value, form)) + "&r"), lore);
     }
@@ -584,8 +583,8 @@ final class BukkitLanguageEditor implements AutoCloseable, Listener {
         );
     }
 
-    private ItemStack categoryItem(Player player, Material material, String name, int messages) {
-        return formattedItem(material,
+    private ItemStack categoryItem(Player player, String group, String name, int messages) {
+        return formattedItem(options.presentation().icon(group, groupMaterial(group)),
                 categoryTitle(name),
                 List.of(
                         localized(
@@ -606,9 +605,20 @@ final class BukkitLanguageEditor implements AutoCloseable, Listener {
     }
 
     static List<Integer> categorySlots(int count) {
-        int bounded = Math.max(0, Math.min(count, CATEGORY_PAGE_SIZE));
+        return categorySlots(count, BukkitLanguageEditorPresentation.Layout.CENTERED);
+    }
+
+    static List<Integer> categorySlots(int count, BukkitLanguageEditorPresentation.Layout layout) {
+        int bounded = Math.max(0, Math.min(count, layout.categoryPageSize()));
         if (bounded == 0) {
             return List.of();
+        }
+        if (layout == BukkitLanguageEditorPresentation.Layout.FOUR_ROWS) {
+            ArrayList<Integer> slots = new ArrayList<>(bounded);
+            for (int slot = 0; slot < bounded; slot++) {
+                slots.add(slot);
+            }
+            return List.copyOf(slots);
         }
         int rows = (bounded + 6) / 7;
         int firstRow = (5 - rows) / 2;
@@ -626,14 +636,15 @@ final class BukkitLanguageEditor implements AutoCloseable, Listener {
         return List.copyOf(slots);
     }
 
-    private static int pageSize(View view) {
+    private int pageSize(View view) {
         return view.locale() != null && view.group() == null && view.filter().isEmpty()
-                ? CATEGORY_PAGE_SIZE : PAGE_SIZE;
+                ? options.presentation().layout().categoryPageSize()
+                : options.presentation().layout().messagePageSize();
     }
 
-    private static List<Integer> contentSlots(View view, int count) {
+    private List<Integer> contentSlots(View view, int count) {
         if (view.locale() != null && view.group() == null && view.filter().isEmpty()) {
-            return categorySlots(count);
+            return categorySlots(count, options.presentation().layout());
         }
         ArrayList<Integer> slots = new ArrayList<>(count);
         for (int slot = 0; slot < count; slot++) {
@@ -642,17 +653,20 @@ final class BukkitLanguageEditor implements AutoCloseable, Listener {
         return List.copyOf(slots);
     }
 
-    private static int contentOrdinal(View view, int slot) {
+    private int contentOrdinal(View view, int slot) {
         if (view.locale() != null && view.group() == null && view.filter().isEmpty()) {
             DirectorMiniMenu.ContentPage page = DirectorMiniMenu.paginate(
-                    groups(view.document()).size(), view.page(), CATEGORY_PAGE_SIZE);
-            return categorySlots(page.endIndex() - page.startIndex()).indexOf(slot);
+                    groups(view.document()).size(), view.page(), pageSize(view));
+            return categorySlots(page.endIndex() - page.startIndex(), options.presentation().layout()).indexOf(slot);
         }
-        return slot < PAGE_SIZE ? slot : -1;
+        return slot < pageSize(view) ? slot : -1;
     }
 
     private ItemStack formattedItem(Material material, ComponentText name, List<ComponentText> lore) {
-        ItemStack stack = new ItemStack(material);
+        return formattedItem(new ItemStack(material), name, lore);
+    }
+
+    private ItemStack formattedItem(ItemStack stack, ComponentText name, List<ComponentText> lore) {
         ItemMeta meta = stack.getItemMeta();
         if (meta == null) {
             return stack;
@@ -1017,7 +1031,11 @@ final class BukkitLanguageEditor implements AutoCloseable, Listener {
         return List.copyOf(lines);
     }
 
-    record Options(PluginLanguageService languages, BukkitLanguageSwitcher.Options switcher, Consumer<Player> back) {
+    record Options(PluginLanguageService languages, BukkitLanguageSwitcher.Options switcher, Consumer<Player> back,
+                   BukkitLanguageEditorPresentation presentation) {
+        Options {
+            Objects.requireNonNull(presentation, "presentation");
+        }
     }
 
     private record View(String locale, PluginLanguageEditor.Document document, String group, String filter,

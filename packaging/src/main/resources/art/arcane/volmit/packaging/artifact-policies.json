@@ -100,7 +100,7 @@
     {
       "name": "HiddenOre",
       "filename": "HiddenOre-*.jar",
-      "max_bytes": 755000,
+      "max_bytes": 800000,
       "forbidden_prefixes": [
         "org/bukkit/",
         "io/papermc/",

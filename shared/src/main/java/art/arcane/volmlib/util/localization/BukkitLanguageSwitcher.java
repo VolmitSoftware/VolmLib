@@ -50,18 +50,24 @@ public final class BukkitLanguageSwitcher implements AutoCloseable, Listener {
     private final BukkitLanguageEditor editor;
     private volatile boolean closed;
 
-    private BukkitLanguageSwitcher(Plugin plugin, PluginLanguageService languages, Options options) {
+    private BukkitLanguageSwitcher(Plugin plugin, PluginLanguageService languages, Options options,
+                                   BukkitLanguageEditorPresentation presentation) {
         this.plugin = Objects.requireNonNull(plugin, "plugin");
         this.languages = Objects.requireNonNull(languages, "languages");
         this.options = Objects.requireNonNull(options, "options");
         commandRegistration = new BukkitVolmitCommand(plugin, this);
         editor = new BukkitLanguageEditor(plugin, new BukkitLanguageEditor.Options(languages, options,
-                player -> command(player, new String[]{"server"})));
+                player -> command(player, new String[]{"server"}), presentation));
         provider = createProvider();
     }
 
     public static BukkitLanguageSwitcher register(Plugin plugin, PluginLanguageService languages, Options options) {
-        BukkitLanguageSwitcher switcher = new BukkitLanguageSwitcher(plugin, languages, options);
+        return register(plugin, languages, options, BukkitLanguageEditorPresentation.standard());
+    }
+
+    public static BukkitLanguageSwitcher register(Plugin plugin, PluginLanguageService languages, Options options,
+                                                 BukkitLanguageEditorPresentation presentation) {
+        BukkitLanguageSwitcher switcher = new BukkitLanguageSwitcher(plugin, languages, options, presentation);
         if (plugin.getServer().getPluginManager().getPermission("volmit.language.self") == null) {
             plugin.getServer().getPluginManager().addPermission(new Permission("volmit.language.self", PermissionDefault.TRUE));
         }

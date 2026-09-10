@@ -15,18 +15,18 @@ import static org.junit.Assert.assertTrue;
 
 public class TomlLanguageEditorTest {
     @Test
-    public void updatesQuotedDottedKeysAtTheRootAndInsideTables() throws IOException {
+    public void groupsQuotedDottedKeysAtTheRootAndInsideTables() throws IOException {
         String raw = "\"command.version\" = \"Old root\"\n\n[menu]\n\"status.message\" = \"Old nested\"\n";
         TomlLanguageEditor.EditResult root = TomlLanguageEditor.upsert(raw,
                 "command.version", new TextValue("New root"));
         TomlLanguageEditor.EditResult nested = TomlLanguageEditor.upsert(root.content(),
                 "menu.status.message", new TextValue("New nested"));
         JsonElement parsed = TomlCodec.toJsonElement(nested.content());
-        assertEquals("New root", parsed.getAsJsonObject().get("command.version").getAsString());
-        assertFalse(parsed.getAsJsonObject().has("command"));
+        assertEquals("New root", parsed.getAsJsonObject().getAsJsonObject("command").get("version").getAsString());
+        assertFalse(parsed.getAsJsonObject().has("command.version"));
         assertEquals("New nested", parsed.getAsJsonObject().getAsJsonObject("menu")
-                .get("status.message").getAsString());
-        assertFalse(parsed.getAsJsonObject().getAsJsonObject("menu").has("status"));
+                .getAsJsonObject("status").get("message").getAsString());
+        assertFalse(parsed.getAsJsonObject().getAsJsonObject("menu").has("status.message"));
         TomlLanguageEditor.EditResult removed = TomlLanguageEditor.remove(nested.content(), "command.version");
         assertFalse(TomlCodec.toJsonElement(removed.content()).getAsJsonObject().has("command.version"));
     }
@@ -59,6 +59,13 @@ public class TomlLanguageEditorTest {
         assertTrue(parsed.getAsJsonObject().getAsJsonObject("unknown").get("enabled").getAsBoolean());
         assertEquals(2, parsed.getAsJsonObject().getAsJsonObject("unknown").getAsJsonArray("ports").size());
         assertFalse(result.empty());
+    }
+
+    @Test
+    public void removingScalarParentKeepsIndependentChildMessages() throws IOException {
+        String raw = "[command.help]\nweb = \"Editor\"\n\"web.open\" = \"Open\"\n";
+        TomlLanguageEditor.EditResult removed = TomlLanguageEditor.remove(raw, "command.help.web");
+        assertEquals(Map.of("command.help.web.open", "Open"), TomlLanguageParser.parseText(removed.content()));
     }
 
     @Test
@@ -105,7 +112,7 @@ public class TomlLanguageEditorTest {
         TomlLanguageEditor.EditResult result = TomlLanguageEditor.upsertText(
                 raw, "command.description.config", "New");
 
-        assertTrue(result.content().contains("[empty]\n"));
+        assertTrue(TomlCodec.toJsonElement(result.content()).getAsJsonObject().getAsJsonObject("empty").size() == 0);
         assertTrue(result.content().contains("[mixed]\nlabel = \"kept\""));
         assertTrue(result.content().contains("[mixed.child]\nenabled = true"));
         assertFalse(result.content().contains("  label ="));
@@ -113,8 +120,12 @@ public class TomlLanguageEditorTest {
     }
 
     @Test
-    public void rejectsTableAndScalarCollisions() {
-        assertThrows(IOException.class, () -> TomlLanguageEditor.upsertText(
-                "portal = \"scalar\"\n", "portal.notice.created", "Created"));
+    public void preservesParentMessagesWhenAddingChildMessages() throws IOException {
+        TomlLanguageEditor.EditResult result = TomlLanguageEditor.upsertText(
+                "# Header\n[command.help]\nweb = \"Editor\"\n", "command.help.web.open", "Open editor");
+
+        assertTrue(result.content().contains("[command.help]\nweb = \"Editor\"\n\"web.open\" = \"Open editor\""));
+        assertEquals(Map.of("command.help.web", "Editor", "command.help.web.open", "Open editor"),
+                TomlLanguageParser.parseText(result.content()));
     }
 }

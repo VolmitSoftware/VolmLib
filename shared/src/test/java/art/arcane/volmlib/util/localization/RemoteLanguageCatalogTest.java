@@ -16,6 +16,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.util.HexFormat;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -29,7 +30,6 @@ import java.util.function.Consumer;
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.assertThrows;
 
@@ -40,68 +40,29 @@ public class RemoteLanguageCatalogTest {
     public TemporaryFolder temporaryFolder = new TemporaryFolder();
 
     @Test
-    public void blockingLoadsVerifyCachesAndPreserveEditableLanguages() throws Exception {
-        byte[] content = "verified language".getBytes(StandardCharsets.UTF_8);
+    public void installsPartialCatalogsWithInvalidEntriesWithoutLosingValidTranslations() throws Exception {
+        String source = "[message]\ngreeting = \"Bonjour {name}\"\ninvalid = 42\n";
+        byte[] content = source.getBytes(StandardCharsets.UTF_8);
+        MessageCatalog messages = MessageCatalog.of("en_US",
+                TextKey.of("message.greeting", "Hello {name}"),
+                TextKey.of("message.invalid", "English"),
+                TextKey.of("message.missing", "Default"));
         HttpServer server = server(content);
         try (URLClassLoader resources = resources(hash(content));
              RemoteLanguageCatalog catalog = catalog(server, resources)) {
-            Path cache = catalog.cacheFile("fr_FR");
-            Files.createDirectories(cache.getParent());
-            Files.writeString(cache, "corrupt");
-            assertEquals("verified language", catalog.readOrDownload("fr_FR", (locale, raw) -> {}));
-            assertArrayEquals(content, Files.readAllBytes(cache));
-            Path editable = temporaryFolder.getRoot().toPath().resolve("fr_FR.yml");
-            Files.writeString(editable, "custom translation");
-            assertEquals("custom translation", catalog.readOrInstall("fr_FR", editable, (locale, raw) -> {}));
-            assertEquals("custom translation", Files.readString(editable));
-            assertThrows(IOException.class, () -> catalog.readOrInstall("fr_FR", editable, (locale, raw) -> {
-                throw new IOException("Invalid translation");
-            }));
-            assertEquals("custom translation", Files.readString(editable));
+            Path target = temporaryFolder.newFolder("partial-language").toPath().resolve("fr_FR.toml");
+            assertEquals(source, catalog.readOrInstall("fr_FR", target,
+                    (locale, raw) -> TomlLanguageParser.parseValidText(raw, messages)));
+            assertArrayEquals(content, Files.readAllBytes(target));
+            assertEquals(Map.of("message.greeting", "Bonjour {name}"),
+                    TomlLanguageParser.parseValidText(Files.readString(target), messages));
         } finally {
             server.stop(0);
         }
     }
 
     @Test
-    public void downloadsValidatesAndReusesExactCachedBytes() throws Exception {
-        byte[] content = "messages:\n  runtime:\n    prefix: '&6Test'\n".getBytes(StandardCharsets.UTF_8);
-        HttpServer server = server(content);
-        try (URLClassLoader resources = resources(hash(content));
-             RemoteLanguageCatalog catalog = catalog(server, resources)) {
-            CountDownLatch completed = new CountDownLatch(1);
-            AtomicReference<RemoteLanguageCatalog.DownloadResult> result = new AtomicReference<>();
-
-            RemoteLanguageCatalog.RequestState state = catalog.request("fr_FR", (locale, raw) -> {
-                if (!raw.contains("runtime")) {
-                    throw new IOException("Missing runtime section");
-                }
-            }, value -> {
-                result.set(value);
-                completed.countDown();
-            });
-
-            assertEquals(RemoteLanguageCatalog.RequestState.SCHEDULED, state);
-            assertTrue(completed.await(5L, TimeUnit.SECONDS));
-            assertNotNull(result.get());
-            assertTrue(result.get().successful());
-            assertArrayEquals(content, Files.readAllBytes(catalog.cacheFile("fr_FR")));
-
-            RemoteLanguageCatalog.CacheResult cached = catalog.read("fr_FR", (locale, raw) -> {
-            });
-            assertEquals(RemoteLanguageCatalog.CacheState.VALID, cached.state());
-            assertEquals(new String(content, StandardCharsets.UTF_8), cached.content());
-            assertEquals(RemoteLanguageCatalog.RequestState.CURRENT,
-                    catalog.request("fr_FR", (locale, raw) -> {
-                    }, ignored -> {
-                    }));
-        } finally {
-            server.stop(0);
-        }
-    }
-
-    @Test
-    public void installsVerifiedBytesDirectlyWithoutCreatingARevisionCache() throws Exception {
+    public void installsVerifiedBytesDirectly() throws Exception {
         byte[] content = "[runtime]\nprefix = \"&6Test\"\n".getBytes(StandardCharsets.UTF_8);
         HttpServer server = server(content);
         try (URLClassLoader resources = resources(hash(content));
@@ -125,7 +86,6 @@ public class RemoteLanguageCatalogTest {
             assertTrue(result.get().successful());
             assertEquals(target.toAbsolutePath().normalize(), result.get().file());
             assertArrayEquals(content, Files.readAllBytes(target));
-            assertFalse(Files.exists(catalog.cacheFile("fr_FR")));
         } finally {
             server.stop(0);
         }
@@ -154,20 +114,122 @@ public class RemoteLanguageCatalogTest {
     }
 
     @Test
-    public void checksumFailurePreservesExistingCache() throws Exception {
+    public void blockingInstallPreservesEditedLanguageWhenOffline() throws Exception {
+        byte[] content = "downloaded language".getBytes(StandardCharsets.UTF_8);
+        HttpServer server = server(content);
+        try (URLClassLoader resources = resources("main", null);
+             RemoteLanguageCatalog catalog = catalog(server, resources)) {
+            Path target = temporaryFolder.newFolder("blocking-language").toPath().resolve("fr_FR.yml");
+            AtomicInteger validations = new AtomicInteger();
+
+            assertEquals("downloaded language", catalog.readOrInstall("fr_FR", target, (locale, raw) -> {
+                assertEquals("fr_FR", locale);
+                assertEquals("downloaded language", raw);
+                validations.incrementAndGet();
+            }));
+            assertArrayEquals(content, Files.readAllBytes(target));
+            assertTrue(validations.get() > 0);
+
+            Files.writeString(target, "operator edit");
+            server.stop(0);
+
+            assertEquals("operator edit", catalog.readOrInstall("fr_FR", target,
+                    (locale, raw) -> assertEquals("operator edit", raw)));
+            assertThrows(IOException.class, () -> catalog.readOrInstall("fr_FR", target, (locale, raw) -> {
+                throw new IOException("Invalid translation");
+            }));
+            assertEquals("operator edit", Files.readString(target));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    public void asynchronousInstallPreservesEditedLanguageWhenOffline() throws Exception {
+        byte[] content = "verified language".getBytes(StandardCharsets.UTF_8);
+        HttpServer server = server(content);
+        try (URLClassLoader resources = resources(hash(content));
+             RemoteLanguageCatalog catalog = catalog(server, resources)) {
+            Path target = temporaryFolder.newFolder("asynchronous-language").toPath().resolve("fr_FR.yml");
+            CountDownLatch completed = new CountDownLatch(1);
+            AtomicReference<RemoteLanguageCatalog.DownloadResult> result = new AtomicReference<>();
+
+            assertEquals(RemoteLanguageCatalog.RequestState.SCHEDULED,
+                    catalog.requestInstallIfMissing("fr_FR", target, (locale, raw) -> {
+                        assertEquals("fr_FR", locale);
+                        assertEquals("verified language", raw);
+                    }, value -> {
+                        result.set(value);
+                        completed.countDown();
+                    }));
+
+            assertTrue(completed.await(5L, TimeUnit.SECONDS));
+            assertTrue(result.get().successful());
+            assertEquals(target.toAbsolutePath().normalize(), result.get().file());
+            assertArrayEquals(content, Files.readAllBytes(target));
+
+            Files.writeString(target, "operator edit");
+            server.stop(0);
+
+            assertEquals(RemoteLanguageCatalog.RequestState.CURRENT,
+                    catalog.requestInstallIfMissing("fr_FR", target, (locale, raw) -> {}, ignored -> {}));
+            assertEquals("operator edit", catalog.readOrInstall("fr_FR", target,
+                    (locale, raw) -> assertEquals("operator edit", raw)));
+            assertEquals("operator edit", Files.readString(target));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    public void blockingInstallPreservesAFileCreatedDuringDownload() throws Exception {
+        byte[] content = "downloaded language".getBytes(StandardCharsets.UTF_8);
+        HttpServer server = server(content);
+        try (URLClassLoader resources = resources(hash(content));
+             RemoteLanguageCatalog catalog = catalog(server, resources)) {
+            Path target = temporaryFolder.newFolder("concurrent-language").toPath().resolve("fr_FR.yml");
+
+            assertEquals("operator edit", catalog.readOrInstall("fr_FR", target, (locale, raw) -> {
+                if (raw.equals("downloaded language")) {
+                    Files.writeString(target, "operator edit");
+                }
+            }));
+            assertEquals("operator edit", Files.readString(target));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    public void blockingInstallRejectsMismatchedDownloadBeforePublication() throws Exception {
+        byte[] expected = "expected".getBytes(StandardCharsets.UTF_8);
+        HttpServer server = server("different".getBytes(StandardCharsets.UTF_8));
+        try (URLClassLoader resources = resources(hash(expected));
+             RemoteLanguageCatalog catalog = catalog(server, resources)) {
+            Path target = temporaryFolder.newFolder("invalid-language").toPath().resolve("fr_FR.yml");
+
+            assertThrows(IllegalArgumentException.class,
+                    () -> catalog.readOrInstall("fr_FR", target, (locale, raw) -> {}));
+            assertFalse(Files.exists(target));
+            assertThrows(IOException.class,
+                    () -> catalog.readOrInstall("fr_FR", target, (locale, raw) -> {}));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    public void checksumFailureRejectsDownloadBeforeInstallation() throws Exception {
         byte[] expected = "expected".getBytes(StandardCharsets.UTF_8);
         byte[] response = "different".getBytes(StandardCharsets.UTF_8);
         HttpServer server = server(response);
         try (URLClassLoader resources = resources(hash(expected));
              RemoteLanguageCatalog catalog = catalog(server, resources)) {
-            Path target = catalog.cacheFile("fr_FR");
-            Files.createDirectories(target.getParent());
-            byte[] previous = "previous".getBytes(StandardCharsets.UTF_8);
-            Files.write(target, previous);
+            Path target = temporaryFolder.newFolder("checksum-language").toPath().resolve("fr_FR.yml");
             CountDownLatch completed = new CountDownLatch(1);
             AtomicReference<RemoteLanguageCatalog.DownloadResult> result = new AtomicReference<>();
 
-            catalog.request("fr_FR", (locale, raw) -> {
+            catalog.requestInstallIfMissing("fr_FR", target, (locale, raw) -> {
             }, value -> {
                 result.set(value);
                 completed.countDown();
@@ -176,7 +238,7 @@ public class RemoteLanguageCatalogTest {
             assertTrue(completed.await(5L, TimeUnit.SECONDS));
             assertFalse(result.get().successful());
             assertTrue(result.get().failure().getMessage().contains("checksum"));
-            assertArrayEquals(previous, Files.readAllBytes(target));
+            assertFalse(Files.exists(target));
         } finally {
             server.stop(0);
         }
@@ -193,11 +255,12 @@ public class RemoteLanguageCatalogTest {
         server.start();
         try (URLClassLoader resources = resources(hash(expected));
              RemoteLanguageCatalog catalog = catalog(server, resources)) {
+            Path target = temporaryFolder.newFolder("requested-language").toPath().resolve("fr_FR.yml");
             CountDownLatch completed = new CountDownLatch(1);
             AtomicReference<RemoteLanguageCatalog.DownloadResult> result = new AtomicReference<>();
 
             assertEquals(RemoteLanguageCatalog.RequestState.SCHEDULED,
-                    catalog.request("fr_FR", (locale, raw) -> {
+                    catalog.requestInstallIfMissing("fr_FR", target, (locale, raw) -> {
                     }, value -> {
                         result.set(value);
                         completed.countDown();
@@ -209,7 +272,7 @@ public class RemoteLanguageCatalogTest {
             assertTrue(result.get().failure().getMessage().contains(result.get().source().toString()));
             assertTrue(result.get().failure().getMessage().contains("HTTP 404"));
             assertEquals(RemoteLanguageCatalog.RequestState.COOLDOWN,
-                    catalog.request("fr_FR", (locale, raw) -> {
+                    catalog.requestInstallIfMissing("fr_FR", target, (locale, raw) -> {
                     }, ignored -> {
                     }));
         } finally {
@@ -220,10 +283,12 @@ public class RemoteLanguageCatalogTest {
     @Test
     public void coalescesConcurrentRequestsAndCompletesEveryListener() throws Exception {
         byte[] content = "verified".getBytes(StandardCharsets.UTF_8);
+        AtomicInteger requests = new AtomicInteger();
         CountDownLatch requestStarted = new CountDownLatch(1);
         CountDownLatch releaseResponse = new CountDownLatch(1);
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/", exchange -> {
+            requests.incrementAndGet();
             requestStarted.countDown();
             try {
                 releaseResponse.await(5L, TimeUnit.SECONDS);
@@ -236,6 +301,7 @@ public class RemoteLanguageCatalogTest {
         server.start();
         try (URLClassLoader resources = resources(hash(content));
              RemoteLanguageCatalog catalog = catalog(server, resources)) {
+            Path target = temporaryFolder.newFolder("requested-language").toPath().resolve("fr_FR.yml");
             CountDownLatch completed = new CountDownLatch(2);
             AtomicInteger completions = new AtomicInteger();
             Consumer<RemoteLanguageCatalog.DownloadResult> completion = result -> {
@@ -246,16 +312,18 @@ public class RemoteLanguageCatalogTest {
             };
 
             assertEquals(RemoteLanguageCatalog.RequestState.SCHEDULED,
-                    catalog.request("fr_FR", (locale, raw) -> {
+                    catalog.requestInstallIfMissing("fr_FR", target, (locale, raw) -> {
                     }, completion));
             assertTrue(requestStarted.await(5L, TimeUnit.SECONDS));
             assertEquals(RemoteLanguageCatalog.RequestState.IN_FLIGHT,
-                    catalog.request("fr_FR", (locale, raw) -> {
+                    catalog.requestInstallIfMissing("fr_FR", target, (locale, raw) -> {
                     }, completion));
 
             releaseResponse.countDown();
             assertTrue(completed.await(5L, TimeUnit.SECONDS));
             assertEquals(2, completions.get());
+            assertEquals(1, requests.get());
+            assertArrayEquals(content, Files.readAllBytes(target));
         } finally {
             releaseResponse.countDown();
             server.stop(0);
@@ -301,35 +369,23 @@ public class RemoteLanguageCatalogTest {
                     "languages",
                     ".yml",
                     "source.properties",
-                    temporaryFolder.newFolder("invalid-cache").toPath(),
                     loader
             ));
         }
     }
 
     @Test
-    public void closingRejectsABlockingCacheDownloadAfterValidation() throws Exception {
-        assertCloseRejectsPublication(false, false);
-    }
-
-    @Test
     public void closingRejectsABlockingDirectInstallAfterValidation() throws Exception {
-        assertCloseRejectsPublication(true, false);
-    }
-
-    @Test
-    public void closingRejectsAnAsynchronousCacheDownloadAfterValidation() throws Exception {
-        assertCloseRejectsPublication(false, true);
+        assertCloseRejectsPublication(false);
     }
 
     @Test
     public void closingRejectsAnAsynchronousDirectInstallAfterValidation() throws Exception {
-        assertCloseRejectsPublication(true, true);
+        assertCloseRejectsPublication(true);
     }
 
-    private void assertCloseRejectsPublication(boolean directInstall, boolean asynchronous) throws Exception {
+    private void assertCloseRejectsPublication(boolean asynchronous) throws Exception {
         byte[] content = "downloaded language".getBytes(StandardCharsets.UTF_8);
-        byte[] previous = "previous cache".getBytes(StandardCharsets.UTF_8);
         HttpServer server = server(content);
         CountDownLatch entered = new CountDownLatch(1);
         CountDownLatch released = new CountDownLatch(1);
@@ -338,13 +394,7 @@ public class RemoteLanguageCatalogTest {
         AtomicInteger callbacks = new AtomicInteger();
         try (URLClassLoader resources = resources(hash(content));
              RemoteLanguageCatalog catalog = catalog(server, resources)) {
-            Path target = directInstall
-                    ? temporaryFolder.newFolder("closing-install").toPath().resolve("fr_FR.toml")
-                    : catalog.cacheFile("fr_FR");
-            if (!directInstall) {
-                Files.createDirectories(target.getParent());
-                Files.write(target, previous);
-            }
+            Path target = temporaryFolder.newFolder("closing-install").toPath().resolve("fr_FR.toml");
             RemoteLanguageCatalog.ContentValidator validator = (locale, raw) -> {
                 validationThread.set(Thread.currentThread());
                 entered.countDown();
@@ -352,14 +402,10 @@ public class RemoteLanguageCatalogTest {
             };
             Future<String> blocking = null;
             if (asynchronous) {
-                RemoteLanguageCatalog.RequestState state = directInstall
-                        ? catalog.requestInstallIfMissing("fr_FR", target, validator, result -> callbacks.incrementAndGet())
-                        : catalog.request("fr_FR", validator, result -> callbacks.incrementAndGet());
-                assertEquals(RemoteLanguageCatalog.RequestState.SCHEDULED, state);
+                assertEquals(RemoteLanguageCatalog.RequestState.SCHEDULED,
+                        catalog.requestInstallIfMissing("fr_FR", target, validator, result -> callbacks.incrementAndGet()));
             } else {
-                blocking = workers.submit(() -> directInstall
-                        ? catalog.readOrInstall("fr_FR", target, validator)
-                        : catalog.readOrDownload("fr_FR", validator));
+                blocking = workers.submit(() -> catalog.readOrInstall("fr_FR", target, validator));
             }
             assertTrue(entered.await(2L, TimeUnit.SECONDS));
             Future<?> closed = workers.submit(catalog::close);
@@ -375,13 +421,7 @@ public class RemoteLanguageCatalogTest {
                 assertTrue(failure.getCause() instanceof IOException);
             }
             assertEquals(0, callbacks.get());
-            if (directInstall) {
-                assertFalse(Files.exists(target));
-            } else {
-                assertArrayEquals(previous, Files.readAllBytes(target));
-            }
-            assertEquals(RemoteLanguageCatalog.RequestState.CLOSED,
-                    catalog.request("fr_FR", validator, result -> callbacks.incrementAndGet()));
+            assertFalse(Files.exists(target));
             assertEquals(RemoteLanguageCatalog.RequestState.CLOSED,
                     catalog.requestInstallIfMissing("fr_FR", target, validator, result -> callbacks.incrementAndGet()));
         } finally {
@@ -428,7 +468,7 @@ public class RemoteLanguageCatalogTest {
         return new URLClassLoader(new URL[]{resources.toUri().toURL()}, null);
     }
 
-    private RemoteLanguageCatalog catalog(HttpServer server, ClassLoader resources) throws IOException {
+    private RemoteLanguageCatalog catalog(HttpServer server, ClassLoader resources) {
         URI root = URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/");
         return RemoteLanguageCatalog.load(new RemoteLanguageCatalog.Options(
                 "Test",
@@ -436,7 +476,6 @@ public class RemoteLanguageCatalogTest {
                 "languages",
                 ".yml",
                 "source.properties",
-                temporaryFolder.newFolder("cache-" + System.nanoTime()).toPath(),
                 resources
         ));
     }

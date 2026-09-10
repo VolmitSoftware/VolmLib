@@ -5,6 +5,7 @@ import art.arcane.volmlib.util.director.help.DirectorMiniMenu;
 import art.arcane.volmlib.util.inventorygui.BukkitInventoryShutdown;
 import art.arcane.volmlib.util.scheduling.FoliaScheduler;
 import org.bukkit.ChatColor;
+import org.bukkit.Material;
 import org.bukkit.Server;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Entity;
@@ -14,6 +15,7 @@ import org.bukkit.event.server.PluginDisableEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.InventoryView;
+import org.bukkit.inventory.ItemStack;
 import org.bukkit.plugin.Plugin;
 import org.junit.Test;
 import org.mockito.MockedStatic;
@@ -26,15 +28,18 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Consumer;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNotSame;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
@@ -127,7 +132,7 @@ public class BukkitLanguageEditorTest {
         BukkitLanguageEditor editor = new BukkitLanguageEditor(
                 plugin,
                 new BukkitLanguageEditor.Options(languages, switcher, ignored -> {
-                })
+                }, BukkitLanguageEditorPresentation.standard())
         );
 
         assertTrue(editor.localized(player, key).legacy().contains("§6Retour"));
@@ -252,6 +257,69 @@ public class BukkitLanguageEditorTest {
     }
 
     @Test
+    public void fourRowLayoutUsesEverySlotAndRejectsUnusedFifthRowClicks() throws Exception {
+        List<Integer> slots = BukkitLanguageEditor.categorySlots(40, BukkitLanguageEditorPresentation.Layout.FOUR_ROWS);
+        assertEquals(36, slots.size());
+        for (int slot = 0; slot < 36; slot++) {
+            assertEquals(Integer.valueOf(slot), slots.get(slot));
+        }
+        assertEquals(List.of(0, 1, 2),
+                BukkitLanguageEditor.categorySlots(3, BukkitLanguageEditorPresentation.Layout.FOUR_ROWS));
+        Plugin plugin = mock(Plugin.class);
+        PluginLanguageService languages = mock(PluginLanguageService.class);
+        BukkitLanguageSwitcher.Options switcher = new BukkitLanguageSwitcher.Options(
+                "test", "test.language.admin", DirectorMiniMenu.Theme.adaptRed(),
+                DirectorTextResolver.ENGLISH, new PluginLanguageEditor.Options(locale -> null, edit -> null));
+        BukkitLanguageEditor editor = new BukkitLanguageEditor(plugin, new BukkitLanguageEditor.Options(
+                languages, switcher, ignored -> {
+                }, new BukkitLanguageEditorPresentation(BukkitLanguageEditorPresentation.Layout.FOUR_ROWS,
+                ignored -> Optional.empty())));
+        MessageCatalog.Builder catalog = MessageCatalog.builder("en_US");
+        for (int index = 0; index < 40; index++) {
+            catalog.add(TextKey.of("group" + index + ".message", "Message"));
+        }
+        PluginLanguageEditor.Document document = new PluginLanguageEditor.Document("en_US",
+                LocalizationSnapshot.create(LocalizationCandidate.english(catalog.build(), PluralSelector.oneOther())));
+        Constructor<?> constructor = nested("View").getDeclaredConstructors()[0];
+        constructor.setAccessible(true);
+        Object categories = constructor.newInstance("en_US", document, null, "", 2, null,
+                (Consumer<Player>) ignored -> {
+                });
+        Object messages = constructor.newInstance("en_US", document, null, "message", 2, null,
+                (Consumer<Player>) ignored -> {
+                });
+        Method ordinal = BukkitLanguageEditor.class.getDeclaredMethod("contentOrdinal", nested("View"), int.class);
+        ordinal.setAccessible(true);
+        Method pageSize = BukkitLanguageEditor.class.getDeclaredMethod("pageSize", nested("View"));
+        pageSize.setAccessible(true);
+
+        assertEquals(36, pageSize.invoke(editor, categories));
+        assertEquals(36, pageSize.invoke(editor, messages));
+        assertEquals(3, ordinal.invoke(editor, categories, 3));
+        assertEquals(-1, ordinal.invoke(editor, categories, 4));
+        assertEquals(35, ordinal.invoke(editor, messages, 35));
+        assertEquals(-1, ordinal.invoke(editor, messages, 36));
+        assertEquals(-1, ordinal.invoke(editor, messages, 44));
+    }
+
+    @Test
+    public void customIconsAreClonedBeforeEditorMetadataIsApplied() {
+        ItemStack template = mock(ItemStack.class);
+        ItemStack copy = mock(ItemStack.class);
+        when(template.getType()).thenReturn(Material.DIAMOND_AXE);
+        when(template.clone()).thenReturn(copy);
+        BukkitLanguageEditorPresentation presentation = new BukkitLanguageEditorPresentation(
+                BukkitLanguageEditorPresentation.Layout.FOUR_ROWS, ignored -> Optional.of(template));
+
+        ItemStack icon = presentation.icon("axe.wood_miner.name", Material.PAPER);
+
+        assertSame(copy, icon);
+        assertNotSame(template, icon);
+        verify(template).clone();
+        assertEquals(Material.BOOK, BukkitLanguageEditorPresentation.standard().icon("command", Material.BOOK).getType());
+    }
+
+    @Test
     public void languageEditorBytecodeDoesNotBindInventoryViewInvocationKind() throws IOException {
         List<String> directCalls = new ArrayList<>();
         try (InputStream bytecode = BukkitLanguageEditor.class.getResourceAsStream("BukkitLanguageEditor.class")) {
@@ -296,7 +364,7 @@ public class BukkitLanguageEditorTest {
         BukkitLanguageEditor editor = new BukkitLanguageEditor(
                 plugin,
                 new BukkitLanguageEditor.Options(languages, switcher, ignored -> {
-                })
+                }, BukkitLanguageEditorPresentation.standard())
         );
         Constructor<?> viewConstructor = nested("View").getDeclaredConstructors()[0];
         viewConstructor.setAccessible(true);
@@ -400,7 +468,7 @@ public class BukkitLanguageEditorTest {
         return new BukkitLanguageEditor(
                 plugin,
                 new BukkitLanguageEditor.Options(languages, switcher, ignored -> {
-                })
+                }, BukkitLanguageEditorPresentation.standard())
         );
     }
 

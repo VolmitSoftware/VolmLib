@@ -10,12 +10,10 @@ import java.nio.channels.FileChannel;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -50,9 +48,7 @@ public final class RemoteLanguageCatalog implements AutoCloseable {
 
     private final Options options;
     private final Source source;
-    private final Set<String> verifiedCache = ConcurrentHashMap.newKeySet();
     private final Map<String, Long> failedAtNanos = new ConcurrentHashMap<>();
-    private final Map<String, List<Consumer<DownloadResult>>> completions = new LinkedHashMap<>();
     private final Map<InstallRequest, List<Consumer<DownloadResult>>> installCompletions = new LinkedHashMap<>();
     private final Object requestLock = new Object();
     private final Object publicationLock = new Object();
@@ -83,49 +79,11 @@ public final class RemoteLanguageCatalog implements AutoCloseable {
         return source.locales();
     }
 
-    public Path cacheFile(String locale) {
-        String requiredLocale = requireSupportedLocale(locale);
-        return options.cacheDirectory()
-                .resolve(source.revision())
-                .resolve(requiredLocale + options.extension())
-                .toAbsolutePath()
-                .normalize();
-    }
-
     public URI sourceUri(String locale) {
         String requiredLocale = requireSupportedLocale(locale);
         String path = source.revision() + "/" + normalizedSourcePath(options.sourcePath())
                 + requiredLocale + options.extension();
         return options.repositoryRoot().resolve(path);
-    }
-
-    public synchronized String readOrDownload(String locale, ContentValidator validator) throws Exception {
-        long generation = lifecycle.get();
-        requireActive(generation);
-        String requiredLocale = requireSupportedLocale(locale);
-        Objects.requireNonNull(validator, "validator");
-        CacheResult cached = read(requiredLocale, validator);
-        if (cached.state() == CacheState.VALID) {
-            requireActive(generation);
-            return cached.content();
-        }
-        requireDownloadReady(requiredLocale);
-        try {
-            byte[] bytes = fetch(requiredLocale, sourceUri(requiredLocale));
-            verifyHash(requiredLocale, bytes);
-            String content = decode(bytes);
-            validator.validate(requiredLocale, content);
-            publishAtomic(cacheFile(requiredLocale), bytes, generation);
-            synchronized (publicationLock) {
-                requireActive(generation);
-                verifiedCache.add(requiredLocale);
-                failedAtNanos.remove(requiredLocale);
-            }
-            return content;
-        } catch (Exception failure) {
-            rememberFailure(requiredLocale, generation);
-            throw failure;
-        }
     }
 
     public synchronized String readOrInstall(String locale, Path destination, ContentValidator validator) throws Exception {
@@ -134,9 +92,6 @@ public final class RemoteLanguageCatalog implements AutoCloseable {
         String requiredLocale = requireSupportedLocale(locale);
         Path target = Objects.requireNonNull(destination, "destination").toAbsolutePath().normalize();
         Objects.requireNonNull(validator, "validator");
-        if (target.equals(cacheFile(requiredLocale))) {
-            return readOrDownload(requiredLocale, validator);
-        }
         if (!Files.exists(target, LinkOption.NOFOLLOW_LINKS)) {
             requireDownloadReady(requiredLocale);
             try {
@@ -171,7 +126,6 @@ public final class RemoteLanguageCatalog implements AutoCloseable {
     private void rememberFailure(String locale, long generation) {
         synchronized (publicationLock) {
             if (!closed && generation == lifecycle.get()) {
-                verifiedCache.remove(locale);
                 failedAtNanos.put(locale, System.nanoTime());
             }
         }
@@ -184,72 +138,6 @@ public final class RemoteLanguageCatalog implements AutoCloseable {
         Long failedAt = failedAtNanos.get(locale);
         if (failedAt != null && System.nanoTime() - failedAt < FAILURE_RETRY_COOLDOWN_NANOS) {
             throw new IOException("Language download is cooling down after a failure: " + locale);
-        }
-    }
-
-    public CacheResult read(String locale, ContentValidator validator) {
-        long generation = lifecycle.get();
-        Objects.requireNonNull(validator, "validator");
-        if (!source.locales().contains(locale)) {
-            return new CacheResult(CacheState.UNSUPPORTED, locale, null, null, null);
-        }
-        Path target = cacheFile(locale);
-        if (!Files.isRegularFile(target)) {
-            verifiedCache.remove(locale);
-            return new CacheResult(CacheState.MISSING, locale, target, null, null);
-        }
-        try {
-            requireActive(generation);
-            byte[] bytes = readBounded(target);
-            verifyHash(locale, bytes);
-            String content = decode(bytes);
-            validator.validate(locale, content);
-            synchronized (publicationLock) {
-                requireActive(generation);
-                verifiedCache.add(locale);
-            }
-            return new CacheResult(CacheState.VALID, locale, target, content, null);
-        } catch (Throwable failure) {
-            verifiedCache.remove(locale);
-            return new CacheResult(CacheState.INVALID, locale, target, null, failure);
-        }
-    }
-
-    public RequestState request(String locale, ContentValidator validator, Consumer<DownloadResult> completion) {
-        Objects.requireNonNull(validator, "validator");
-        Objects.requireNonNull(completion, "completion");
-        synchronized (requestLock) {
-            if (!source.locales().contains(locale)) {
-                return RequestState.UNSUPPORTED;
-            }
-            if (closed || executor.isShutdown()) {
-                return RequestState.CLOSED;
-            }
-            if (verifiedCache.contains(locale)) {
-                return RequestState.CURRENT;
-            }
-            Long failedAt = failedAtNanos.get(locale);
-            long now = System.nanoTime();
-            if (failedAt != null && now - failedAt < FAILURE_RETRY_COOLDOWN_NANOS) {
-                return RequestState.COOLDOWN;
-            }
-            if (failedAt != null) {
-                failedAtNanos.remove(locale, failedAt);
-            }
-            List<Consumer<DownloadResult>> listeners = completions.get(locale);
-            if (listeners != null) {
-                listeners.add(completion);
-                return RequestState.IN_FLIGHT;
-            }
-            completions.put(locale, new ArrayList<>(List.of(completion)));
-            long generation = lifecycle.get();
-            try {
-                executor.execute(() -> download(locale, generation, validator));
-                return RequestState.SCHEDULED;
-            } catch (RejectedExecutionException exception) {
-                completions.remove(locale);
-                return RequestState.CLOSED;
-            }
         }
     }
 
@@ -307,62 +195,12 @@ public final class RemoteLanguageCatalog implements AutoCloseable {
             }
             closed = true;
             lifecycle.incrementAndGet();
-            verifiedCache.clear();
             failedAtNanos.clear();
         }
         synchronized (requestLock) {
-            completions.clear();
             installCompletions.clear();
         }
         executor.shutdownNow();
-    }
-
-    private void download(
-            String locale,
-            long generation,
-            ContentValidator validator
-    ) {
-        Path target = cacheFile(locale);
-        URI source = sourceUri(locale);
-        DownloadResult result;
-        try {
-            byte[] bytes = fetch(locale, source);
-            verifyHash(locale, bytes);
-            String content = decode(bytes);
-            validator.validate(locale, content);
-            publishAtomic(target, bytes, generation);
-            synchronized (publicationLock) {
-                requireActive(generation);
-                verifiedCache.add(locale);
-                failedAtNanos.remove(locale);
-            }
-            result = new DownloadResult(locale, source, target, null);
-        } catch (Throwable failure) {
-            rememberFailure(locale, generation);
-            result = new DownloadResult(locale, source, target, failure);
-        }
-        List<Consumer<DownloadResult>> listeners;
-        synchronized (requestLock) {
-            listeners = completions.remove(locale);
-        }
-        if (generation != lifecycle.get() || listeners == null) {
-            return;
-        }
-        RuntimeException completionFailure = null;
-        for (Consumer<DownloadResult> listener : listeners) {
-            try {
-                listener.accept(result);
-            } catch (RuntimeException exception) {
-                if (completionFailure == null) {
-                    completionFailure = exception;
-                } else {
-                    completionFailure.addSuppressed(exception);
-                }
-            }
-        }
-        if (completionFailure != null) {
-            throw completionFailure;
-        }
     }
 
     private void downloadInstall(
@@ -472,11 +310,11 @@ public final class RemoteLanguageCatalog implements AutoCloseable {
     private byte[] readBounded(Path file) throws IOException {
         long size = Files.size(file);
         if (size > MAXIMUM_DOWNLOAD_BYTES) {
-            throw new IOException("Cached locale exceeds " + MAXIMUM_DOWNLOAD_BYTES + " bytes");
+            throw new IOException("Installed locale exceeds " + MAXIMUM_DOWNLOAD_BYTES + " bytes");
         }
         byte[] bytes = Files.readAllBytes(file);
         if (bytes.length > MAXIMUM_DOWNLOAD_BYTES) {
-            throw new IOException("Cached locale exceeds " + MAXIMUM_DOWNLOAD_BYTES + " bytes");
+            throw new IOException("Installed locale exceeds " + MAXIMUM_DOWNLOAD_BYTES + " bytes");
         }
         return bytes;
     }
@@ -501,49 +339,6 @@ public final class RemoteLanguageCatalog implements AutoCloseable {
                 .onUnmappableCharacter(CodingErrorAction.REPORT)
                 .decode(ByteBuffer.wrap(bytes))
                 .toString();
-    }
-
-    private void publishAtomic(Path target, byte[] bytes, long generation) throws IOException {
-        requireActive(generation);
-        Path absoluteTarget = target.toAbsolutePath().normalize();
-        Path parent = absoluteTarget.getParent();
-        if (parent == null) {
-            throw new IOException("Language cache target has no parent: " + absoluteTarget);
-        }
-        Files.createDirectories(parent);
-        Path temporary = Files.createTempFile(parent, "." + absoluteTarget.getFileName() + ".", ".tmp");
-        boolean published = false;
-        try {
-            try (FileChannel channel = FileChannel.open(
-                    temporary,
-                    StandardOpenOption.WRITE,
-                    StandardOpenOption.TRUNCATE_EXISTING
-            )) {
-                ByteBuffer buffer = ByteBuffer.wrap(bytes);
-                while (buffer.hasRemaining()) {
-                    channel.write(buffer);
-                }
-                channel.force(true);
-            }
-            synchronized (publicationLock) {
-                requireActive(generation);
-                try {
-                    Files.move(
-                            temporary,
-                            absoluteTarget,
-                            StandardCopyOption.ATOMIC_MOVE,
-                            StandardCopyOption.REPLACE_EXISTING
-                    );
-                } catch (AtomicMoveNotSupportedException exception) {
-                    throw new IOException("Language cache does not support atomic publication", exception);
-                }
-                published = true;
-            }
-        } finally {
-            if (!published) {
-                Files.deleteIfExists(temporary);
-            }
-        }
     }
 
     private void publishAtomicIfMissing(Path target, byte[] bytes, long generation) throws IOException {
@@ -651,7 +446,6 @@ public final class RemoteLanguageCatalog implements AutoCloseable {
             String sourcePath,
             String extension,
             String manifestResource,
-            Path cacheDirectory,
             ClassLoader resourceLoader
     ) {
         public Options {
@@ -660,7 +454,6 @@ public final class RemoteLanguageCatalog implements AutoCloseable {
             Objects.requireNonNull(sourcePath, "sourcePath");
             Objects.requireNonNull(extension, "extension");
             Objects.requireNonNull(manifestResource, "manifestResource");
-            Objects.requireNonNull(cacheDirectory, "cacheDirectory");
             Objects.requireNonNull(resourceLoader, "resourceLoader");
             if (!repositoryRoot.toString().endsWith("/")) {
                 throw new IllegalArgumentException("Repository root must end with /");
@@ -671,13 +464,6 @@ public final class RemoteLanguageCatalog implements AutoCloseable {
         }
     }
 
-    public enum CacheState {
-        VALID,
-        MISSING,
-        INVALID,
-        UNSUPPORTED
-    }
-
     public enum RequestState {
         SCHEDULED,
         CURRENT,
@@ -685,15 +471,6 @@ public final class RemoteLanguageCatalog implements AutoCloseable {
         COOLDOWN,
         UNSUPPORTED,
         CLOSED
-    }
-
-    public record CacheResult(
-            CacheState state,
-            String locale,
-            Path file,
-            String content,
-            Throwable failure
-    ) {
     }
 
     public record DownloadResult(String locale, URI source, Path file, Throwable failure) {

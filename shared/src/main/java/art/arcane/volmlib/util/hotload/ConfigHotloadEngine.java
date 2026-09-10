@@ -68,6 +68,8 @@ public class ConfigHotloadEngine {
     private final Map<String, FileState> pendingStates = new HashMap<>();
     private final Map<String, Long> pendingSinceNanos = new HashMap<>();
     private final Map<String, StableContentSnapshot> queuedTouchedSnapshots = new HashMap<>();
+    private final Map<String, Long> selfWriteRevisions = new HashMap<>();
+    private final Map<String, Object> applicationLocks = new ConcurrentHashMap<>();
     private final Set<String> signatureReconciliationSeenPaths = new HashSet<>();
 
     private WatchService directoryWatchService;
@@ -165,12 +167,25 @@ public class ConfigHotloadEngine {
             return;
         }
 
-        synchronized (watcherStateLock) {
-            updateKnownSnapshot(file, normalize(rawContent));
-            String path = file.getAbsolutePath();
-            pendingStates.remove(path);
-            pendingSinceNanos.remove(path);
-            queuedTouchedSnapshots.remove(path);
+        synchronized (applicationLock(file)) {
+            synchronized (watcherStateLock) {
+                updateKnownSnapshot(file, normalize(rawContent));
+                String path = file.getAbsolutePath();
+                selfWriteRevisions.merge(path, 1L, Long::sum);
+                pendingStates.remove(path);
+                pendingSinceNanos.remove(path);
+                queuedTouchedSnapshots.remove(path);
+            }
+        }
+    }
+
+    public <T> T write(File file, FileWrite<T> writer) throws Exception {
+        Objects.requireNonNull(file, "file");
+        Objects.requireNonNull(writer, "writer");
+        synchronized (applicationLock(file)) {
+            Written<T> written = Objects.requireNonNull(writer.write(), "written");
+            noteSelfWrite(file, written.content());
+            return written.value();
         }
     }
 
@@ -181,9 +196,12 @@ public class ConfigHotloadEngine {
             return false;
         }
 
-        String now = readNormalizedContent(file);
-        String appliedSignature = signature(file);
-        StableContentSnapshot snapshot = new StableContentSnapshot(file, appliedSignature, now);
+        StableContentSnapshot snapshot;
+        synchronized (watcherStateLock) {
+            String now = readNormalizedContent(file);
+            String appliedSignature = signature(file);
+            snapshot = new StableContentSnapshot(file, appliedSignature, now, selfWriteRevision(file));
+        }
         return processSnapshotChange(snapshot, ignored -> applyChange.apply(file), onApplied);
     }
 
@@ -192,13 +210,27 @@ public class ConfigHotloadEngine {
                                          Consumer<ContentDelta> onApplied) {
         Objects.requireNonNull(snapshot, "snapshot");
         Objects.requireNonNull(applyChange, "applyChange");
+        synchronized (applicationLock(snapshot.file())) {
+            return processSnapshotChangeLocked(snapshot, applyChange, onApplied);
+        }
+    }
+
+    private boolean processSnapshotChangeLocked(StableContentSnapshot snapshot,
+                                                Function<StableContentSnapshot, Boolean> applyChange,
+                                                Consumer<ContentDelta> onApplied) {
         File file = snapshot.file();
         if (!managedConfigFilePredicate.test(file)) {
             return false;
         }
 
         String path = file.getAbsolutePath();
-        String before = knownContents.get(path);
+        String before;
+        synchronized (watcherStateLock) {
+            if (snapshot.selfWriteRevision() != selfWriteRevision(file)) {
+                return false;
+            }
+            before = knownContents.get(path);
+        }
         String now = snapshot.normalizedContent();
         if (now == null && Objects.equals(handledNullContentSignatures.get(path), snapshot.signature())) {
             knownSignatures.put(path, snapshot.signature());
@@ -215,14 +247,19 @@ public class ConfigHotloadEngine {
         } catch (RuntimeException failure) {
             FileState afterFailure = state(file);
             synchronized (watcherStateLock) {
-                recordRejectedSnapshot(path, snapshot);
-                queueAfterSnapshotApplyLocked(snapshot, afterFailure, false);
-                recordApplyCompletionLocked();
+                if (snapshot.selfWriteRevision() == selfWriteRevision(file)) {
+                    recordRejectedSnapshot(path, snapshot);
+                    queueAfterSnapshotApplyLocked(snapshot, afterFailure, false);
+                    recordApplyCompletionLocked();
+                }
             }
             throw failure;
         }
         FileState after = state(file);
         synchronized (watcherStateLock) {
+            if (snapshot.selfWriteRevision() != selfWriteRevision(file)) {
+                return false;
+            }
             if (applied) {
                 updateKnownSnapshot(file, snapshot.signature(), now);
             } else {
@@ -269,6 +306,7 @@ public class ConfigHotloadEngine {
         pendingStates.clear();
         pendingSinceNanos.clear();
         queuedTouchedSnapshots.clear();
+        selfWriteRevisions.clear();
         resetSignatureReconciliation();
         hotloadCooldownNanos = TimeUnit.MILLISECONDS.toNanos(Math.max(100L, hotloadCooldownMs));
         lastTouchedEmissionNanos = 0L;
@@ -318,6 +356,7 @@ public class ConfigHotloadEngine {
         pendingStates.clear();
         pendingSinceNanos.clear();
         queuedTouchedSnapshots.clear();
+        selfWriteRevisions.clear();
         resetSignatureReconciliation();
         fullWatchScanCountdown = 0;
         signatureScanCountdown = 0;
@@ -415,7 +454,7 @@ public class ConfigHotloadEngine {
                 if (currentState.missing() && now - pendingSince < hotloadCooldownNanos) {
                     stillPending.put(path, currentState);
                 } else {
-                    stable.add(new StableContentSnapshot(file, currentState.signature(), currentState.content()));
+                    stable.add(new StableContentSnapshot(file, currentState.signature(), currentState.content(), selfWriteRevision(file)));
                     pendingSinceNanos.remove(path);
                 }
             } else {
@@ -707,6 +746,14 @@ public class ConfigHotloadEngine {
         }
     }
 
+    private long selfWriteRevision(File file) {
+        return selfWriteRevisions.getOrDefault(file.getAbsolutePath(), 0L);
+    }
+
+    private Object applicationLock(File file) {
+        return applicationLocks.computeIfAbsent(file.getAbsolutePath(), ignored -> new Object());
+    }
+
     private void queueAfterSnapshotApplyLocked(StableContentSnapshot snapshot, FileState after, boolean applied) {
         String path = snapshot.file().getAbsolutePath();
         if (snapshot.matches(after)) {
@@ -881,7 +928,7 @@ public class ConfigHotloadEngine {
         }
     }
 
-    public record StableContentSnapshot(File file, String signature, String normalizedContent) {
+    public record StableContentSnapshot(File file, String signature, String normalizedContent, long selfWriteRevision) {
         public StableContentSnapshot {
             file = Objects.requireNonNull(file, "file").getAbsoluteFile();
             signature = Objects.requireNonNull(signature, "signature");
@@ -893,6 +940,14 @@ public class ConfigHotloadEngine {
     }
 
     public record ContentDelta(File file, String before, String after) {
+    }
+
+    @FunctionalInterface
+    public interface FileWrite<T> {
+        Written<T> write() throws Exception;
+    }
+
+    public record Written<T>(String content, T value) {
     }
 
     public record DiffEntry(String key, String oldValue, String newValue) {

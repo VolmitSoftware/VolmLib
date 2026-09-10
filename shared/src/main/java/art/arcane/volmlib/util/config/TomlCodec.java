@@ -55,6 +55,14 @@ public final class TomlCodec {
         return new GenericTomlWriter().write(toGenericValue(element));
     }
 
+    static String toInlineToml(JsonElement element) {
+        Object value = toGenericValue(element);
+        if (!isInlineValue(value)) {
+            throw new IllegalArgumentException("TOML value must be a scalar or an array of scalars");
+        }
+        return formatInlineValue(value);
+    }
+
     private static Object toGenericValue(JsonElement element) {
         if (element == null || element.isJsonNull()) {
             return null;
