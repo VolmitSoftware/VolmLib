@@ -40,6 +40,14 @@ public class DirectorMiniMenuVisualTest {
     }
 
     @Test
+    public void versionUsesTheHeaderGradientWithoutMenuDecoration() {
+        assertEquals("<gradient:#003366:#00BFFF>React v1.2.3</gradient>",
+                DirectorMiniMenu.version("React", "1.2.3", DirectorMiniMenu.Theme.reactBlue()));
+        assertEquals("<gradient:#003366:#00BFFF>React v1.2.3-\\<preview></gradient>",
+                DirectorMiniMenu.version("React", "1.2.3-<preview>", DirectorMiniMenu.Theme.reactBlue()));
+    }
+
+    @Test
     public void headerOmitsPageIndicatorsWhenPaginated() {
         String header = render(List.of("help=2"), 1).get(0);
 

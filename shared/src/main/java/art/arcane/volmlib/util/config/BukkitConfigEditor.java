@@ -9,6 +9,7 @@ import art.arcane.volmlib.util.localization.MessageArgument;
 import art.arcane.volmlib.util.localization.TextKey;
 import art.arcane.volmlib.util.plugin.ComponentMessenger;
 import art.arcane.volmlib.util.plugin.ComponentText;
+import art.arcane.volmlib.util.plugin.LegacyLoreLayout;
 import art.arcane.volmlib.util.scheduling.FoliaScheduler;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonPrimitive;
@@ -22,6 +23,7 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.HandlerList;
 import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.InventoryClickEvent;
+import org.bukkit.event.inventory.ClickType;
 import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.event.inventory.InventoryOpenEvent;
@@ -36,6 +38,7 @@ import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.plugin.Plugin;
 
 import java.io.IOException;
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -47,6 +50,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.logging.Level;
 
 public final class BukkitConfigEditor implements Listener, AutoCloseable {
@@ -66,6 +70,7 @@ public final class BukkitConfigEditor implements Listener, AutoCloseable {
     private final Map<UUID, Session> sessions = new ConcurrentHashMap<>();
     private final Map<UUID, Prompt> prompts = new ConcurrentHashMap<>();
     private final Map<UUID, BukkitInventoryShutdown.View> openInventories = new ConcurrentHashMap<>();
+    private volatile EditorLayout layout;
     private volatile boolean closed;
 
     private BukkitConfigEditor(Plugin plugin, Options options) {
@@ -85,13 +90,24 @@ public final class BukkitConfigEditor implements Listener, AutoCloseable {
     }
 
     public void open(CommandSender sender) {
+        open(sender, null);
+    }
+
+    public void open(CommandSender sender, Consumer<Player> returnAction) {
         Objects.requireNonNull(sender, "sender");
         if (!(sender instanceof Player player)) {
             ComponentMessenger.send(sender, styled(options.presentation().textResolver()
                     .resolve(BukkitConfigMessages.PLAYER_ONLY), options.presentation().theme().description()));
             return;
         }
-        FoliaScheduler.runEntity(plugin, player, () -> openOwned(player));
+        FoliaScheduler.runEntity(plugin, player, () -> openOwned(player, returnAction));
+    }
+
+    public synchronized void configureLayout(EditorLayout layout) {
+        if (closed || !sessions.isEmpty()) {
+            throw new IllegalStateException("Configure the editor layout before opening it");
+        }
+        this.layout = Objects.requireNonNull(layout, "layout");
     }
 
     @Override
@@ -118,12 +134,13 @@ public final class BukkitConfigEditor implements Listener, AutoCloseable {
             return;
         }
         int slot = event.getRawSlot();
+        ClickType clickType = event.getClick();
         if (slot < 0 || slot >= SIZE) {
             return;
         }
         FoliaScheduler.runEntity(plugin, player, () -> {
             if (BukkitInventoryViews.top(player.getOpenInventory()).getHolder() == holder) {
-                click(player, holder, slot);
+                LanguageAudience.run(player.getUniqueId(), () -> click(player, holder, slot, clickType));
             }
         }, 1L);
     }
@@ -184,12 +201,12 @@ public final class BukkitConfigEditor implements Listener, AutoCloseable {
         }
     }
 
-    private void openOwned(Player player) {
+    private void openOwned(Player player, Consumer<Player> returnAction) {
         if (!allowed(player)) {
             return;
         }
         cancel(player.getUniqueId());
-        Session session = new Session(player);
+        Session session = new Session(player, returnAction);
         sessions.put(player.getUniqueId(), session);
         show(session, new View(null, List.of(), 0));
         load(session);
@@ -212,7 +229,7 @@ public final class BukkitConfigEditor implements Listener, AutoCloseable {
         });
     }
 
-    private void click(Player player, Holder holder, int slot) {
+    private void click(Player player, Holder holder, int slot, ClickType clickType) {
         Session session = holder.session;
         if (!active(session) || !allowed(player)) {
             return;
@@ -226,7 +243,11 @@ public final class BukkitConfigEditor implements Listener, AutoCloseable {
             return;
         }
         View view = holder.view;
-        if (slot == REFRESH) {
+        if (slot == BACK && view.path().isEmpty() && session.returnAction != null) {
+            cancel(player.getUniqueId());
+            player.closeInventory();
+            session.returnAction.accept(player);
+        } else if (slot == REFRESH && layout == null) {
             load(session);
         } else if (view.document() == null) {
             return;
@@ -235,27 +256,53 @@ public final class BukkitConfigEditor implements Listener, AutoCloseable {
         } else if (slot == PREVIOUS || slot == NEXT) {
             show(session, new View(view.document(), view.path(), view.page() + (slot == NEXT ? 1 : -1)));
         } else if (slot < PAGE_SIZE) {
-            int index = view.page() * PAGE_SIZE + slot;
+            int ordinal = holder.contentSlots.indexOf(slot);
+            if (ordinal < 0) {
+                return;
+            }
+            int index = view.page() * pageSize(view.path()) + ordinal;
             if (index < holder.entries.size()) {
-                select(session, holder.entries.get(index));
+                select(session, holder.entries.get(index), clickType);
+            } else if (index - holder.entries.size() < holder.shortcuts.size()) {
+                RootShortcut shortcut = holder.shortcuts.get(index - holder.entries.size());
+                cancel(player.getUniqueId());
+                shortcut.action().accept(player);
             }
         }
     }
 
-    private void select(Session session, ConfigEditorDocument.Entry entry) {
+    private void select(Session session, ConfigEditorDocument.Entry entry, ClickType clickType) {
+        EntryPresentation presentation = entryPresentation(entry.path());
+        if (presentation != null && presentation.action() != null) {
+            cancel(session.owner);
+            session.player.closeInventory();
+            presentation.action().accept(session.player);
+            return;
+        }
         if (entry.kind() == ConfigEditorDocument.Kind.TABLE || entry.kind() == ConfigEditorDocument.Kind.TABLE_ARRAY) {
             show(session, new View(session.view.document(), entry.path(), 0));
         } else if (entry.kind() == ConfigEditorDocument.Kind.BOOLEAN) {
             save(session, session.view.document().edit(entry.path(), new JsonPrimitive(!entry.value().getAsBoolean())));
+        } else if (presentation != null && presentation.numeric() != null && numeric(entry.kind())
+                && numericClick(clickType)) {
+            try {
+                JsonPrimitive replacement = adjustedValue(entry, presentation.numeric(), clickType);
+                if (!replacement.equals(entry.value())) {
+                    save(session, session.view.document().edit(entry.path(), replacement));
+                }
+            } catch (ArithmeticException | IllegalArgumentException failure) {
+                message(session.player, BukkitConfigMessages.FAILED, MessageArgument.untrusted("reason", reason(failure)));
+            }
         } else {
             Prompt prompt = new Prompt(session, entry);
             prompts.put(session.player.getUniqueId(), prompt);
             session.player.closeInventory();
             message(session.player, BukkitConfigMessages.PROMPT,
-                    MessageArgument.untrusted("path", displayPath(entry.path())));
+                    MessageArgument.untrusted("path", presentation == null ? displayPath(entry.path())
+                            : ComponentText.markup(text(session.player, presentation.name())).plain()));
             message(session.player, BukkitConfigMessages.CURRENT,
                     MessageArgument.untrusted("value", preview(entry.value())));
-            message(session.player, guidance(entry.kind()));
+            message(session.player, inputGuidance(entry.kind(), presentation));
             if (!FoliaScheduler.runEntity(plugin, session.player, () -> expire(prompt), PROMPT_TICKS,
                     () -> prompts.remove(session.player.getUniqueId(), prompt))) {
                 prompts.remove(session.player.getUniqueId(), prompt);
@@ -280,7 +327,7 @@ public final class BukkitConfigEditor implements Listener, AutoCloseable {
         }
         try {
             ConfigEditorDocument document = session.view.document();
-            JsonElement replacement = document.parseValue(prompt.entry().path(), input);
+            JsonElement replacement = parseInput(document, prompt.entry(), entryPresentation(prompt.entry().path()), input);
             save(session, document.edit(prompt.entry().path(), replacement));
         } catch (IOException | IllegalArgumentException failure) {
             message(player, BukkitConfigMessages.FAILED, MessageArgument.untrusted("reason", reason(failure)));
@@ -355,36 +402,56 @@ public final class BukkitConfigEditor implements Listener, AutoCloseable {
             return;
         }
         List<ConfigEditorDocument.Entry> entries = requested.document() == null ? List.of()
-                : orderedEntries(requested.document(), requested.path());
-        int maximum = Math.max(0, (entries.size() - 1) / PAGE_SIZE);
+                : presentedEntries(requested.document(), requested.path(), layout);
+        List<RootShortcut> shortcuts = layout != null && requested.path().isEmpty() && requested.document() != null
+                ? layout.shortcuts() : List.of();
+        int pageSize = pageSize(requested.path());
+        int total = entries.size() + shortcuts.size();
+        int maximum = Math.max(0, (total - 1) / pageSize);
         View view = new View(requested.document(), requested.path(), Math.max(0, Math.min(requested.page(), maximum)));
         Holder holder = new Holder(this, session, view);
         holder.entries = entries;
-        Inventory inventory = plugin.getServer().createInventory(holder, SIZE,
-                text(player, BukkitConfigMessages.TITLE, MessageArgument.untrusted("plugin", plugin.getName())));
+        holder.shortcuts = shortcuts;
+        Inventory inventory = plugin.getServer().createInventory(holder, SIZE, title(player, view));
         holder.inventory = inventory;
-        int start = view.page() * PAGE_SIZE;
-        for (int index = start; index < Math.min(start + PAGE_SIZE, entries.size()); index++) {
-            inventory.setItem(index - start, entryItem(player, entries.get(index), view));
+        if (layout != null) {
+            ItemStack filler = item(Material.BLACK_STAINED_GLASS_PANE, " ", List.of());
+            for (int slot = 0; slot < SIZE; slot++) {
+                inventory.setItem(slot, filler);
+            }
         }
-        if (entries.isEmpty()) {
+        int start = view.page() * pageSize;
+        int count = Math.min(pageSize, total - start);
+        holder.contentSlots = contentSlots(view.path(), count);
+        for (int index = start; index < start + count; index++) {
+            ItemStack entry = index < entries.size() ? entryItem(player, entries.get(index), view)
+                    : shortcutItem(player, shortcuts.get(index - entries.size()));
+            inventory.setItem(holder.contentSlots.get(index - start), entry);
+        }
+        if (total == 0) {
             inventory.setItem(22, item(Material.PAPER,
                     text(player, view.document() == null ? BukkitConfigMessages.LOADING : BukkitConfigMessages.EMPTY), List.of()));
         }
-        if (!view.path().isEmpty()) {
-            inventory.setItem(BACK, item(Material.ARROW, text(player, BukkitConfigMessages.BACK), List.of()));
+        if (!view.path().isEmpty() || session.returnAction != null) {
+            inventory.setItem(BACK, item(Material.ARROW,
+                    navigationName(player, BukkitConfigMessages.BACK, options.presentation().theme().primaryRight()), List.of()));
         }
         if (view.page() > 0) {
-            inventory.setItem(PREVIOUS, item(Material.ARROW, text(player, BukkitConfigMessages.PREVIOUS), List.of()));
+            inventory.setItem(PREVIOUS, item(Material.ARROW,
+                    navigationName(player, BukkitConfigMessages.PREVIOUS, options.presentation().theme().primaryRight()), List.of()));
         }
         if (view.page() < maximum) {
-            inventory.setItem(NEXT, item(Material.ARROW, text(player, BukkitConfigMessages.NEXT), List.of()));
+            inventory.setItem(NEXT, item(Material.ARROW,
+                    navigationName(player, BukkitConfigMessages.NEXT, options.presentation().theme().primaryRight()), List.of()));
         }
-        inventory.setItem(REFRESH, item(Material.COMPASS, text(player, BukkitConfigMessages.REFRESH), List.of(
-                text(player, BukkitConfigMessages.SECTION, MessageArgument.untrusted("path", displayPath(view.path()))),
-                text(player, BukkitConfigMessages.PAGE, MessageArgument.trusted("page", view.page() + 1),
-                        MessageArgument.trusted("pages", maximum + 1)))));
-        inventory.setItem(CLOSE, item(Material.BARRIER, text(player, BukkitConfigMessages.CLOSE), List.of()));
+        if (layout == null) {
+            inventory.setItem(REFRESH, item(Material.COMPASS, text(player, BukkitConfigMessages.REFRESH), List.of(
+                    text(player, BukkitConfigMessages.SECTION, MessageArgument.untrusted("path", displayPath(view.path()))),
+                    text(player, BukkitConfigMessages.PAGE, MessageArgument.trusted("page", view.page() + 1),
+                            MessageArgument.trusted("pages", maximum + 1)))));
+        }
+        inventory.setItem(CLOSE, item(Material.BARRIER,
+                navigationName(player, BukkitConfigMessages.CLOSE, options.presentation().theme().required()), List.of()));
         session.view = view;
         player.openInventory(inventory);
         if (BukkitInventoryViews.top(player.getOpenInventory()) == inventory) {
@@ -401,6 +468,10 @@ public final class BukkitConfigEditor implements Listener, AutoCloseable {
 
     private ItemStack entryItem(Player player, ConfigEditorDocument.Entry entry, View view) {
         boolean section = entry.kind() == ConfigEditorDocument.Kind.TABLE || entry.kind() == ConfigEditorDocument.Kind.TABLE_ARRAY;
+        EntryPresentation presentation = entryPresentation(entry.path());
+        if (presentation != null) {
+            return presentedItem(player, entry, presentation, section);
+        }
         String name = entry.name();
         if (view.document().value(view.path()).isJsonArray()) {
             name = text(player, BukkitConfigMessages.ENTRY, MessageArgument.trusted("number", Integer.parseInt(name) + 1));
@@ -418,14 +489,102 @@ public final class BukkitConfigEditor implements Listener, AutoCloseable {
         return item(icon(entry), name, lore);
     }
 
+    private ItemStack presentedItem(Player player, ConfigEditorDocument.Entry entry,
+                                    EntryPresentation presentation, boolean section) {
+        ArrayList<String> lore = new ArrayList<>();
+        lore.add(text(player, presentation.description()));
+        if (!section) {
+            lore.add(text(player, BukkitConfigMessages.CURRENT, MessageArgument.untrusted("value", preview(entry.value()))));
+        }
+        if (presentation.action() == null) {
+            if (presentation.numeric() != null && numeric(entry.kind())) {
+                lore.add(text(player, BukkitConfigMessages.ADJUST,
+                        MessageArgument.untrusted("step", BigDecimal.valueOf(presentation.numeric().step()).stripTrailingZeros().toPlainString())));
+            } else {
+                lore.add(text(player, section ? BukkitConfigMessages.OPEN
+                        : entry.kind() == ConfigEditorDocument.Kind.BOOLEAN ? BukkitConfigMessages.TOGGLE : BukkitConfigMessages.EDIT));
+                if (!section && entry.kind() != ConfigEditorDocument.Kind.BOOLEAN) {
+                    lore.add(text(player, inputGuidance(entry.kind(), presentation)));
+                }
+            }
+        }
+        Material material = entry.kind() == ConfigEditorDocument.Kind.BOOLEAN ? icon(entry) : presentation.icon();
+        return item(material, text(player, presentation.name()), lore);
+    }
+
+    private ItemStack shortcutItem(Player player, RootShortcut shortcut) {
+        return item(shortcut.icon(), text(player, shortcut.name()), List.of(text(player, shortcut.description())));
+    }
+
+    private String title(Player player, View view) {
+        if (layout == null) {
+            return text(player, BukkitConfigMessages.TITLE, MessageArgument.untrusted("plugin", plugin.getName()));
+        }
+        ComponentText title = styledMarkup(text(player, layout.title()), "#404040");
+        if (view.path().isEmpty()) {
+            return title.legacy();
+        }
+        EntryPresentation presentation = entryPresentation(view.path());
+        ComponentText section = presentation == null
+                ? styled(view.path().get(view.path().size() - 1), "#404040")
+                : styledMarkup(text(player, presentation.name()), "#404040");
+        return section.legacy();
+    }
+
+    private EntryPresentation entryPresentation(List<String> path) {
+        return layout == null ? null : layout.entries().apply(path);
+    }
+
+    private String navigationName(Player player, TextKey key, String color) {
+        return layout == null ? text(player, key) : styledMarkup(text(player, key), color).legacy();
+    }
+
+    static List<ConfigEditorDocument.Entry> presentedEntries(ConfigEditorDocument document, List<String> path, EditorLayout layout) {
+        if (layout == null) {
+            return orderedEntries(document, path);
+        }
+        ArrayList<ConfigEditorDocument.Entry> entries = new ArrayList<>();
+        for (ConfigEditorDocument.Entry entry : document.entries(path)) {
+            if (layout.entries().apply(entry.path()) != null) {
+                entries.add(entry);
+            }
+        }
+        if (document.value(path).isJsonObject()) {
+            entries.sort(Comparator.comparingInt((ConfigEditorDocument.Entry entry) -> {
+                return layout.entries().apply(entry.path()).order();
+            }).thenComparing(ConfigEditorDocument.Entry::name));
+        }
+        return List.copyOf(entries);
+    }
+
+    private int pageSize(List<String> path) {
+        return layout != null && path.isEmpty() ? 8 : PAGE_SIZE;
+    }
+
+    private List<Integer> contentSlots(List<String> path, int count) {
+        if (layout != null && path.isEmpty()) {
+            return categorySlots(count);
+        }
+        ArrayList<Integer> slots = new ArrayList<>(count);
+        for (int slot = 0; slot < count; slot++) {
+            slots.add(slot);
+        }
+        return List.copyOf(slots);
+    }
+
     private ItemStack item(Material material, String name, List<String> lore) {
         ItemStack item = new ItemStack(material);
         ItemMeta meta = item.getItemMeta();
         if (meta != null) {
-            meta.setDisplayName(styled(name, options.presentation().theme().primaryLeft()).legacy());
+            meta.setDisplayName((layout == null ? styled(name, options.presentation().theme().primaryLeft())
+                    : styledMarkup(name, options.presentation().theme().primaryLeft())).legacy());
             ArrayList<String> lines = new ArrayList<>(lore.size());
             for (String line : lore) {
-                lines.add(styled(line, options.presentation().theme().description()).legacy());
+                if (layout == null) {
+                    lines.add(styled(line, options.presentation().theme().description()).legacy());
+                } else {
+                    lines.addAll(LegacyLoreLayout.wrap(styledMarkup(line, options.presentation().theme().description()).legacy(), 44));
+                }
             }
             meta.setLore(lines);
             meta.addItemFlags(ItemFlag.HIDE_ATTRIBUTES);
@@ -460,7 +619,9 @@ public final class BukkitConfigEditor implements Listener, AutoCloseable {
     }
 
     private void message(Player player, TextKey key, MessageArgument... arguments) {
-        ComponentMessenger.send(player, styled(text(player, key, arguments), options.presentation().theme().description()));
+        String message = text(player, key, arguments);
+        ComponentMessenger.send(player, layout == null ? styled(message, options.presentation().theme().description())
+                : styledMarkup(message, options.presentation().theme().description()));
     }
 
     private String text(Player player, TextKey key, MessageArgument... arguments) {
@@ -469,6 +630,64 @@ public final class BukkitConfigEditor implements Listener, AutoCloseable {
 
     private static ComponentText styled(String text, String color) {
         return ComponentText.component(Component.text(text).color(TextColor.fromHexString(color)));
+    }
+
+    private static ComponentText styledMarkup(String text, String color) {
+        return ComponentText.markup(text).colorIfAbsent(color);
+    }
+
+    static List<Integer> categorySlots(int count) {
+        if (count < 0 || count > 8) {
+            throw new IllegalArgumentException("A category page holds at most eight entries");
+        }
+        if (count == 0) {
+            return List.of();
+        }
+        int rows = (count + 3) / 4;
+        int remaining = count;
+        ArrayList<Integer> slots = new ArrayList<>(count);
+        for (int row = 0; row < rows; row++) {
+            int rowSize = (remaining + rows - row - 1) / (rows - row);
+            int firstColumn = 5 - rowSize;
+            for (int index = 0; index < rowSize; index++) {
+                slots.add((2 + row) * 9 + firstColumn + index * 2);
+            }
+            remaining -= rowSize;
+        }
+        return List.copyOf(slots);
+    }
+
+    static JsonPrimitive adjustedValue(ConfigEditorDocument.Entry entry, NumericControl control, ClickType click) {
+        BigDecimal step = BigDecimal.valueOf(control.step()).multiply(BigDecimal.valueOf(click.isShiftClick() ? 10L : 1L));
+        if (click.isRightClick()) {
+            step = step.negate();
+        }
+        BigDecimal adjusted = new BigDecimal(entry.value().getAsString()).add(step)
+                .max(BigDecimal.valueOf(control.minimum())).min(BigDecimal.valueOf(control.maximum()));
+        if (entry.kind() == ConfigEditorDocument.Kind.INTEGER && control.step() == Math.rint(control.step())) {
+            return new JsonPrimitive(adjusted.longValueExact());
+        }
+        BigDecimal decimal = adjusted.stripTrailingZeros();
+        return new JsonPrimitive(decimal.scale() < 1 ? decimal.setScale(1) : decimal);
+    }
+
+    private static boolean numeric(ConfigEditorDocument.Kind kind) {
+        return kind == ConfigEditorDocument.Kind.INTEGER || kind == ConfigEditorDocument.Kind.DECIMAL;
+    }
+
+    static JsonElement parseInput(ConfigEditorDocument document, ConfigEditorDocument.Entry entry,
+                                  EntryPresentation presentation, String input) throws IOException {
+        return decimalControl(entry.kind(), presentation) ? ConfigEditorDocument.parseDecimal(input.strip())
+                : document.parseValue(entry.path(), input);
+    }
+
+    private static boolean decimalControl(ConfigEditorDocument.Kind kind, EntryPresentation presentation) {
+        return numeric(kind) && presentation != null && presentation.numeric() != null
+                && presentation.numeric().step() != Math.rint(presentation.numeric().step());
+    }
+
+    private static boolean numericClick(ClickType click) {
+        return click == ClickType.LEFT || click == ClickType.RIGHT || click == ClickType.SHIFT_LEFT || click == ClickType.SHIFT_RIGHT;
     }
 
     static List<ConfigEditorDocument.Entry> orderedEntries(ConfigEditorDocument document, List<String> path) {
@@ -508,6 +727,13 @@ public final class BukkitConfigEditor implements Listener, AutoCloseable {
         };
     }
 
+    static TextKey inputGuidance(ConfigEditorDocument.Kind kind, EntryPresentation presentation) {
+        if (presentation != null && presentation.inputGuidance() != null) {
+            return presentation.inputGuidance();
+        }
+        return decimalControl(kind, presentation) ? BukkitConfigMessages.DECIMAL : guidance(kind);
+    }
+
     private static String reason(Throwable failure) {
         return Objects.requireNonNullElse(failure.getMessage(), failure.getClass().getSimpleName());
     }
@@ -528,6 +754,41 @@ public final class BukkitConfigEditor implements Listener, AutoCloseable {
         }
     }
 
+    public record EditorLayout(TextKey title, Function<List<String>, EntryPresentation> entries, List<RootShortcut> shortcuts) {
+        public EditorLayout {
+            Objects.requireNonNull(title, "title");
+            Objects.requireNonNull(entries, "entries");
+            shortcuts = List.copyOf(shortcuts);
+        }
+    }
+
+    public record EntryPresentation(TextKey name, TextKey description, Material icon, int order,
+                                    NumericControl numeric, TextKey inputGuidance, Consumer<Player> action) {
+        public EntryPresentation {
+            Objects.requireNonNull(name, "name");
+            Objects.requireNonNull(description, "description");
+            Objects.requireNonNull(icon, "icon");
+        }
+    }
+
+    public record NumericControl(double step, double minimum, double maximum) {
+        public NumericControl {
+            if (!Double.isFinite(step) || !Double.isFinite(minimum) || !Double.isFinite(maximum)
+                    || step <= 0D || minimum > maximum) {
+                throw new IllegalArgumentException("Numeric controls require a positive finite step and ordered finite bounds");
+            }
+        }
+    }
+
+    public record RootShortcut(TextKey name, TextKey description, Material icon, Consumer<Player> action) {
+        public RootShortcut {
+            Objects.requireNonNull(name, "name");
+            Objects.requireNonNull(description, "description");
+            Objects.requireNonNull(icon, "icon");
+            Objects.requireNonNull(action, "action");
+        }
+    }
+
     @FunctionalInterface
     public interface Loader {
         ConfigEditorDocument load() throws Exception;
@@ -541,12 +802,14 @@ public final class BukkitConfigEditor implements Listener, AutoCloseable {
     private static final class Session {
         private final Player player;
         private final UUID owner;
+        private final Consumer<Player> returnAction;
         private View view;
         private boolean busy;
 
-        private Session(Player player) {
+        private Session(Player player, Consumer<Player> returnAction) {
             this.player = player;
             owner = player.getUniqueId();
+            this.returnAction = returnAction;
         }
     }
 
@@ -569,6 +832,8 @@ public final class BukkitConfigEditor implements Listener, AutoCloseable {
         private final View view;
         private final UUID owner;
         private List<ConfigEditorDocument.Entry> entries;
+        private List<RootShortcut> shortcuts;
+        private List<Integer> contentSlots;
         private Inventory inventory;
 
         private Holder(BukkitConfigEditor editor, Session session, View view) {

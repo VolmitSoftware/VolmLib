@@ -432,6 +432,9 @@ public final class DirectorRuntimeEngine implements DirectorCommandEngine {
         String normalized = partial == null ? "" : partial.trim().toLowerCase(Locale.ROOT);
 
         for (DirectorRuntimeNode child : node.getChildren()) {
+            if (child.getDescriptor().isHidden()) {
+                continue;
+            }
             String name = child.getDescriptor().getName();
             if (normalized.isEmpty()) {
                 suggestions.add(name);

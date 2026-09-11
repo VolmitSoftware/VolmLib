@@ -148,7 +148,7 @@ public final class ConfigEditorDocument {
         }
     }
 
-    private static JsonPrimitive parseDecimal(String input) {
+    static JsonPrimitive parseDecimal(String input) {
         try {
             double number = Double.parseDouble(input);
             if (!Double.isFinite(number)) {
@@ -173,18 +173,21 @@ public final class ConfigEditorDocument {
 
     private static void validateReplacement(JsonElement expected, JsonElement replacement) {
         Kind expectedKind = kind(expected);
+        Kind replacementKind = kind(replacement);
         if (expectedKind == Kind.TABLE || expectedKind == Kind.TABLE_ARRAY) {
             throw new IllegalArgumentException("Open the section to edit its settings");
         }
-        if (kind(replacement) != expectedKind) {
+        boolean numericReplacement = (expectedKind == Kind.INTEGER || expectedKind == Kind.DECIMAL)
+                && (replacementKind == Kind.INTEGER || replacementKind == Kind.DECIMAL);
+        if (replacementKind != expectedKind && !numericReplacement) {
             throw new IllegalArgumentException("The replacement must have the same value type");
         }
         if (expectedKind == Kind.LIST) {
             validateList(expected.getAsJsonArray(), replacement.getAsJsonArray());
         }
-        if (expectedKind == Kind.INTEGER) {
+        if (replacementKind == Kind.INTEGER) {
             parseInteger(replacement.getAsString());
-        } else if (expectedKind == Kind.DECIMAL) {
+        } else if (replacementKind == Kind.DECIMAL) {
             parseDecimal(replacement.getAsString());
         }
     }

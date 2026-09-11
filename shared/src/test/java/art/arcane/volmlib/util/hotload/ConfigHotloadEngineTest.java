@@ -648,6 +648,91 @@ public class ConfigHotloadEngineTest {
         }
     }
 
+    @Test
+    public void timingUpdatePreservesSelfWrittenBaselineBeforeAnExternalEdit() throws IOException {
+        File file = temporaryFolder.newFile("timing-baseline.toml");
+        Files.writeString(file.toPath(), "value = 60\n", StandardCharsets.UTF_8);
+        ConfigHotloadEngine engine = createEngine(() -> List.of(file));
+        try {
+            engine.configure(500L, 100L, List.of(), List.of());
+            Files.writeString(file.toPath(), "value = 17\n", StandardCharsets.UTF_8);
+            engine.noteSelfWrite(file, "value = 17\n");
+            Files.writeString(file.toPath(), "value = 19\n", StandardCharsets.UTF_8);
+            engine.updateTiming(250L, 500L);
+            AtomicReference<ConfigHotloadEngine.ContentDelta> delta = new AtomicReference<>();
+            assertTrue(engine.processFileChange(file, ignored -> true, delta::set));
+            assertEquals("value = 17", delta.get().before());
+            assertEquals("value = 19", delta.get().after());
+        } finally {
+            engine.clear();
+        }
+    }
+
+    @Test
+    public void timingUpdatePreservesAnAlreadyPendingExternalSnapshot() throws IOException {
+        File file = temporaryFolder.newFile("timing-pending.toml");
+        Files.writeString(file.toPath(), "value = 1\n", StandardCharsets.UTF_8);
+        ConfigHotloadEngine engine = createEngine(() -> List.of(file));
+        try {
+            engine.configure(100L, 100L, List.of(), List.of());
+            Files.writeString(file.toPath(), "value = 2\n", StandardCharsets.UTF_8);
+            assertTrue(engine.pollTouchedSnapshots().isEmpty());
+            engine.updateTiming(500L, 1_000L);
+            Set<ConfigHotloadEngine.StableContentSnapshot> pending = engine.pollTouchedSnapshots();
+            assertEquals(1, pending.size());
+            assertEquals("value = 2", pending.iterator().next().normalizedContent());
+        } finally {
+            engine.clear();
+        }
+    }
+
+    @Test
+    public void timingUpdateRetainsQueuedChangesWhenTheCooldownShortens() throws IOException {
+        File file = temporaryFolder.newFile("timing-queued.toml");
+        Files.writeString(file.toPath(), "value = 1\n", StandardCharsets.UTF_8);
+        ConfigHotloadEngine engine = createEngine(() -> List.of(file));
+        try {
+            engine.configure(100L, 1_000L, List.of(), List.of());
+            Files.writeString(file.toPath(), "value = 2\n", StandardCharsets.UTF_8);
+            ConfigHotloadEngine.StableContentSnapshot first = awaitTouchedSnapshot(engine, file);
+            assertTrue(engine.processSnapshotChange(first, ignored -> true, null));
+            Files.writeString(file.toPath(), "value = 3\n", StandardCharsets.UTF_8);
+            for (int poll = 0; poll < 30; poll++) {
+                assertTrue(engine.pollTouchedSnapshots().isEmpty());
+            }
+            engine.updateTiming(500L, 100L);
+            clock.addAndGet(TimeUnit.MILLISECONDS.toNanos(100L));
+            Set<ConfigHotloadEngine.StableContentSnapshot> queued = engine.pollTouchedSnapshots();
+            assertEquals(1, queued.size());
+            assertEquals("value = 3", queued.iterator().next().normalizedContent());
+        } finally {
+            engine.clear();
+        }
+    }
+
+    @Test
+    public void timingUpdateRetainsSelfWriteRevisionsAgainstCapturedOlderContent() throws IOException {
+        File file = temporaryFolder.newFile("timing-revision.toml");
+        Files.writeString(file.toPath(), "value = 1\n", StandardCharsets.UTF_8);
+        ConfigHotloadEngine engine = createEngine(() -> List.of(file));
+        try {
+            engine.configure(100L, 100L, List.of(), List.of());
+            Files.writeString(file.toPath(), "value = 2\n", StandardCharsets.UTF_8);
+            ConfigHotloadEngine.StableContentSnapshot stale = awaitTouchedSnapshot(engine, file);
+            Files.writeString(file.toPath(), "value = 3\n", StandardCharsets.UTF_8);
+            engine.noteSelfWrite(file, "value = 3\n");
+            engine.updateTiming(500L, 500L);
+            AtomicBoolean applied = new AtomicBoolean();
+            assertFalse(engine.processSnapshotChange(stale, ignored -> {
+                applied.set(true);
+                return true;
+            }, null));
+            assertFalse(applied.get());
+        } finally {
+            engine.clear();
+        }
+    }
+
     private ConfigHotloadEngine createEngine(KnownFilesSupplier knownFilesSupplier) {
         return new ConfigHotloadEngine(
                 file -> file != null && file.getName().endsWith(".toml"),

@@ -3,6 +3,7 @@ package art.arcane.volmlib.util.localization;
 import art.arcane.volmlib.util.director.DirectorTextResolver;
 import art.arcane.volmlib.util.director.help.DirectorMiniMenu;
 import art.arcane.volmlib.util.inventorygui.BukkitInventoryShutdown;
+import art.arcane.volmlib.util.plugin.ComponentText;
 import art.arcane.volmlib.util.scheduling.FoliaScheduler;
 import org.bukkit.ChatColor;
 import org.bukkit.Material;
@@ -156,7 +157,7 @@ public class BukkitLanguageEditorTest {
         when(languages.snapshot(playerId)).thenReturn(snapshot);
         when(languages.availableLocales()).thenReturn(List.of("fr_FR"));
         when(plugin.isEnabled()).thenReturn(true);
-        when(plugin.getName()).thenReturn("Test<green>");
+        when(plugin.getName()).thenReturn("Test<green>&c[ff0000]§c");
         when(plugin.getServer()).thenReturn(server);
         IllegalStateException inventoryBoundary = new IllegalStateException("Inventory factory boundary");
         List<String> titles = new ArrayList<>();
@@ -173,7 +174,7 @@ public class BukkitLanguageEditorTest {
             assertSame(inventoryBoundary, assertThrows(IllegalStateException.class, () -> editor.open(player, null)));
         }
 
-        assertEquals(List.of("Test<green> › Langues", "Test<green> › Langues"), titles);
+        assertEquals(List.of("Test<green>&c[ff0000] › Langues", "Test<green>&c[ff0000] › Langues"), titles);
     }
 
     @Test
@@ -254,6 +255,40 @@ public class BukkitLanguageEditorTest {
         assertEquals(List.of(20, 21, 22, 23, 24), BukkitLanguageEditor.categorySlots(5));
         assertEquals(List.of(11, 12, 13, 14, 20, 21, 22, 23), BukkitLanguageEditor.categorySlots(8));
         assertEquals(Set.of(45, 48, 49, 50, 53), BukkitLanguageEditor.navigationSlots());
+    }
+
+    @Test
+    public void overriddenEditorTitleUsesThePlayersResolverAndCustomName() {
+        TextKey key = BukkitLanguageMessages.EDITOR_TITLE;
+        TextKey overridden = TextKey.of(key.id(), "{prefix} › {section}");
+        LocalizationSnapshot snapshot = LocalizationSnapshot.create(new LocalizationCandidate(
+                MessageCatalog.of("en_US", overridden), List.of(), PluralSelector.oneOther()));
+        PluginLanguageService languages = mock(PluginLanguageService.class);
+        Player player = mock(Player.class);
+        UUID playerId = UUID.randomUUID();
+        when(player.getUniqueId()).thenReturn(playerId);
+        when(languages.snapshot(playerId)).thenReturn(snapshot);
+        DirectorTextResolver resolver = (requested, arguments) -> {
+            assertEquals(key, requested);
+            assertEquals(playerId, LanguageAudience.current());
+            return "<gold><bold>Custom</bold></gold><gray> › "
+                    + ComponentText.literal(String.valueOf(arguments.require("section").value())).miniMessage()
+                    + "</gray>";
+        };
+        BukkitLanguageSwitcher.Options switcher = new BukkitLanguageSwitcher.Options(
+                "test", "test.language.admin", DirectorMiniMenu.Theme.adaptRed(), resolver,
+                new PluginLanguageEditor.Options(locale -> snapshot, edit -> snapshot));
+        BukkitLanguageEditor editor = new BukkitLanguageEditor(mock(Plugin.class),
+                new BukkitLanguageEditor.Options(languages, switcher, ignored -> {
+                }, BukkitLanguageEditorPresentation.standard()));
+
+        ComponentText rendered = editor.localized(player, key,
+                MessageArgument.untrusted("plugin", "Original"),
+                MessageArgument.untrusted("section", "<red>Messages"));
+
+        assertEquals("Custom › <red>Messages", rendered.plain());
+        assertTrue(rendered.legacy().contains("§6§lCustom"));
+        assertEquals(null, LanguageAudience.current());
     }
 
     @Test

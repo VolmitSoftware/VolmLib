@@ -4,11 +4,13 @@ import art.arcane.volmlib.util.director.DirectorTextResolver;
 import art.arcane.volmlib.util.director.help.DirectorMiniMenu;
 import art.arcane.volmlib.util.localization.LanguageAudience;
 import art.arcane.volmlib.util.localization.MessageArgument;
+import art.arcane.volmlib.util.localization.MessageArgs;
 import art.arcane.volmlib.util.localization.TextKey;
 import art.arcane.volmlib.util.plugin.ComponentMessenger;
 import art.arcane.volmlib.util.plugin.ComponentText;
 import art.arcane.volmlib.util.scheduling.FoliaScheduler;
 import art.arcane.volmlib.util.web.MclogsClient;
+import net.kyori.adventure.text.minimessage.MiniMessage;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 import org.bukkit.permissions.Permission;
@@ -47,6 +49,7 @@ import java.util.function.Supplier;
 import java.util.logging.Level;
 
 public final class BukkitDebugDump implements AutoCloseable {
+    private static final MiniMessage MINI_MESSAGE = MiniMessage.miniMessage();
     private static final String PROTOCOL_KEY = "volmit.debug.protocol";
     private static final String PROTOCOL = "1";
     private static final int MAXIMUM_FILE_ATTEMPTS = 10_000;
@@ -421,7 +424,7 @@ public final class BukkitDebugDump implements AutoCloseable {
             return;
         }
         ArrayList<ComponentText> entries = new ArrayList<>(savedEntries(sender, result.path()));
-        if (!result.notice().isEmpty()) {
+        if (!result.notice().plain().isEmpty()) {
             entries.add(themed(result.notice(), theme().required()));
         }
         if (!result.url().isEmpty()) {
@@ -449,7 +452,7 @@ public final class BukkitDebugDump implements AutoCloseable {
         );
     }
 
-    private void message(CommandSender sender, String text) {
+    private void message(CommandSender sender, ComponentText text) {
         reply(sender, () -> deliver(sender, List.of(themed(text, theme().description()))));
     }
 
@@ -468,27 +471,28 @@ public final class BukkitDebugDump implements AutoCloseable {
         DirectorMiniMenu.ContentMenu menu = new DirectorMiniMenu.ContentMenu(
                 presentation.command(), presentation.command(), presentation.parentCommand(),
                 entries, "", 1, Math.max(1, entries.size()));
-        DirectorMiniMenu.deliverContent(sender, menu, theme(), presentation.textResolver());
+        DirectorMiniMenu.deliverContent(sender, menu, theme(),
+                (key, arguments) -> presentation.textResolver().resolve(key, arguments).plain());
     }
 
-    private ComponentText themed(String text, String color) {
-        return ComponentText.markup("<" + color + ">" + DirectorMiniMenu.escapeText(text) + "</" + color + ">");
+    private ComponentText themed(ComponentText text, String color) {
+        return text.colorIfAbsent(color);
     }
 
-    private ComponentText action(String title, String description, String value) {
+    private ComponentText action(ComponentText title, ComponentText description, String value) {
         DirectorMiniMenu.Theme theme = theme();
-        ComponentText label = ComponentText.markup(
+        ComponentText label = ComponentText.component(MINI_MESSAGE.deserialize(
                 "<gradient:" + theme.primaryLeft() + ":" + theme.primaryRight() + ">"
-                        + DirectorMiniMenu.escapeText(title) + "</gradient>"
-        );
-        return label.hover(ComponentText.markup(
-                "<" + theme.primaryRight() + ">" + DirectorMiniMenu.escapeText(title)
+                        + title.miniMessage() + "</gradient>"
+        ));
+        return label.hover(ComponentText.component(MINI_MESSAGE.deserialize(
+                "<" + theme.primaryRight() + ">" + title.miniMessage()
                         + "</" + theme.primaryRight() + "><reset>\n"
                         + "<" + theme.description() + ">✎ <font:minecraft:uniform>"
-                        + DirectorMiniMenu.escapeText(description) + "</font></" + theme.description() + "><reset>\n"
+                        + description.miniMessage() + "</font></" + theme.description() + "><reset>\n"
                         + "<" + theme.optional() + ">✒ <font:minecraft:uniform>"
-                        + DirectorMiniMenu.escapeText(value) + "</font></" + theme.optional() + ">"
-        ));
+                        + ComponentText.literal(value).miniMessage() + "</font></" + theme.optional() + ">"
+        )));
     }
 
     private String entry(ComponentText content) {
@@ -503,13 +507,17 @@ public final class BukkitDebugDump implements AutoCloseable {
         return presentation == null ? DirectorMiniMenu.Theme.adaptRed() : presentation.theme();
     }
 
-    private String text(CommandSender sender, TextKey key, MessageArgument... arguments) {
+    private ComponentText text(CommandSender sender, TextKey key, MessageArgument... arguments) {
+        MessageArgs.Builder values = MessageArgs.builder();
+        for (MessageArgument argument : arguments) {
+            values.add(argument);
+        }
         return audience(sender, () -> {
             Presentation presentation = options.presentation();
-            DirectorTextResolver resolver = presentation == null
-                    ? DirectorTextResolver.ENGLISH
+            TextResolver resolver = presentation == null
+                    ? TextResolver.ENGLISH
                     : presentation.textResolver();
-            return resolver.resolve(key, arguments);
+            return resolver.resolve(key, values.build());
         });
     }
 
@@ -551,7 +559,7 @@ public final class BukkitDebugDump implements AutoCloseable {
     }
 
     public record Presentation(String command, String parentCommand, DirectorMiniMenu.Theme theme,
-                               DirectorTextResolver textResolver) {
+                               TextResolver textResolver) {
         public Presentation {
             if (command == null || !command.startsWith("/")) {
                 throw new IllegalArgumentException("A debug command beginning with / is required");
@@ -562,6 +570,14 @@ public final class BukkitDebugDump implements AutoCloseable {
             Objects.requireNonNull(theme, "theme");
             Objects.requireNonNull(textResolver, "textResolver");
         }
+    }
+
+    @FunctionalInterface
+    public interface TextResolver {
+        TextResolver ENGLISH = (key, arguments) ->
+                ComponentText.literal(DirectorTextResolver.ENGLISH.resolve(key, arguments));
+
+        ComponentText resolve(TextKey key, MessageArgs arguments);
     }
 
     private static final class DumpOperation {
@@ -695,25 +711,25 @@ public final class BukkitDebugDump implements AutoCloseable {
         }
     }
 
-    private record DebugResult(String name, String version, String path, String url, String notice, String error) {
+    private record DebugResult(String name, String version, String path, String url, ComponentText notice, ComponentText error) {
         private static DebugResult saved(String name, String version, String path) {
-            return new DebugResult(name, version, path, "", "", "");
+            return new DebugResult(name, version, path, "", ComponentText.empty(), ComponentText.empty());
         }
 
-        private static DebugResult savedWithNotice(String name, String version, String path, String notice) {
-            return new DebugResult(name, version, path, "", notice, "");
+        private static DebugResult savedWithNotice(String name, String version, String path, ComponentText notice) {
+            return new DebugResult(name, version, path, "", notice, ComponentText.empty());
         }
 
         private static DebugResult uploaded(String name, String version, String path, String url) {
-            return new DebugResult(name, version, path, url, "", "");
+            return new DebugResult(name, version, path, url, ComponentText.empty(), ComponentText.empty());
         }
 
-        private static DebugResult failure(String name, String version, String error) {
-            return new DebugResult(name, version, "", "", "", error);
+        private static DebugResult failure(String name, String version, ComponentText error) {
+            return new DebugResult(name, version, "", "", ComponentText.empty(), error);
         }
 
         private boolean successful() {
-            return error.isEmpty();
+            return error.plain().isEmpty();
         }
 
         private Map<String, String> export() {
@@ -723,8 +739,8 @@ public final class BukkitDebugDump implements AutoCloseable {
             values.put("version", version);
             values.put("path", path);
             values.put("url", url);
-            values.put("notice", notice);
-            values.put("error", error);
+            values.put("notice", notice.plain());
+            values.put("error", error.plain());
             return Map.copyOf(values);
         }
     }

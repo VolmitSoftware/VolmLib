@@ -98,6 +98,9 @@ public final class DirectorVisualCommand {
         );
 
         for (DirectorRuntimeNode child : runtime.getChildren()) {
+            if (child.getDescriptor().isHidden()) {
+                continue;
+            }
             visual.nodes.add(fromRuntime(child, visual, legacyHandlers));
         }
 

@@ -3,6 +3,7 @@ package art.arcane.volmlib.util.plugin;
 import art.arcane.volmlib.util.format.ColorFormatter;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.event.ClickEvent;
+import net.kyori.adventure.text.format.TextColor;
 import net.kyori.adventure.text.minimessage.MiniMessage;
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
@@ -75,6 +76,12 @@ public final class ComponentText {
     public ComponentText append(ComponentText suffix) {
         ComponentText requiredSuffix = Objects.requireNonNull(suffix, "suffix");
         return new ComponentText(Component.empty().append(component).append(requiredSuffix.component));
+    }
+
+    public ComponentText colorIfAbsent(String hexColor) {
+        TextColor color = Objects.requireNonNull(TextColor.fromHexString(Objects.requireNonNull(hexColor, "hexColor")),
+                "hexColor must be a valid RGB hex color");
+        return new ComponentText(component.colorIfAbsent(color));
     }
 
     public ComponentText hover(ComponentText content) {

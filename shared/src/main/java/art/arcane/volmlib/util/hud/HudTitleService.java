@@ -61,6 +61,37 @@ public final class HudTitleService {
     }
   }
 
+  boolean dismiss(Player player, long sessionId, String purpose, long sinceMillis) {
+    if (!ledger.release(localKey(player.getUniqueId()), sessionId)) {
+      return false;
+    }
+    List<MetadataValue> values = player.getMetadata(METADATA_KEY);
+    List<HudBidder> bidders = new ArrayList<>(values.size());
+    boolean posted = false;
+    for (MetadataValue value : values) {
+      Plugin owner = value.getOwningPlugin();
+      if (owner == null) {
+        continue;
+      }
+      HudBid bid = HudBid.decode(value.asString());
+      if (owner == plugin && bid != null && bid.sinceMillis() == sinceMillis && bid.purpose().equals(purpose)) {
+        posted = true;
+      }
+      bidders.add(new HudBidder(owner.getName(), bid));
+    }
+    if (!posted) {
+      return false;
+    }
+    HudBidder winner = HudBidder.winner(bidders, System.currentTimeMillis());
+    boolean owned = winner != null && winner.ownerName().equals(plugin.getName())
+        && winner.bid().sinceMillis() == sinceMillis && winner.bid().purpose().equals(purpose);
+    player.removeMetadata(METADATA_KEY, plugin);
+    if (owned) {
+      player.resetTitle();
+    }
+    return owned;
+  }
+
   void retire(UUID playerId, long sessionId) {
     ledger.release(localKey(playerId), sessionId);
   }

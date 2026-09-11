@@ -2,6 +2,9 @@ package art.arcane.volmlib.util.diagnostics;
 
 import art.arcane.volmlib.util.director.DirectorTextResolver;
 import art.arcane.volmlib.util.director.help.DirectorMiniMenu;
+import art.arcane.volmlib.util.localization.MessageArgs;
+import art.arcane.volmlib.util.localization.TextKey;
+import art.arcane.volmlib.util.plugin.ComponentText;
 import art.arcane.volmlib.util.scheduling.FoliaScheduler;
 import art.arcane.volmlib.util.web.MclogsClient;
 import net.kyori.adventure.text.Component;
@@ -46,6 +49,7 @@ import java.util.function.BiFunction;
 import java.util.logging.Logger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static org.junit.Assert.assertEquals;
@@ -184,7 +188,7 @@ public class BukkitDebugDumpTest {
         BukkitDebugDump dumps = BukkitDebugDump.create(plugin,
                 new BukkitDebugDump.Options(() -> true, () -> () -> "Portal count: 2",
                         new BukkitDebugDump.Presentation("/shapedportals debug dump", "/shapedportals debug",
-                                DirectorMiniMenu.Theme.adaptRed(), DirectorTextResolver.ENGLISH)));
+                                DirectorMiniMenu.Theme.adaptRed(), BukkitDebugDump.TextResolver.ENGLISH)));
         dumps.updateTheme(DirectorMiniMenu.Theme.reactBlue());
 
         dumps.request(player, false);
@@ -213,8 +217,8 @@ public class BukkitDebugDumpTest {
 
     @Test
     public void presentationResolverLocalizesDebugWorkflowMessages() {
-        DirectorTextResolver resolver = (key, arguments) ->
-                "localized:" + DirectorTextResolver.ENGLISH.resolve(key, arguments);
+        BukkitDebugDump.TextResolver resolver = (key, arguments) ->
+                ComponentText.literal("localized:" + DirectorTextResolver.ENGLISH.resolve(key, arguments));
         BukkitDebugDump dumps = BukkitDebugDump.create(plugin,
                 new BukkitDebugDump.Options(() -> true, () -> () -> "",
                         new BukkitDebugDump.Presentation("/shapedportals debug dump", "/shapedportals debug",
@@ -226,6 +230,98 @@ public class BukkitDebugDumpTest {
         assertTrue(rendered.contains("localized:Preparing ShapedPortals debug dump"));
         assertTrue(rendered.contains("localized:Saved ShapedPortals debug dump"));
         assertTrue(rendered.contains("localized:Copy local path"));
+    }
+
+    @Test
+    public void richMessagesKeepTheirPrefixesAndLiteralPathsThroughMenuDelivery() throws Exception {
+        directory = temporary.newFolder("&4[ff0000]-reports").toPath();
+        when(snapshot.dataDirectory()).thenReturn(directory);
+        BukkitDebugDump dumps = BukkitDebugDump.create(plugin,
+                new BukkitDebugDump.Options(() -> true, () -> () -> "",
+                        new BukkitDebugDump.Presentation("/shapedportals debug dump", "/shapedportals debug",
+                                DirectorMiniMenu.Theme.adaptRed(), this::styledDebugText)));
+
+        dumps.request(player, false);
+
+        String path = savedReports().get(0).toAbsolutePath().normalize().toString();
+        String visible = visibleMessages();
+        assertTrue(visible.contains("Local › Preparing ShapedPortals debug dump..."));
+        assertTrue(visible.contains("Local › Saved Local debug dump to " + path + "."));
+        assertFalse(visible.contains("<bold>"));
+        assertFalse(visible.contains("<gradient:"));
+        assertFalse(visible.contains("{prefix}"));
+        List<Component> components = renderedComponents();
+        assertTrue(hasColor(components, TextColor.color(0x6F35C5)));
+        assertTrue(hasColor(components, TextColor.color(0x35135F)));
+        assertFalse(hasColor(components, TextColor.color(0xFF0000)));
+        assertFalse(hasColor(components, TextColor.color(0xAA0000)));
+        assertTrue(components.stream().anyMatch(component ->
+                ClickEvent.copyToClipboard(path).equals(component.clickEvent())));
+        assertTrue(components.stream().anyMatch(component -> component.hoverEvent() != null
+                && component.hoverEvent().value() instanceof Component hover
+                && ComponentText.component(hover).plain().contains(path)));
+    }
+
+    @Test
+    public void uploadedRichMessagesKeepOneExactOpenAction() throws Exception {
+        BukkitDebugDump dumps = BukkitDebugDump.create(plugin,
+                new BukkitDebugDump.Options(() -> true, () -> () -> "",
+                        new BukkitDebugDump.Presentation("/shapedportals debug dump", "/shapedportals debug",
+                                DirectorMiniMenu.Theme.adaptRed(), this::styledDebugText)));
+        URI url = URI.create("https://mclo.gs/Ab12?first=1&4=literal");
+        when(clients.constructed().get(0).publish(anyString(), anyString(), anyString())).thenReturn(url);
+
+        dumps.request(player, true);
+
+        String visible = visibleMessages();
+        assertTrue(visible.contains("Local › Uploaded as VolmitSoftware - Local - v2.0.0."));
+        assertTrue(visible.contains("Local › Open: " + url));
+        assertFalse(visible.contains("<bold>"));
+        assertFalse(visible.contains("<gradient:"));
+        long links = renderedComponents().stream().filter(component ->
+                ClickEvent.openUrl(url.toString()).equals(component.clickEvent())).count();
+        assertEquals(1L, links);
+    }
+
+    @Test
+    public void richFailureAndUploadNoticeStayFormattedAndAggregateExportsStayPlain() throws Exception {
+        BukkitDebugDump dumps = BukkitDebugDump.create(plugin,
+                new BukkitDebugDump.Options(() -> true, () -> () -> "",
+                        new BukkitDebugDump.Presentation("/shapedportals debug dump", "/shapedportals debug",
+                                DirectorMiniMenu.Theme.adaptRed(), this::styledDebugText)));
+        when(clients.constructed().get(0).publish(anyString(), anyString(), anyString()))
+                .thenThrow(new IOException("offline"));
+        dumps.request(player, true);
+        assertTrue(visibleMessages().contains("Local › Debug dump upload failed; the local report is saved."));
+        assertFalse(visibleMessages().contains("<bold>"));
+        assertTrue(hasColor(renderedComponents(), TextColor.color(0x6F35C5)));
+
+        messages.clear();
+        when(player.hasPermission("shapedportals.debugdump")).thenReturn(false);
+        dumps.request(player, false);
+        assertTrue(visibleMessages().contains("Local › Missing permission: shapedportals.debugdump"));
+        assertFalse(visibleMessages().contains("<bold>"));
+        Map<?, ?> provider = services.getRegistrations(Map.class).get(0).getProvider();
+        @SuppressWarnings("unchecked")
+        BiFunction<CommandSender, Boolean, CompletableFuture<Map<String, String>>> aggregate =
+                (BiFunction<CommandSender, Boolean, CompletableFuture<Map<String, String>>>) provider.get("request.aggregate");
+        assertEquals("Local › Missing permission: shapedportals.debugdump",
+                aggregate.apply(player, false).join().get("error"));
+    }
+
+    @Test
+    public void plainResolversKeepFormattingLikeTextLiteral() {
+        BukkitDebugDump dumps = BukkitDebugDump.create(plugin,
+                new BukkitDebugDump.Options(() -> true, () -> () -> "",
+                        new BukkitDebugDump.Presentation("/shapedportals debug dump", "/shapedportals debug",
+                                DirectorMiniMenu.Theme.adaptRed(), (key, arguments) -> ComponentText.literal(
+                                        "<red>&4[ff0000] " + DirectorTextResolver.ENGLISH.resolve(key, arguments)))));
+
+        dumps.request(player, false);
+
+        assertTrue(visibleMessages().contains("<red>&4[ff0000] Saved ShapedPortals debug dump"));
+        assertFalse(hasColor(renderedComponents(), TextColor.color(0xFF0000)));
+        assertFalse(hasColor(renderedComponents(), TextColor.color(0xAA0000)));
     }
 
     @Test
@@ -478,6 +574,26 @@ public class BukkitDebugDumpTest {
         assertEquals("Diagnostic report\n", Files.readString(report));
     }
 
+    private ComponentText styledDebugText(TextKey key, MessageArgs arguments) {
+        ComponentText prefix = ComponentText.markup("<bold><gradient:#6f35c5:#35135f>Local</gradient></bold>");
+        ComponentText body;
+        if (key.equals(BukkitDebugMessages.SAVED)) {
+            body = ComponentText.literal("Saved ").append(prefix)
+                    .append(ComponentText.literal(" debug dump to " + arguments.require("path").value() + "."));
+        } else if (key.equals(BukkitDebugMessages.UPLOADED_AS)) {
+            body = ComponentText.literal("Uploaded as VolmitSoftware - ").append(prefix)
+                    .append(ComponentText.literal(" - v" + arguments.require("version").value() + "."));
+        } else {
+            body = ComponentText.literal(DirectorTextResolver.ENGLISH.resolve(key, arguments));
+        }
+        return prefix.append(ComponentText.literal(" › ")).append(body);
+    }
+
+    private String visibleMessages() {
+        return messages.stream().map(message -> ComponentText.component(MiniMessage.miniMessage().deserialize(message)).plain())
+                .collect(Collectors.joining("\n"));
+    }
+
     private List<Component> renderedComponents() {
         List<Component> components = new ArrayList<>();
         for (String message : messages) {
@@ -517,5 +633,8 @@ public class BukkitDebugDumpTest {
     public interface TestPlayer extends Player, CommandSender {
         @Override
         Player.Spigot spigot();
+
+        @Override
+        void resetTitle();
     }
 }

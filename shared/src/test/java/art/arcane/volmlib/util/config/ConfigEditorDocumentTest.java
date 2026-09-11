@@ -117,6 +117,22 @@ public class ConfigEditorDocumentTest {
         assertThrows(IllegalArgumentException.class, () -> document.edit(List.of("drops"), new JsonArray()));
     }
 
+    @Test
+    public void numericEditsAllowIntegerAndDecimalStorageWithoutRelaxingOtherTypes() throws IOException {
+        ConfigEditorDocument document = ConfigEditorDocument.fromToml(SOURCE);
+        ConfigEditorDocument.Edit decimal = document.edit(List.of("maximum"), new JsonPrimitive(0.7D));
+        ConfigEditorDocument.Edit integer = document.edit(List.of("chance"), new JsonPrimitive(1L));
+
+        assertEquals("0.7", decimal.value().toString());
+        assertEquals("1", integer.value().toString());
+        assertEquals(10L, decimal.expected().getAsLong());
+        assertEquals(SOURCE, decimal.original().source());
+        assertThrows(IllegalArgumentException.class, () -> document.edit(List.of("maximum"), new JsonPrimitive("0.7")));
+        assertThrows(IllegalArgumentException.class, () -> document.edit(List.of("maximum"), new JsonPrimitive(Double.NaN)));
+        assertThrows(IllegalArgumentException.class, () -> document.edit(List.of("enabled"), new JsonPrimitive(1L)));
+        assertThrows(IllegalArgumentException.class, () -> document.edit(List.of("language"), new JsonPrimitive(1L)));
+    }
+
     private static ConfigEditorDocument.Entry entry(ConfigEditorDocument document, String name) {
         for (ConfigEditorDocument.Entry entry : document.entries(List.of())) {
             if (entry.name().equals(name)) {

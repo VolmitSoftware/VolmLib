@@ -4,6 +4,8 @@ import art.arcane.volmlib.util.director.DirectorTextResolver;
 import art.arcane.volmlib.util.director.help.DirectorMiniMenu;
 import art.arcane.volmlib.util.plugin.ComponentMessenger;
 import art.arcane.volmlib.util.plugin.ComponentText;
+import art.arcane.volmlib.util.format.ColorFormatter;
+import net.kyori.adventure.text.minimessage.MiniMessage;
 import art.arcane.volmlib.util.scheduling.FoliaScheduler;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
@@ -927,10 +929,7 @@ public final class BukkitLanguageSwitcher implements AutoCloseable, Listener {
                 audience,
                 () -> localizedMessage(sender, key, messageArgs(arguments))
         );
-        ComponentMessenger.send(sender, ComponentText.markup(
-                "<" + options.theme().description() + ">" + content.miniMessage()
-                        + "</" + options.theme().description() + ">"
-        ));
+        ComponentMessenger.send(sender, content.colorIfAbsent(options.theme().description()));
     }
 
     private ComponentText localizedMessage(CommandSender sender, TextKey key, MessageArgs arguments) {
@@ -942,16 +941,24 @@ public final class BukkitLanguageSwitcher implements AutoCloseable, Listener {
             template = resolved.template();
             resolvedArguments = resolved.arguments();
         } catch (RuntimeException failure) {
-            return ComponentText.literal(localized(key, arguments));
+            String rendered = localizedOverride(key, arguments);
+            if (rendered != null) {
+                return ComponentText.component(MiniMessage.miniMessage().deserialize(rendered));
+            }
+            template = key.english();
+            resolvedArguments = arguments;
         }
+        template = ComponentText.normalizeMarkup(template);
         for (MessageArgument argument : resolvedArguments.arguments().values()) {
             String value = String.valueOf(argument.value());
             if (argument.kind() == MessageArgumentKind.UNTRUSTED) {
-                value = DirectorMiniMenu.escapeText(value);
+                value = DirectorMiniMenu.escapeText(ColorFormatter.stripColor(value));
+            } else {
+                value = ComponentText.normalizeMarkup(value);
             }
             template = template.replace("{" + argument.name() + "}", value);
         }
-        return ComponentText.markup(template);
+        return ComponentText.component(MiniMessage.miniMessage().deserialize(template));
     }
 
     private String link(CommandSender sender, String label, String command, String hover) {
@@ -1005,6 +1012,17 @@ public final class BukkitLanguageSwitcher implements AutoCloseable, Listener {
             rendered = DirectorTextResolver.ENGLISH.resolve(key, arguments);
         }
         return ComponentText.markup(rendered).plain();
+    }
+
+    private String localizedOverride(TextKey key, MessageArgs arguments) {
+        if (options.textResolver() == DirectorTextResolver.ENGLISH) {
+            return null;
+        }
+        try {
+            return options.textResolver().resolve(key, arguments);
+        } catch (IllegalArgumentException exception) {
+            return null;
+        }
     }
 
     private String entry(ComponentText content) {

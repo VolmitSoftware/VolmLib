@@ -1,9 +1,12 @@
 package art.arcane.volmlib.util.localization;
 
+import art.arcane.volmlib.util.director.DirectorTextResolver;
 import art.arcane.volmlib.util.director.help.DirectorMiniMenu;
+import art.arcane.volmlib.util.format.ColorFormatter;
 import art.arcane.volmlib.util.inventorygui.BukkitInventoryShutdown;
 import art.arcane.volmlib.util.plugin.ComponentMessenger;
 import art.arcane.volmlib.util.plugin.ComponentText;
+import net.kyori.adventure.text.minimessage.MiniMessage;
 import art.arcane.volmlib.util.scheduling.FoliaScheduler;
 import org.bukkit.ChatColor;
 import org.bukkit.Material;
@@ -463,7 +466,9 @@ final class BukkitLanguageEditor implements AutoCloseable, Listener {
             section = view.locale();
         }
         DirectorMiniMenu.Theme theme = this.theme;
-        String title = ComponentText.literal(plugin.getName() + " › " + section).legacy();
+        String title = localized(player, BukkitLanguageMessages.EDITOR_TITLE,
+                MessageArgument.untrusted("plugin", plugin.getName()),
+                MessageArgument.untrusted("section", section)).plain();
         Inventory inventory = plugin.getServer().createInventory(holder, SIZE, title);
         holder.inventory = inventory;
         ItemStack filler = formattedItem(Material.BLACK_STAINED_GLASS_PANE, ComponentText.literal(" "), List.of());
@@ -727,7 +732,7 @@ final class BukkitLanguageEditor implements AutoCloseable, Listener {
                                  String color,
                                  MessageArgument... arguments) {
         ComponentText content = localized(player, key, arguments);
-        return ComponentText.markup("<" + color + ">" + content.miniMessage() + "</" + color + ">");
+        return content.colorIfAbsent(color);
     }
 
     ComponentText localized(Player player, TextKey key, MessageArgument... arguments) {
@@ -745,17 +750,37 @@ final class BukkitLanguageEditor implements AutoCloseable, Listener {
             template = resolved.template();
             resolvedArguments = resolved.arguments();
         } catch (RuntimeException failure) {
+            String rendered = localizedOverride(player, key, supplied);
+            if (rendered != null) {
+                return ComponentText.component(MiniMessage.miniMessage().deserialize(rendered));
+            }
             template = key.english();
             resolvedArguments = supplied;
         }
+        template = ComponentText.normalizeMarkup(template);
         for (MessageArgument argument : resolvedArguments.arguments().values()) {
             String value = String.valueOf(argument.value());
             if (argument.kind() == MessageArgumentKind.UNTRUSTED) {
-                value = DirectorMiniMenu.escapeText(value);
+                value = DirectorMiniMenu.escapeText(ColorFormatter.stripColor(value));
+            } else {
+                value = ComponentText.normalizeMarkup(value);
             }
             template = template.replace("{" + argument.name() + "}", value);
         }
-        return ComponentText.markup(template);
+        return ComponentText.component(MiniMessage.miniMessage().deserialize(template));
+    }
+
+    private String localizedOverride(Player player, TextKey key, MessageArgs arguments) {
+        if (options.switcher().textResolver() == DirectorTextResolver.ENGLISH) {
+            return null;
+        }
+        return LanguageAudience.call(player.getUniqueId(), () -> {
+            try {
+                return options.switcher().textResolver().resolve(key, arguments);
+            } catch (IllegalArgumentException exception) {
+                return null;
+            }
+        });
     }
 
     private static Method resolveInventoryViewTopInventory() {

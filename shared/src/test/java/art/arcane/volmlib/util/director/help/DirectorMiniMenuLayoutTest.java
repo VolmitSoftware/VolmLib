@@ -99,6 +99,7 @@ public class DirectorMiniMenuLayoutTest {
                 DirectorOrigin.BOTH,
                 DirectorExecutionMode.SYNC,
                 true,
+                false,
                 List.of()
         );
         return new DirectorRuntimeNode(descriptor, parent, new Object(), null, List.of());

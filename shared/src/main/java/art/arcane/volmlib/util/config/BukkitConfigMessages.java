@@ -14,6 +14,7 @@ public final class BukkitConfigMessages {
     public static final TextKey OPEN = TextKey.of("config.editor.open", "Click to open this section.");
     public static final TextKey TOGGLE = TextKey.of("config.editor.toggle", "Click to toggle true or false.");
     public static final TextKey EDIT = TextKey.of("config.editor.edit", "Click to enter a new value in chat.");
+    public static final TextKey ADJUST = TextKey.of("config.editor.adjust", "Left +{step}, right -{step}, shift x10, Q to type an exact value.");
     public static final TextKey TEXT = TextKey.of("config.editor.type.text", "Text; no surrounding quotes needed.");
     public static final TextKey INTEGER = TextKey.of("config.editor.type.integer", "Enter a whole number.");
     public static final TextKey DECIMAL = TextKey.of("config.editor.type.decimal", "Enter a number, such as 0.25.");
@@ -43,5 +44,9 @@ public final class BukkitConfigMessages {
 
     public static List<MessageKey> keys() {
         return KEYS;
+    }
+
+    public static List<MessageKey> configuredLayoutKeys() {
+        return List.of(ADJUST);
     }
 }

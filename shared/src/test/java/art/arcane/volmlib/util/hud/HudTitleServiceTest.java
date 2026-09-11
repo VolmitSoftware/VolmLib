@@ -20,6 +20,9 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -89,6 +92,63 @@ public class HudTitleServiceTest {
     claim.release();
     assertFalse(store.containsKey(plugin));
     assertFalse(claim.granted());
+  }
+
+  @Test
+  public void test_dismiss_currentWinningClaim_resetsTitleOnce() {
+    HudTitleClaim claim = service.open(player, "wormholes:look", HudPriority.NOTICE, 1500L);
+    assertTrue(claim.resolve());
+
+    assertTrue(claim.dismiss());
+    assertFalse(claim.dismiss());
+
+    verify(player, times(1)).resetTitle();
+    assertFalse(store.containsKey(plugin));
+    assertFalse(claim.granted());
+  }
+
+  @Test
+  public void test_dismiss_foreignWinner_releasesOwnBidWithoutResettingTitle() {
+    HudTitleClaim claim = service.open(player, "wormholes:look", HudPriority.NOTICE, 1500L);
+    assertTrue(claim.resolve());
+    seedForeignBid("React", HudPriority.INTERACTIVE);
+
+    assertFalse(claim.dismiss());
+
+    verify(player, never()).resetTitle();
+    assertFalse(store.containsKey(plugin));
+    assertTrue(store.size() == 1);
+  }
+
+  @Test
+  public void test_dismiss_replacedLocalClaim_preservesCurrentTitle() {
+    HudTitleClaim previous = service.open(player, "wormholes:look", HudPriority.NOTICE, 1500L);
+    assertTrue(previous.resolve());
+    previous.release();
+    HudTitleClaim current = service.open(player, "wormholes:direction", HudPriority.NOTICE, 1500L);
+    assertTrue(current.resolve());
+
+    assertFalse(previous.dismiss());
+
+    verify(player, never()).resetTitle();
+    assertTrue(store.containsKey(plugin));
+    assertTrue(current.dismiss());
+    verify(player).resetTitle();
+  }
+
+  @Test
+  public void test_dismiss_otherServiceFromSamePlugin_preservesItsMetadataAndTitle() {
+    HudTitleClaim previous = service.open(player, "wormholes:look", HudPriority.NOTICE, 1500L);
+    assertTrue(previous.resolve());
+    HudTitleService replacement = new HudTitleService(plugin);
+    HudTitleClaim current = replacement.open(player, "wormholes:direction", HudPriority.INTERACTIVE, 1500L);
+    assertTrue(current.resolve());
+
+    assertFalse(previous.dismiss());
+
+    verify(player, never()).resetTitle();
+    assertTrue(store.containsKey(plugin));
+    assertTrue(current.dismiss());
   }
 
   @Test

@@ -74,6 +74,7 @@ public final class BukkitLanguageMessages {
             "language.selection.server-selected", "{plugin}: server language is now {locale}.");
     public static final TextKey SERVER_DEFAULT_SELECTED = TextKey.of(
             "language.selection.server-default-selected", "{plugin}: your language now uses the server default.");
+    public static final TextKey EDITOR_TITLE = TextKey.of("language.editor.title", "{plugin} › {section}");
     public static final TextKey EDITOR_LANGUAGES = TextKey.of(
             "language.editor.section.languages", "Languages");
     public static final TextKey EDITOR_SEARCH = TextKey.of(
@@ -183,6 +184,7 @@ public final class BukkitLanguageMessages {
             PERSONAL_SELECTED,
             SERVER_SELECTED,
             SERVER_DEFAULT_SELECTED,
+            EDITOR_TITLE,
             EDITOR_LANGUAGES,
             EDITOR_SEARCH,
             EDITOR_SECTION_SEARCH,

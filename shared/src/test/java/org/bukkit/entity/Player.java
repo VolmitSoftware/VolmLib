@@ -40,6 +40,9 @@ public interface Player {
   default void closeInventory() {
   }
 
+  default void resetTitle() {
+  }
+
   default boolean isOnline() {
     return false;
   }

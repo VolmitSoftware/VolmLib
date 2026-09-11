@@ -12,6 +12,7 @@ public final class DirectorNodeDescriptor {
     private final DirectorOrigin origin;
     private final DirectorExecutionMode executionMode;
     private final boolean group;
+    private final boolean hidden;
     private final List<DirectorParameterDescriptor> parameters;
 
     public DirectorNodeDescriptor(
@@ -22,6 +23,7 @@ public final class DirectorNodeDescriptor {
             DirectorOrigin origin,
             DirectorExecutionMode executionMode,
             boolean group,
+            boolean hidden,
             List<DirectorParameterDescriptor> parameters
     ) {
         this.name = name;
@@ -31,6 +33,7 @@ public final class DirectorNodeDescriptor {
         this.origin = origin;
         this.executionMode = executionMode;
         this.group = group;
+        this.hidden = hidden;
         this.parameters = parameters == null ? List.of() : List.copyOf(parameters);
     }
 
@@ -60,6 +63,10 @@ public final class DirectorNodeDescriptor {
 
     public boolean isGroup() {
         return group;
+    }
+
+    public boolean isHidden() {
+        return hidden;
     }
 
     public List<DirectorParameterDescriptor> getParameters() {

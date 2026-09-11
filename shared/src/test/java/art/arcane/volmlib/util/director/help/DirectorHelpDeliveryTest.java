@@ -2,6 +2,8 @@ package art.arcane.volmlib.util.director.help;
 
 import art.arcane.volmlib.util.director.DirectorTextResolver;
 import art.arcane.volmlib.util.plugin.ComponentText;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.minimessage.MiniMessage;
 import net.md_5.bungee.api.chat.BaseComponent;
 import net.md_5.bungee.chat.ComponentSerializer;
 import org.bukkit.command.CommandSender;
@@ -10,6 +12,7 @@ import org.junit.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.util.ArrayList;
+import java.net.URI;
 import java.util.List;
 import java.util.Locale;
 
@@ -17,6 +20,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
@@ -115,6 +119,40 @@ public class DirectorHelpDeliveryTest {
         assertTrue(json, json.contains("\"action\":\"show_text\""));
         assertTrue(json, json.contains("Choose a personal language"));
         assertTrue(json, json.toLowerCase(Locale.ROOT).contains("#e9a06b"));
+    }
+
+    @Test
+    public void contentDeliveryPreservesLiteralFormattingSyntaxAndInteractiveValues() {
+        CommandSender sender = mock(CommandSender.class, withSettings().extraInterfaces(Player.class));
+        List<String> delivered = new ArrayList<>();
+        doAnswer(invocation -> delivered.add(invocation.getArgument(0, String.class)))
+                .when(sender).sendRichMessage(anyString());
+        String path = "C:\\reports\\&4[ff0000]<red>\\report.txt";
+        URI url = URI.create("https://example.invalid/report?token=&4[ff0000]%3Cred%3E");
+        ComponentText copy = ComponentText.markup("<gold><bold>Copy</bold></gold> ")
+                .append(ComponentText.literal(path))
+                .hover(ComponentText.literal("Report " + path))
+                .clickCopyToClipboard(path);
+        ComponentText open = ComponentText.markup("<aqua>Open</aqua> ")
+                .append(ComponentText.literal(url.toString()))
+                .hover(ComponentText.literal("Open " + path))
+                .clickOpenUrl(url);
+        List<ComponentText> entries = List.of(copy, open);
+        DirectorMiniMenu.ContentMenu menu = new DirectorMiniMenu.ContentMenu(
+                "/test report", "/test report", "/test",
+                entries.stream().map(ComponentText::miniMessage).toList(), "", 1, 2);
+
+        DirectorMiniMenu.deliverContent(sender, menu, THEME, DirectorTextResolver.ENGLISH);
+
+        MiniMessage miniMessage = MiniMessage.miniMessage();
+        for (ComponentText entry : entries) {
+            Component actual = delivered.stream().map(miniMessage::deserialize)
+                    .filter(component -> ComponentText.component(component).plain().equals(entry.plain()))
+                    .findFirst().orElseThrow();
+            assertEquals(miniMessage.deserialize(entry.miniMessage()), actual);
+        }
+        assertEquals("Copy " + path, copy.plain());
+        assertEquals("Open " + url, open.plain());
     }
 
     @Test

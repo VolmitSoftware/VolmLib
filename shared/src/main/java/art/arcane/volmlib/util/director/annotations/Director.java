@@ -16,6 +16,8 @@ public @interface Director {
 
     boolean studio() default false;
 
+    boolean hidden() default false;
+
     boolean sync() default false;
 
     String description() default DEFAULT_DESCRIPTION;

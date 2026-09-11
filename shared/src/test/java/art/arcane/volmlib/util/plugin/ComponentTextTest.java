@@ -4,6 +4,7 @@ import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.event.ClickEvent;
 import net.kyori.adventure.text.event.HoverEvent;
 import net.kyori.adventure.text.format.NamedTextColor;
+import net.kyori.adventure.text.format.TextColor;
 import net.kyori.adventure.text.minimessage.MiniMessage;
 import org.junit.Test;
 
@@ -101,6 +102,35 @@ public class ComponentTextTest {
 
         assertEquals(source, MiniMessage.miniMessage().deserialize(message.miniMessage()));
         assertEquals("Run", message.plain());
+    }
+
+    @Test
+    public void fallbackColorsPreserveLabelsAcrossLegacyResetsAndGradients() {
+        ComponentText close = ComponentText.markup("&cClose&r").colorIfAbsent("#85d6b0");
+        ComponentText navigation = ComponentText.markup("&aBack&r / <gradient:#e9bd68:#85d6b0>Settings</gradient>&r")
+                .colorIfAbsent("#e9bd68");
+        ComponentText current = ComponentText.markup("&7Current: &ftrue&r").colorIfAbsent("#85d6b0");
+
+        assertEquals("Close", ComponentText.legacy(close.legacy()).plain());
+        assertEquals("Back / Settings", ComponentText.legacy(navigation.legacy()).plain());
+        assertEquals("Current: true", ComponentText.legacy(current.legacy()).plain());
+        assertTrue(close.legacy().contains("\u00a7cClose"));
+        assertTrue(navigation.legacy().contains("\u00a7aBack"));
+        assertTrue(current.legacy().contains("\u00a7ftrue"));
+        assertFalse(close.legacy().contains("</color>"));
+        assertFalse(navigation.legacy().contains("</color>"));
+        assertFalse(current.legacy().contains("</color>"));
+    }
+
+    @Test
+    public void fallbackColorsFillOnlyMissingColorsAndRejectInvalidInputs() {
+        ComponentText plain = ComponentText.literal("Settings").colorIfAbsent("#85d6b0");
+        ComponentText explicit = ComponentText.component(Component.text("Close", NamedTextColor.RED)).colorIfAbsent("#85d6b0");
+
+        assertEquals(TextColor.fromHexString("#85d6b0"), MiniMessage.miniMessage().deserialize(plain.miniMessage()).color());
+        assertEquals(NamedTextColor.RED, MiniMessage.miniMessage().deserialize(explicit.miniMessage()).color());
+        assertThrows(NullPointerException.class, () -> ComponentText.literal("Settings").colorIfAbsent(null));
+        assertThrows(NullPointerException.class, () -> ComponentText.literal("Settings").colorIfAbsent("invalid"));
     }
 
     @Test

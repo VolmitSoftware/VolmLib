@@ -189,6 +189,12 @@ public class ConfigHotloadEngine {
         }
     }
 
+    public void updateTiming(long pollIntervalMs, long hotloadCooldownMs) {
+        synchronized (watcherStateLock) {
+            updateTimingLocked(pollIntervalMs, hotloadCooldownMs);
+        }
+    }
+
     public boolean processFileChange(File file,
                                      Function<File, Boolean> applyChange,
                                      Consumer<ContentDelta> onApplied) {
@@ -308,15 +314,9 @@ public class ConfigHotloadEngine {
         queuedTouchedSnapshots.clear();
         selfWriteRevisions.clear();
         resetSignatureReconciliation();
-        hotloadCooldownNanos = TimeUnit.MILLISECONDS.toNanos(Math.max(100L, hotloadCooldownMs));
+        updateTimingLocked(pollIntervalMs, hotloadCooldownMs);
         lastTouchedEmissionNanos = 0L;
         emittedTouchedFiles = false;
-
-        long effectivePollInterval = Math.max(100L, pollIntervalMs);
-        fullWatchScanEveryPolls = cycleCountForWindow(effectivePollInterval, fullWatchScanWindowMs);
-        signatureScanEveryPolls = cycleCountForWindow(effectivePollInterval, signatureScanWindowMs);
-        fullWatchScanCountdown = 0;
-        signatureScanCountdown = 0;
 
         if (watchedFiles != null) {
             for (File file : watchedFiles) {
@@ -342,6 +342,15 @@ public class ConfigHotloadEngine {
             fullWatchScanCountdown = fullWatchScanEveryPolls;
             signatureScanCountdown = signatureScanEveryPolls;
         }
+    }
+
+    private void updateTimingLocked(long pollIntervalMs, long hotloadCooldownMs) {
+        hotloadCooldownNanos = TimeUnit.MILLISECONDS.toNanos(Math.max(100L, hotloadCooldownMs));
+        long effectivePollInterval = Math.max(100L, pollIntervalMs);
+        fullWatchScanEveryPolls = cycleCountForWindow(effectivePollInterval, fullWatchScanWindowMs);
+        signatureScanEveryPolls = cycleCountForWindow(effectivePollInterval, signatureScanWindowMs);
+        fullWatchScanCountdown = 0;
+        signatureScanCountdown = 0;
     }
 
     private void clearWatcherState() {

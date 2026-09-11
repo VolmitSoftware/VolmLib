@@ -32,6 +32,7 @@ public final class DirectorAnnotationCompatibility {
                 director.origin(),
                 director.sync() ? DirectorExecutionMode.SYNC : DirectorExecutionMode.ASYNC,
                 true,
+                director.hidden(),
                 List.of()
         ));
     }
@@ -77,6 +78,7 @@ public final class DirectorAnnotationCompatibility {
                 origin,
                 director.sync() ? DirectorExecutionMode.SYNC : DirectorExecutionMode.ASYNC,
                 false,
+                director.hidden(),
                 parameters
         ));
     }

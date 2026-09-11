@@ -10,6 +10,8 @@ import art.arcane.volmlib.util.localization.MessageArgs;
 import art.arcane.volmlib.util.localization.MessageArgument;
 import art.arcane.volmlib.util.localization.TextKey;
 import art.arcane.volmlib.util.plugin.ComponentMessenger;
+import art.arcane.volmlib.util.plugin.ComponentText;
+import net.kyori.adventure.text.minimessage.MiniMessage;
 import org.bukkit.command.CommandSender;
 
 import java.util.ArrayList;
@@ -27,6 +29,7 @@ public final class DirectorMiniMenu {
     private static final int FOOTER_BUTTON_WIDTH = 10;
     private static final int FONT_SPACE_WIDTH = 4;
     private static final int HEADER_ORNAMENT_WIDTH = 28;
+    private static final MiniMessage MINI_MESSAGE = MiniMessage.miniMessage();
 
     private DirectorMiniMenu() {
     }
@@ -126,7 +129,7 @@ public final class DirectorMiniMenu {
         }
 
         if (sender instanceof CommandSender commandSender) {
-            ComponentMessenger.sendMarkup(commandSender, line);
+            ComponentMessenger.send(commandSender, ComponentText.component(MINI_MESSAGE.deserialize(line)));
             return;
         }
         try {
@@ -288,7 +291,12 @@ public final class DirectorMiniMenu {
     }
 
     private static List<DirectorRuntimeNode> sortedChildren(DirectorRuntimeNode node) {
-        List<DirectorRuntimeNode> children = new ArrayList<>(node.getChildren());
+        List<DirectorRuntimeNode> children = new ArrayList<>();
+        for (DirectorRuntimeNode child : node.getChildren()) {
+            if (!child.getDescriptor().isHidden()) {
+                children.add(child);
+            }
+        }
         children.sort(Comparator.comparing(child -> child.getDescriptor().getName(), String.CASE_INSENSITIVE_ORDER));
         return children;
     }
@@ -435,6 +443,11 @@ public final class DirectorMiniMenu {
                 + " <gradient:" + theme.primaryLeft() + ":" + theme.primaryRight() + ">" + escapeText(activeTitle) + "</gradient> "
                 + "<font:minecraft:uniform><strikethrough><gradient:" + theme.borderRight() + ":" + theme.borderLeft() + ">)))"
                 + spaces(padding) + "]</gradient></strikethrough></font>";
+    }
+
+    public static String version(String pluginName, String version, Theme theme) {
+        return "<gradient:" + theme.primaryLeft() + ":" + theme.primaryRight() + ">"
+                + escapeText(pluginName + " v" + version) + "</gradient>";
     }
 
     public static String banner(String title, ContentPage page, Theme theme) {

@@ -10,6 +10,7 @@ import net.kyori.adventure.text.event.ClickEvent;
 import net.kyori.adventure.text.format.TextColor;
 import net.kyori.adventure.text.format.TextDecoration;
 import net.kyori.adventure.text.minimessage.MiniMessage;
+import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 import org.bukkit.Bukkit;
 import org.bukkit.Server;
 import org.bukkit.command.CommandSender;
@@ -612,6 +613,52 @@ public class BukkitLanguageSwitcherTest {
         return hasComponent(component -> expected.equals(component.color()));
     }
 
+    @Test
+    public void defaultFeedbackDoesNotInterpretFormattingInsideArguments() {
+        PluginLanguageService localizedService = languageService();
+        when(localizedService.effectiveLocale(playerId)).thenReturn("fr_FR");
+        when(localizedService.selectPlayer(playerId, "fr_FR")).thenReturn(CompletableFuture.completedFuture(null));
+        String name = "Literal&c<bold>[ff0000]§c";
+        BukkitLanguageSwitcher localized = register(name, "literal", localizedService);
+
+        localized.command(player, new String[]{"self", "fr_FR"});
+
+        assertTrue(richMessages().stream().map(message -> PlainTextComponentSerializer.plainText()
+                .serialize(MiniMessage.miniMessage().deserialize(message)))
+                .anyMatch(message -> message.contains("Literal&c<bold>[ff0000]")));
+        assertFalse(hasColor(0xFF5555));
+        assertFalse(hasColor(0xFF0000));
+    }
+
+    @Test
+    public void overriddenFeedbackRetainsResolverPrefixFormatting() {
+        PluginLanguageService localizedService = languageService();
+        TextKey overridden = TextKey.of(BukkitLanguageMessages.PERSONAL_SELECTED.id(),
+                "{prefix} › Your language is now {locale}.");
+        LocalizationSnapshot snapshot = LocalizationSnapshot.create(new LocalizationCandidate(
+                MessageCatalog.of("en_US", overridden), List.of(), PluralSelector.oneOther()));
+        when(localizedService.snapshot(playerId)).thenReturn(snapshot);
+        when(localizedService.effectiveLocale(playerId)).thenReturn("fr_FR");
+        when(localizedService.selectPlayer(playerId, "fr_FR")).thenReturn(CompletableFuture.completedFuture(null));
+        DirectorTextResolver resolver = (key, arguments) -> {
+            if (!key.id().equals(overridden.id())) {
+                return DirectorTextResolver.ENGLISH.resolve(key, arguments);
+            }
+            assertEquals(playerId, LanguageAudience.current());
+            return "<gold><bold>Custom</bold></gold><gray> › Your language is now "
+                    + arguments.require("locale").value() + ".</gray>";
+        };
+        BukkitLanguageSwitcher localized = register("Localized", "localized", localizedService, resolver);
+
+        localized.command(player, new String[]{"self", "fr_FR"});
+
+        assertTrue(String.join("\n", richMessages()).contains("Custom"));
+        assertTrue(hasColor(0xFFAA00));
+        assertTrue(hasComponent(component -> component.decoration(TextDecoration.BOLD)
+                == TextDecoration.State.TRUE));
+        assertFalse(String.join("\n", richMessages()).contains("{prefix}"));
+    }
+
     private boolean hasRunCommand(String command) {
         ClickEvent expected = ClickEvent.runCommand(command);
         return hasComponent(component -> expected.equals(component.clickEvent()));
@@ -642,6 +689,9 @@ public class BukkitLanguageSwitcherTest {
     public interface TestPlayer extends Player, CommandSender {
         @Override
         Player.Spigot spigot();
+
+        @Override
+        void resetTitle();
 
         void sendRichMessage(String message);
     }

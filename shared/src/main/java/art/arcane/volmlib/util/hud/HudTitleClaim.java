@@ -41,6 +41,11 @@ public final class HudTitleClaim {
     service.release(player, sessionId);
   }
 
+  public boolean dismiss() {
+    granted = false;
+    return service.dismiss(player, sessionId, purpose, sinceMillis);
+  }
+
   public void retire() {
     granted = false;
     service.retire(playerId, sessionId);
