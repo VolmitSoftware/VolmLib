@@ -37,10 +37,6 @@ public final class DirectorRuntimeMessages {
             "director.runtime.error.execution_failed",
             "Failed to execute command {command}: {reason}"
     );
-    public static final TextKey USAGE = TextKey.of(
-            "director.runtime.usage",
-            "Usage: {usage}"
-    );
 
     private static final List<TextKey> KEYS = List.of(
             INVALID_ORIGIN,
@@ -50,8 +46,7 @@ public final class DirectorRuntimeMessages {
             CONVERSION_FAILED,
             DEFAULT_PARSE_FAILED,
             MISSING_ARGUMENT,
-            EXECUTION_FAILED,
-            USAGE
+            EXECUTION_FAILED
     );
 
     private DirectorRuntimeMessages() {

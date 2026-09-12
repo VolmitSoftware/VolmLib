@@ -1,13 +1,19 @@
 package art.arcane.volmlib.util.hotload;
 
 import com.google.gson.JsonElement;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
+import com.google.gson.annotations.SerializedName;
 import art.arcane.volmlib.util.VolmLog;
 import art.arcane.volmlib.util.io.FileWatcher;
 import art.arcane.volmlib.util.io.FolderWatcher;
 
 import java.io.File;
 import java.io.IOException;
+import java.lang.reflect.Field;
+import java.lang.reflect.Modifier;
+import java.lang.reflect.ParameterizedType;
+import java.lang.reflect.Type;
 import java.nio.file.ClosedWatchServiceException;
 import java.nio.file.FileSystems;
 import java.nio.file.Files;
@@ -827,8 +833,16 @@ public class ConfigHotloadEngine {
     public static List<DiffEntry> computeStructuredDiff(String before,
                                                         String after,
                                                         Function<String, JsonElement> parser) {
-        Map<String, String> left = flattenForDiff(before, parser);
-        Map<String, String> right = flattenForDiff(after, parser);
+        return computeStructuredDiff(before, after, parser, null);
+    }
+
+    public static List<DiffEntry> computeStructuredDiff(String before,
+                                                       String after,
+                                                       Function<String, JsonElement> parser,
+                                                       Type configType) {
+        Set<String> setPaths = new HashSet<>();
+        Map<String, String> left = flattenForDiff(before, parser, configType, setPaths);
+        Map<String, String> right = flattenForDiff(after, parser, configType, setPaths);
         Set<String> keys = new HashSet<>(left.keySet());
         keys.addAll(right.keySet());
 
@@ -844,10 +858,23 @@ public class ConfigHotloadEngine {
             if (Objects.equals(oldValue, newValue)) {
                 continue;
             }
+            if (setPaths.contains(key) && (hasSetMembers(key, left) || hasSetMembers(key, right))) {
+                continue;
+            }
             changes.add(new DiffEntry(key, oldValue, newValue));
         }
 
         return changes;
+    }
+
+    private static boolean hasSetMembers(String path, Map<String, String> values) {
+        String prefix = path + "[";
+        for (String key : values.keySet()) {
+            if (key.startsWith(prefix)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public static String compactValue(String value, int maxLength) {
@@ -864,7 +891,9 @@ public class ConfigHotloadEngine {
     }
 
     private static Map<String, String> flattenForDiff(String raw,
-                                                      Function<String, JsonElement> parser) {
+                                                      Function<String, JsonElement> parser,
+                                                      Type configType,
+                                                      Set<String> setPaths) {
         JsonElement element = parse(raw, parser);
         if (element == null) {
             Map<String, String> fallback = new HashMap<>();
@@ -875,7 +904,7 @@ public class ConfigHotloadEngine {
         }
 
         Map<String, String> out = new HashMap<>();
-        flattenJson("$", element, out);
+        flattenJson("$", element, configType, out, setPaths);
         return out;
     }
 
@@ -891,7 +920,8 @@ public class ConfigHotloadEngine {
         }
     }
 
-    private static void flattenJson(String path, JsonElement element, Map<String, String> out) {
+    private static void flattenJson(String path, JsonElement element, Type type,
+                                    Map<String, String> out, Set<String> setPaths) {
         if (element == null || element.isJsonNull()) {
             out.put(path, "null");
             return;
@@ -903,13 +933,22 @@ public class ConfigHotloadEngine {
         }
 
         if (element.isJsonArray()) {
+            if (Set.class.isAssignableFrom(rawType(type))) {
+                setPaths.add(path);
+                out.put(path, "[]");
+                for (JsonElement member : element.getAsJsonArray()) {
+                    String value = canonicalValue(member);
+                    out.put(path + "[" + value + "]", value);
+                }
+                return;
+            }
             if (element.getAsJsonArray().size() == 0) {
                 out.put(path, "[]");
                 return;
             }
 
             for (int i = 0; i < element.getAsJsonArray().size(); i++) {
-                flattenJson(path + "[" + i + "]", element.getAsJsonArray().get(i), out);
+                flattenJson(path + "[" + i + "]", element.getAsJsonArray().get(i), elementType(type), out, setPaths);
             }
             return;
         }
@@ -921,8 +960,73 @@ public class ConfigHotloadEngine {
         }
 
         for (Map.Entry<String, JsonElement> entry : object.entrySet()) {
-            flattenJson(path + "." + entry.getKey(), entry.getValue(), out);
+            flattenJson(path + "." + entry.getKey(), entry.getValue(), memberType(type, entry.getKey()), out, setPaths);
         }
+    }
+
+    private static Class<?> rawType(Type type) {
+        if (type instanceof Class<?> raw) {
+            return raw;
+        }
+        if (type instanceof ParameterizedType parameterized) {
+            return rawType(parameterized.getRawType());
+        }
+        return Object.class;
+    }
+
+    private static Type elementType(Type type) {
+        if (type instanceof Class<?> raw && raw.isArray()) {
+            return raw.getComponentType();
+        }
+        if (type instanceof ParameterizedType parameterized
+                && Collection.class.isAssignableFrom(rawType(type))) {
+            return parameterized.getActualTypeArguments()[0];
+        }
+        return null;
+    }
+
+    private static Type memberType(Type type, String name) {
+        if (type instanceof ParameterizedType parameterized
+                && Map.class.isAssignableFrom(rawType(type))) {
+            return parameterized.getActualTypeArguments()[1];
+        }
+        for (Class<?> owner = rawType(type); owner != Object.class && owner != null; owner = owner.getSuperclass()) {
+            for (Field field : owner.getDeclaredFields()) {
+                if (Modifier.isStatic(field.getModifiers()) || Modifier.isTransient(field.getModifiers())) {
+                    continue;
+                }
+                SerializedName serialized = field.getAnnotation(SerializedName.class);
+                String serializedName = serialized == null ? field.getName() : serialized.value();
+                if (serializedName.equals(name)) {
+                    return field.getGenericType();
+                }
+            }
+        }
+        return null;
+    }
+
+    private static String canonicalValue(JsonElement value) {
+        return canonicalElement(value).toString();
+    }
+
+    private static JsonElement canonicalElement(JsonElement value) {
+        if (value.isJsonArray()) {
+            JsonArray array = new JsonArray();
+            for (JsonElement element : value.getAsJsonArray()) {
+                array.add(canonicalElement(element));
+            }
+            return array;
+        }
+        if (!value.isJsonObject()) {
+            return value;
+        }
+        JsonObject sorted = new JsonObject();
+        List<String> names = new ArrayList<>(value.getAsJsonObject().keySet());
+        names.sort(String::compareTo);
+        for (String name : names) {
+            sorted.add(name, canonicalElement(value.getAsJsonObject().get(name)));
+        }
+        return sorted;
     }
 
     private record WatchedFile(File file, FileWatcher watcher) {

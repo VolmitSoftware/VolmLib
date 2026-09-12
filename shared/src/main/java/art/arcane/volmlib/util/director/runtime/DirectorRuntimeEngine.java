@@ -152,7 +152,6 @@ public final class DirectorRuntimeEngine implements DirectorCommandEngine {
             for (String error : mapping.errors) {
                 sender.sendMessage(error);
             }
-            sender.sendMessage(usage(node));
             return DirectorExecutionResult.failure(String.join("; ", mapping.errors));
         }
 
@@ -301,30 +300,6 @@ public final class DirectorRuntimeEngine implements DirectorCommandEngine {
         }
 
         return new MappingResult(mapped, errors);
-    }
-
-    private String usage(DirectorRuntimeNode node) {
-        StringBuilder out = new StringBuilder(node.path());
-        for (DirectorRuntimeParameter parameter : node.getParameters()) {
-            DirectorParameterDescriptor descriptor = parameter.getDescriptor();
-            if (descriptor.isContextual()) {
-                if (descriptor.isContextualOverride()) {
-                    out.append(" [").append(descriptor.getName()).append("=...]");
-                }
-                continue;
-            }
-
-            if (descriptor.isRequired()) {
-                out.append(" <").append(descriptor.getName()).append("=...>");
-            } else {
-                out.append(" [").append(descriptor.getName()).append("=...]");
-            }
-        }
-
-        return resolveText(
-                DirectorRuntimeMessages.USAGE,
-                MessageArgument.untrusted("usage", out.toString())
-        );
     }
 
     private ValueResult parseValue(DirectorRuntimeParameter parameter, String raw) {
