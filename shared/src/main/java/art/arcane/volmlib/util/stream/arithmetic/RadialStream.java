@@ -20,7 +20,6 @@ package art.arcane.volmlib.util.stream.arithmetic;
 
 import art.arcane.volmlib.util.stream.BasicStream;
 import art.arcane.volmlib.util.stream.ProceduralStream;
-
 public class RadialStream<T> extends BasicStream<T> implements ProceduralStream<T> {
     private final double scale;
 

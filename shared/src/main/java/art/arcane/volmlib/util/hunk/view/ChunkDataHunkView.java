@@ -1,13 +1,13 @@
 package art.arcane.volmlib.util.hunk.view;
 
-import art.arcane.volmlib.util.hunk.HunkLike;
+import art.arcane.volmlib.util.hunk.Hunk;
 import org.bukkit.block.data.BlockData;
 import org.bukkit.generator.ChunkGenerator.ChunkData;
 
 import java.util.function.Function;
 
 @SuppressWarnings("ClassCanBeRecord")
-public class ChunkDataHunkView implements HunkLike<BlockData> {
+public class ChunkDataHunkView implements Hunk<BlockData> {
     private final ChunkData chunk;
     private final BlockData air;
     private final Function<BlockData, BlockData> dataUnwrapper;

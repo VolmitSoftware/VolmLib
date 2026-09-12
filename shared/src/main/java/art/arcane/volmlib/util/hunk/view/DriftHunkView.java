@@ -1,9 +1,10 @@
 package art.arcane.volmlib.util.hunk.view;
 
+import art.arcane.volmlib.util.hunk.Hunk;
 import art.arcane.volmlib.util.hunk.HunkLike;
 
 @SuppressWarnings("ClassCanBeRecord")
-public class DriftHunkView<T> implements HunkLike<T> {
+public class DriftHunkView<T> implements Hunk<T> {
     private final int ox;
     private final int oy;
     private final int oz;

@@ -1,8 +1,8 @@
 package art.arcane.volmlib.util.hunk.storage;
 
-import art.arcane.volmlib.util.hunk.HunkLike;
+import art.arcane.volmlib.util.hunk.Hunk;
 
-public abstract class StorageHunk<T> implements HunkLike<T> {
+public abstract class StorageHunk<T> implements Hunk<T> {
     private final int width;
     private final int height;
     private final int depth;

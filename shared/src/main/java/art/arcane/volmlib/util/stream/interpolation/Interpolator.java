@@ -19,7 +19,6 @@
 package art.arcane.volmlib.util.stream.interpolation;
 
 import art.arcane.volmlib.util.stream.ProceduralStream;
-
 public interface Interpolator<T> {
     @SuppressWarnings("unchecked")
     default InterpolatorFactory<T> into() {

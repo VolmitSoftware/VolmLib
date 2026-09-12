@@ -18,7 +18,6 @@
 
 package art.arcane.volmlib.util.noise;
 
-import art.arcane.volmlib.util.math.M;
 import art.arcane.volmlib.util.math.RNG;
 
 public class VascularNoise implements NoiseGenerator {
@@ -32,7 +31,21 @@ public class VascularNoise implements NoiseGenerator {
     }
 
     private double filter(double noise) {
-        return M.clip((noise / 2D) + 0.5D, 0D, 1D);
+        double normalized = 0.5D - noise * 0.5D;
+        if (normalized < 0D) {
+            return 0D;
+        }
+
+        return normalized > 1D ? 1D : normalized;
+    }
+
+    private double filterSigned(double noise) {
+        noise = -noise;
+        if (noise < -1D) {
+            return -1D;
+        }
+
+        return noise > 1D ? 1D : noise;
     }
 
     @Override
@@ -41,12 +54,27 @@ public class VascularNoise implements NoiseGenerator {
     }
 
     @Override
+    public double noiseSigned(double x) {
+        return filterSigned(n.GetCellular(x, 0D));
+    }
+
+    @Override
     public double noise(double x, double z) {
         return filter(n.GetCellular(x, z));
     }
 
     @Override
+    public double noiseSigned(double x, double z) {
+        return filterSigned(n.GetCellular(x, z));
+    }
+
+    @Override
     public double noise(double x, double y, double z) {
         return filter(n.GetCellular(x, y, z));
+    }
+
+    @Override
+    public double noiseSigned(double x, double y, double z) {
+        return filterSigned(n.GetCellular(x, y, z));
     }
 }

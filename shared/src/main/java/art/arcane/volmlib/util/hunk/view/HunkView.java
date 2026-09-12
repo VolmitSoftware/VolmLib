@@ -1,8 +1,9 @@
 package art.arcane.volmlib.util.hunk.view;
 
+import art.arcane.volmlib.util.hunk.Hunk;
 import art.arcane.volmlib.util.hunk.HunkLike;
 
-public class HunkView<T> implements HunkLike<T> {
+public class HunkView<T> implements Hunk<T> {
     private final int ox;
     private final int oy;
     private final int oz;

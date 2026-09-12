@@ -43,6 +43,16 @@ public abstract class RawMatter<T> extends PaletteOrHunk<T> implements MatterSli
         this.type = type;
     }
 
+    @Override
+    public T get(int x, int y, int z) {
+        return MatterSlice.super.get(x, y, z);
+    }
+
+    @Override
+    public void set(int x, int y, int z, T value) {
+        MatterSlice.super.set(x, y, z, value);
+    }
+
     protected <W> void registerWriter(Class<W> mediumType, MatterWriter<W, T> injector) {
         writers.put(mediumType, injector);
     }

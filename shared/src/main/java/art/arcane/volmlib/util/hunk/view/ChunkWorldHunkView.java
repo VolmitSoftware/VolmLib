@@ -2,10 +2,10 @@ package art.arcane.volmlib.util.hunk.view;
 
 import art.arcane.volmlib.util.function.Consumer4;
 import art.arcane.volmlib.util.function.Function3;
-import art.arcane.volmlib.util.hunk.HunkLike;
+import art.arcane.volmlib.util.hunk.Hunk;
 import org.bukkit.Chunk;
 
-public class ChunkWorldHunkView<T> implements HunkLike<T> {
+public class ChunkWorldHunkView<T> implements Hunk<T> {
     private final Chunk chunk;
     private final int height;
     private final Consumer4<Integer, Integer, Integer, T> setter;

@@ -20,12 +20,12 @@ package art.arcane.volmlib.util.noise;
 
 import art.arcane.volmlib.util.math.RNG;
 import art.arcane.volmlib.util.noise.FastNoiseDouble.FractalType;
-
 public class FractalBillowPerlinNoise implements NoiseGenerator, OctaveNoise {
     private final FastNoiseDouble n;
 
     public FractalBillowPerlinNoise(long seed) {
         this.n = new FastNoiseDouble(new RNG(seed).lmax());
+        n.setLongerp(FastNoiseDouble.Longerp.Qulongic);
         n.setFractalOctaves(1);
         n.setFractalType(FractalType.Billow);
     }

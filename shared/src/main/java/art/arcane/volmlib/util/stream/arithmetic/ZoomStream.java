@@ -20,7 +20,6 @@ package art.arcane.volmlib.util.stream.arithmetic;
 
 import art.arcane.volmlib.util.stream.BasicStream;
 import art.arcane.volmlib.util.stream.ProceduralStream;
-
 public class ZoomStream<T> extends BasicStream<T> {
     private final double ox;
     private final double oy;

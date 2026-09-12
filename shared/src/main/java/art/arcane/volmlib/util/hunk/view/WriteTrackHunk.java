@@ -1,11 +1,12 @@
 package art.arcane.volmlib.util.hunk.view;
 
+import art.arcane.volmlib.util.hunk.Hunk;
 import art.arcane.volmlib.util.hunk.HunkLike;
 
 import java.util.concurrent.atomic.AtomicBoolean;
 
 @SuppressWarnings("ClassCanBeRecord")
-public class WriteTrackHunk<T> implements HunkLike<T> {
+public class WriteTrackHunk<T> implements Hunk<T> {
     private final HunkLike<T> src;
     private final AtomicBoolean b;
 

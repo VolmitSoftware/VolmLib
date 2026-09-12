@@ -20,7 +20,6 @@ package art.arcane.volmlib.util.stream.interpolation;
 
 import art.arcane.volmlib.util.interpolation.InterpolationMethod;
 import art.arcane.volmlib.util.stream.ProceduralStream;
-
 @SuppressWarnings("ClassCanBeRecord")
 public class InterpolatorFactory<T> {
     private final ProceduralStream<T> stream;

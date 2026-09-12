@@ -20,7 +20,6 @@ package art.arcane.volmlib.util.stream.utility;
 
 import art.arcane.volmlib.util.stream.BasicStream;
 import art.arcane.volmlib.util.stream.ProceduralStream;
-
 public class SynchronizedStream<T> extends BasicStream<T> {
     public SynchronizedStream(ProceduralStream<T> stream) {
         super(stream);

@@ -32,7 +32,7 @@ public class CellHeightNoise implements NoiseGenerator {
     }
 
     private double filter(double noise) {
-        return M.clip(1D - ((noise / 2D) + 0.5D), 0D, 1D);
+        return M.clip((noise / 2D) + 0.5D, 0D, 1D);
     }
 
     @Override

@@ -20,7 +20,6 @@ package art.arcane.volmlib.util.stream.convert;
 
 import art.arcane.volmlib.util.stream.BasicStream;
 import art.arcane.volmlib.util.stream.ProceduralStream;
-
 public class RoundingStream extends BasicStream<Integer> {
     private final ProceduralStream<?> stream;
 

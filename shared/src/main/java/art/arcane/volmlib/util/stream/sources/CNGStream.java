@@ -21,7 +21,6 @@ package art.arcane.volmlib.util.stream.sources;
 import art.arcane.volmlib.util.noise.CNG;
 import art.arcane.volmlib.util.stream.BasicLayer;
 import art.arcane.volmlib.util.stream.ProceduralStream;
-
 public class CNGStream extends BasicLayer implements ProceduralStream<Double> {
     private final CNG cng;
 

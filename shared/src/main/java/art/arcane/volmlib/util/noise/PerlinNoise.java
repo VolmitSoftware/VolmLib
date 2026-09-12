@@ -23,9 +23,11 @@ import art.arcane.volmlib.util.math.RNG;
 public class PerlinNoise implements NoiseGenerator, OctaveNoise {
     private final FastNoiseDouble n;
     private int octaves;
+    private double octaveBounding = 1D;
 
     public PerlinNoise(long seed) {
         this.n = new FastNoiseDouble(new RNG(seed).lmax());
+        n.setLongerp(FastNoiseDouble.Longerp.Qulongic);
         octaves = 1;
     }
 
@@ -35,61 +37,74 @@ public class PerlinNoise implements NoiseGenerator, OctaveNoise {
 
     @Override
     public double noise(double x) {
-        if (octaves <= 1) {
-            return f(n.GetPerlin(x, 0));
+        return f(noiseSigned(x));
+    }
+
+    @Override
+    public double noiseSigned(double x) {
+        if (octaves == 1) {
+            return n.GetPerlin(x, 0D);
         }
 
-        double f = 1;
-        double m = 0;
-        double v = 0;
-
+        double frequency = 1D;
+        double amplitude = 1D;
+        double value = 0D;
         for (int i = 0; i < octaves; i++) {
-            v += n.GetPerlin((x * (f == 1 ? f++ : (f *= 2))), 0) * f;
-            m += f;
+            value += n.GetPerlin(x * frequency, 0D) * amplitude;
+            frequency *= 2D;
+            amplitude *= 0.5D;
         }
-
-        return f(v / m);
+        return value * octaveBounding;
     }
 
     @Override
     public double noise(double x, double z) {
-        if (octaves <= 1) {
-            return f(n.GetPerlin(x, z));
-        }
-        double f = 1;
-        double m = 0;
-        double v = 0;
+        return f(noiseSigned(x, z));
+    }
 
+    @Override
+    public double noiseSigned(double x, double z) {
+        if (octaves == 1) {
+            return n.GetPerlin(x, z);
+        }
+
+        double frequency = 1D;
+        double amplitude = 1D;
+        double value = 0D;
         for (int i = 0; i < octaves; i++) {
-            f = f == 1 ? f + 1 : f * 2;
-            v += n.GetPerlin((x * f), (z * f)) * f;
-            m += f;
+            value += n.GetPerlin(x * frequency, z * frequency) * amplitude;
+            frequency *= 2D;
+            amplitude *= 0.5D;
         }
-
-        return f(v / m);
+        return value * octaveBounding;
     }
 
     @Override
     public double noise(double x, double y, double z) {
-        if (octaves <= 1) {
-            return f(n.GetPerlin(x, y, z));
-        }
-        double f = 1;
-        double m = 0;
-        double v = 0;
-
-        for (int i = 0; i < octaves; i++) {
-            f = f == 1 ? f + 1 : f * 2;
-            v += n.GetPerlin((x * f), (y * f), (z * f)) * f;
-            m += f;
-        }
-
-        return f(v / m);
+        return f(noiseSigned(x, y, z));
     }
 
     @Override
-    public void setOctaves(int o) {
-        octaves = o;
+    public double noiseSigned(double x, double y, double z) {
+        if (octaves == 1) {
+            return n.GetPerlin(x, y, z);
+        }
+
+        double frequency = 1D;
+        double amplitude = 1D;
+        double value = 0D;
+        for (int i = 0; i < octaves; i++) {
+            value += n.GetPerlin(x * frequency, y * frequency, z * frequency) * amplitude;
+            frequency *= 2D;
+            amplitude *= 0.5D;
+        }
+        return value * octaveBounding;
+    }
+
+    @Override
+    public void setOctaves(int octaves) {
+        this.octaves = Math.max(1, Math.min(16, octaves));
+        octaveBounding = 1D / (2D - Math.scalb(1D, 1 - this.octaves));
     }
 
     public NoiseGenerator hermite() {

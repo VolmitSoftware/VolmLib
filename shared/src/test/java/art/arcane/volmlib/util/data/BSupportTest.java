@@ -86,6 +86,25 @@ public class BSupportTest {
         }
     }
 
+    @Test
+    public void sugarCaneRequiresNativeSubstrate() {
+        try (MockedStatic<Bukkit> bukkit = mockStatic(Bukkit.class)) {
+            bukkit.when(() -> Bukkit.createBlockData(Material.AIR)).thenReturn(blockData(Material.AIR));
+            BSupport<Object> support = new BSupport<Object>() {
+            };
+            for (Material material : new Material[]{Material.SUGAR_CANE, Material.GRASS_BLOCK, Material.DIRT,
+                    Material.COARSE_DIRT, Material.PODZOL, Material.MYCELIUM, Material.ROOTED_DIRT,
+                    Material.MOSS_BLOCK, Material.MUD, Material.MUDDY_MANGROVE_ROOTS,
+                    Material.SAND, Material.RED_SAND, Material.SUSPICIOUS_SAND}) {
+                assertTrue(material.name(), support.canPlaceOnto(Material.SUGAR_CANE, material));
+            }
+            for (Material material : new Material[]{Material.STONE, Material.GRAVEL, Material.CLAY,
+                    Material.DIRT_PATH, Material.FARMLAND, Material.AIR, Material.WATER}) {
+                assertFalse(material.name(), support.canPlaceOnto(Material.SUGAR_CANE, material));
+            }
+        }
+    }
+
     private static BlockData blockData(Material material) {
         return (BlockData) Proxy.newProxyInstance(
                 BlockData.class.getClassLoader(),

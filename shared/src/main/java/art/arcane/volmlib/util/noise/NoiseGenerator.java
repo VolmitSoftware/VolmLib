@@ -20,13 +20,24 @@ package art.arcane.volmlib.util.noise;
 
 import art.arcane.volmlib.util.stream.ProceduralStream;
 import art.arcane.volmlib.util.stream.interpolation.Interpolated;
-
 public interface NoiseGenerator {
     double noise(double x);
 
     double noise(double x, double z);
 
     double noise(double x, double y, double z);
+
+    default double noiseSigned(double x) {
+        return (noise(x) * 2D) - 1D;
+    }
+
+    default double noiseSigned(double x, double z) {
+        return (noise(x, z) * 2D) - 1D;
+    }
+
+    default double noiseSigned(double x, double y, double z) {
+        return (noise(x, y, z) * 2D) - 1D;
+    }
 
     default boolean isStatic() {
         return false;

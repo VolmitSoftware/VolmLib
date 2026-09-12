@@ -1,11 +1,11 @@
 package art.arcane.volmlib.util.hunk.view;
 
-import art.arcane.volmlib.util.hunk.HunkLike;
+import art.arcane.volmlib.util.hunk.Hunk;
 import org.bukkit.block.Biome;
 import org.bukkit.generator.ChunkGenerator.BiomeGrid;
 
 @SuppressWarnings("ClassCanBeRecord")
-public class BiomeGridHunkView implements HunkLike<Biome> {
+public class BiomeGridHunkView implements Hunk<Biome> {
     private final BiomeGrid chunk;
     private final int minHeight;
     private final int maxHeight;

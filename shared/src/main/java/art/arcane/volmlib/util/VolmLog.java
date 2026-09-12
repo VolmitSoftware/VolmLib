@@ -9,6 +9,10 @@ public final class VolmLog {
     private VolmLog() {
     }
 
+    public static void info(String component, String message) {
+        LOGGER.info(format(component, message));
+    }
+
     public static void fine(String component, String message, Throwable failure) {
         if (LOGGER.isLoggable(Level.FINE)) {
             LOGGER.log(Level.FINE, format(component, message), failure);

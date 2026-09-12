@@ -1,10 +1,11 @@
 package art.arcane.volmlib.util.hunk.view;
 
+import art.arcane.volmlib.util.hunk.Hunk;
 import art.arcane.volmlib.util.hunk.HunkLike;
 
 import java.util.function.Function;
 
-public class FunctionalHunkView<R, T> implements HunkLike<T> {
+public class FunctionalHunkView<R, T> implements Hunk<T> {
     private final HunkLike<R> src;
     private final Function<R, T> converter;
     private final Function<T, R> backConverter;

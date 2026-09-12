@@ -20,7 +20,6 @@ package art.arcane.volmlib.util.stream.interpolation;
 
 import art.arcane.volmlib.util.stream.BasicStream;
 import art.arcane.volmlib.util.stream.ProceduralStream;
-
 public class BiStarcastStream<T> extends BasicStream<T> implements Interpolator<T> {
     private final int rad;
     private final int checks;

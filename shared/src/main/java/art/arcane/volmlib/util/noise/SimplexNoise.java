@@ -23,6 +23,7 @@ import art.arcane.volmlib.util.math.RNG;
 public class SimplexNoise implements NoiseGenerator, OctaveNoise {
     private final FastNoiseDouble n;
     private int octaves;
+    private double octaveBounding = 1D;
 
     public SimplexNoise(long seed) {
         this.n = new FastNoiseDouble(new RNG(seed).lmax());
@@ -35,60 +36,74 @@ public class SimplexNoise implements NoiseGenerator, OctaveNoise {
 
     @Override
     public double noise(double x) {
-        if (octaves <= 1) {
-            return f(n.GetSimplex(x, 0d));
+        return f(noiseSigned(x));
+    }
+
+    @Override
+    public double noiseSigned(double x) {
+        if (octaves == 1) {
+            return n.GetSimplex(x, 0D);
         }
 
-        double f = 1;
-        double m = 0;
-        double v = 0;
-
+        double frequency = 1D;
+        double amplitude = 1D;
+        double value = 0D;
         for (int i = 0; i < octaves; i++) {
-            v += n.GetSimplex((x * (f == 1 ? f++ : (f *= 2))), 0d) * f;
-            m += f;
+            value += n.GetSimplex(x * frequency, 0D) * amplitude;
+            frequency *= 2D;
+            amplitude *= 0.5D;
         }
-
-        return f(v / m);
+        return value * octaveBounding;
     }
 
     @Override
     public double noise(double x, double z) {
-        if (octaves <= 1) {
-            return f(n.GetSimplex(x, z));
-        }
-        double f = 1;
-        double m = 0;
-        double v = 0;
+        return f(noiseSigned(x, z));
+    }
 
+    @Override
+    public double noiseSigned(double x, double z) {
+        if (octaves == 1) {
+            return n.GetSimplex(x, z);
+        }
+
+        double frequency = 1D;
+        double amplitude = 1D;
+        double value = 0D;
         for (int i = 0; i < octaves; i++) {
-            f = f == 1 ? f + 1 : f * 2;
-            v += n.GetSimplex((x * f), (z * f)) * f;
-            m += f;
+            value += n.GetSimplex(x * frequency, z * frequency) * amplitude;
+            frequency *= 2D;
+            amplitude *= 0.5D;
         }
-
-        return f(v / m);
+        return value * octaveBounding;
     }
 
     @Override
     public double noise(double x, double y, double z) {
-        if (octaves <= 1) {
-            return f(n.GetSimplex(x, y, z));
-        }
-        double f = 1;
-        double m = 0;
-        double v = 0;
-
-        for (int i = 0; i < octaves; i++) {
-            f = f == 1 ? f + 1 : f * 2;
-            v += n.GetSimplex((x * f), (y * f), (z * f)) * f;
-            m += f;
-        }
-
-        return f(v / m);
+        return f(noiseSigned(x, y, z));
     }
 
     @Override
-    public void setOctaves(int o) {
-        octaves = o;
+    public double noiseSigned(double x, double y, double z) {
+        if (octaves == 1) {
+            return n.GetSimplex(x, y, z);
+        }
+
+        double frequency = 1D;
+        double amplitude = 1D;
+        double value = 0D;
+        for (int i = 0; i < octaves; i++) {
+            value += n.GetSimplex(x * frequency, y * frequency, z * frequency) * amplitude;
+            frequency *= 2D;
+            amplitude *= 0.5D;
+        }
+        return value * octaveBounding;
     }
+
+    @Override
+    public void setOctaves(int octaves) {
+        this.octaves = Math.max(1, Math.min(16, octaves));
+        octaveBounding = 1D / (2D - Math.scalb(1D, 1 - this.octaves));
+    }
+
 }

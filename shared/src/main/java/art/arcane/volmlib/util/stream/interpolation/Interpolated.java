@@ -1,91 +1,64 @@
+/*
+ * Iris is a World Generator for Minecraft Bukkit Servers
+ * Copyright (c) 2022 Arcane Arts (Volmit Software)
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 package art.arcane.volmlib.util.stream.interpolation;
 
+import art.arcane.volmlib.util.collection.KList;
+import art.arcane.volmlib.util.math.RNG;
+import art.arcane.volmlib.util.stream.ProceduralStream;
+
+import java.util.UUID;
+import art.arcane.volmlib.util.VolmLog;
+import java.util.function.Function;
+
 public interface Interpolated<T> {
-    Interpolated<Double> DOUBLE = new Interpolated<>() {
-        @Override
-        public double toDouble(Double t) {
-            return t == null ? 0D : t;
-        }
+    Interpolated<RNG> RNG = of((t) -> 0D, (t) -> null);
+    Interpolated<Double> DOUBLE = of((t) -> t, (t) -> t);
+    Interpolated<Double[]> DOUBLE_ARRAY = of((t) -> 0D, (t) -> new Double[2]);
+    Interpolated<Boolean> BOOLEAN = of((t) -> 0D, (t) -> false);
+    Interpolated<Integer> INT = of(Double::valueOf, Double::intValue);
+    Interpolated<Long> LONG = of(Double::valueOf, Double::longValue);
+    Interpolated<UUID> UUID = of((i) -> Double.longBitsToDouble(i.getMostSignificantBits()), (i) -> new UUID(Double.doubleToLongBits(i), i.longValue()));
 
-        @Override
-        public Double fromDouble(double d) {
-            return d;
-        }
-    };
+    static <T> Interpolated<T> of(Function<T, Double> a, Function<Double, T> b) {
+        return new Interpolated<>() {
+            @Override
+            public double toDouble(T t) {
+                return a.apply(t);
+            }
 
-    Interpolated<Integer> INTEGER = new Interpolated<>() {
-        @Override
-        public double toDouble(Integer t) {
-            return t == null ? 0D : t.doubleValue();
-        }
-
-        @Override
-        public Integer fromDouble(double d) {
-            return (int) Math.round(d);
-        }
-    };
-
-    Interpolated<Long> LONG = new Interpolated<>() {
-        @Override
-        public double toDouble(Long t) {
-            return t == null ? 0D : t.doubleValue();
-        }
-
-        @Override
-        public Long fromDouble(double d) {
-            return Math.round(d);
-        }
-    };
-
-    Interpolated<Float> FLOAT = new Interpolated<>() {
-        @Override
-        public double toDouble(Float t) {
-            return t == null ? 0D : t.doubleValue();
-        }
-
-        @Override
-        public Float fromDouble(double d) {
-            return (float) d;
-        }
-    };
-
-    Interpolated<Boolean> BOOLEAN = new Interpolated<>() {
-        @Override
-        public double toDouble(Boolean t) {
-            return Boolean.TRUE.equals(t) ? 1D : 0D;
-        }
-
-        @Override
-        public Boolean fromDouble(double d) {
-            return d >= 0.5D;
-        }
-    };
-
-    Interpolated<Short> SHORT = new Interpolated<>() {
-        @Override
-        public double toDouble(Short t) {
-            return t == null ? 0D : t.doubleValue();
-        }
-
-        @Override
-        public Short fromDouble(double d) {
-            return (short) Math.round(d);
-        }
-    };
-
-    Interpolated<Byte> BYTE = new Interpolated<>() {
-        @Override
-        public double toDouble(Byte t) {
-            return t == null ? 0D : t.doubleValue();
-        }
-
-        @Override
-        public Byte fromDouble(double d) {
-            return (byte) Math.round(d);
-        }
-    };
+            @Override
+            public T fromDouble(double d) {
+                return b.apply(d);
+            }
+        };
+    }
 
     double toDouble(T t);
 
     T fromDouble(double d);
+
+    default InterpolatorFactory<T> interpolate() {
+        if (this instanceof ProceduralStream) {
+            return new InterpolatorFactory<>((ProceduralStream<T>) this);
+        }
+
+        VolmLog.warning("Interpolation", "Cannot interpolate " + this.getClass().getCanonicalName() + "!");
+        return null;
+    }
 }

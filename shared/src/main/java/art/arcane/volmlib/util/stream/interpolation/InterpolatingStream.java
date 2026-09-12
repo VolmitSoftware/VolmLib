@@ -23,7 +23,6 @@ import art.arcane.volmlib.util.interpolation.InterpolationMethod;
 import art.arcane.volmlib.util.interpolation.IrisInterpolation;
 import art.arcane.volmlib.util.stream.BasicStream;
 import art.arcane.volmlib.util.stream.ProceduralStream;
-
 public class InterpolatingStream<T> extends BasicStream<T> implements Interpolator<T> {
     private final InterpolationMethod type;
     private final NoiseProvider np;

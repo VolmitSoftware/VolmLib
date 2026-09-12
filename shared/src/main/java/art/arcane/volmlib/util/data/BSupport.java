@@ -383,6 +383,18 @@ public abstract class BSupport<P> {
     }
 
     public boolean canPlaceOnto(Material mat, Material onto) {
+        if (mat == SUGAR_CANE) {
+            if (onto.name().equals("PALE_MOSS_BLOCK")) {
+                return true;
+            }
+            return switch (onto) {
+                case SUGAR_CANE, GRASS_BLOCK, DIRT, COARSE_DIRT, PODZOL, MYCELIUM, ROOTED_DIRT,
+                        MOSS_BLOCK, MUD, MUDDY_MANGROVE_ROOTS, SAND, RED_SAND,
+                        SUSPICIOUS_SAND -> true;
+                default -> false;
+            };
+        }
+
         if (mat.equals(CACTUS)) {
             return onto.equals(CACTUS) || onto.equals(SAND) || onto.equals(RED_SAND);
         }

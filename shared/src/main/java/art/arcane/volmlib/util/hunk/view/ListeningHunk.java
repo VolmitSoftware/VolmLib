@@ -1,10 +1,11 @@
 package art.arcane.volmlib.util.hunk.view;
 
 import art.arcane.volmlib.util.function.Consumer4;
+import art.arcane.volmlib.util.hunk.Hunk;
 import art.arcane.volmlib.util.hunk.HunkLike;
 
 @SuppressWarnings("ClassCanBeRecord")
-public class ListeningHunk<T> implements HunkLike<T> {
+public class ListeningHunk<T> implements Hunk<T> {
     private final HunkLike<T> src;
     private final Consumer4<Integer, Integer, Integer, T> listener;
 

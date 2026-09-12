@@ -70,12 +70,12 @@ public abstract class PaletteOrHunk<T> extends StorageHunk<T> implements Writabl
 
     public PaletteOrHunk<T> iterateSync(Consumer4<Integer, Integer, Integer, T> c) {
         if (hunk instanceof MappedHunk<?>) {
-            ((MappedHunk<T>) hunk).iterateSync(c);
+            ((MappedHunk<T>) hunk).iterateEntriesSync(c);
             return this;
         }
 
         if (hunk instanceof MappedSyncHunk<?>) {
-            ((MappedSyncHunk<T>) hunk).iterateSync(c);
+            ((MappedSyncHunk<T>) hunk).iterateEntriesSync(c);
             return this;
         }
 
@@ -100,12 +100,12 @@ public abstract class PaletteOrHunk<T> extends StorageHunk<T> implements Writabl
 
     public PaletteOrHunk<T> iterateSyncIO(Consumer4IO<Integer, Integer, Integer, T> c) throws IOException {
         if (hunk instanceof MappedHunk<?>) {
-            ((MappedHunk<T>) hunk).iterateSyncIO(c);
+            ((MappedHunk<T>) hunk).iterateEntriesSyncIO(c);
             return this;
         }
 
         if (hunk instanceof MappedSyncHunk<?>) {
-            ((MappedSyncHunk<T>) hunk).iterateSyncIO(c);
+            ((MappedSyncHunk<T>) hunk).iterateEntriesSyncIO(c);
             return this;
         }
 
@@ -130,12 +130,12 @@ public abstract class PaletteOrHunk<T> extends StorageHunk<T> implements Writabl
 
     public void empty(T b) {
         if (hunk instanceof MappedHunk<?>) {
-            ((MappedHunk<T>) hunk).empty(b);
+            ((MappedHunk<T>) hunk).clear();
             return;
         }
 
         if (hunk instanceof MappedSyncHunk<?>) {
-            ((MappedSyncHunk<T>) hunk).empty(b);
+            ((MappedSyncHunk<T>) hunk).clear();
             return;
         }
 

@@ -20,7 +20,6 @@ package art.arcane.volmlib.util.noise;
 
 import art.arcane.volmlib.util.math.RNG;
 import art.arcane.volmlib.util.noise.FastNoiseDouble.FractalType;
-
 public class FractalBillowSimplexNoise implements NoiseGenerator, OctaveNoise {
     private final FastNoiseDouble n;
 

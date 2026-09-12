@@ -1,8 +1,9 @@
 package art.arcane.volmlib.util.hunk.view;
 
+import art.arcane.volmlib.util.hunk.Hunk;
 import art.arcane.volmlib.util.hunk.HunkLike;
 
-public class RotatedXHunkView<T> implements HunkLike<T> {
+public class RotatedXHunkView<T> implements Hunk<T> {
     private final HunkLike<T> src;
     private final double sin;
     private final double cos;
@@ -54,7 +55,8 @@ public class RotatedXHunkView<T> implements HunkLike<T> {
         return src;
     }
 
-    private boolean contains(int x, int y, int z) {
+    @Override
+    public boolean contains(int x, int y, int z) {
         return x >= 0 && x < getWidth() && y >= 0 && y < getHeight() && z >= 0 && z < getDepth();
     }
 }

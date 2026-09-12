@@ -20,7 +20,6 @@ package art.arcane.volmlib.util.noise;
 
 import art.arcane.volmlib.util.math.RNG;
 import art.arcane.volmlib.util.noise.FastNoiseDouble.FractalType;
-
 public class FractalFBMSimplexNoise implements NoiseGenerator, OctaveNoise {
     private final FastNoiseDouble n;
 
@@ -40,13 +39,28 @@ public class FractalFBMSimplexNoise implements NoiseGenerator, OctaveNoise {
     }
 
     @Override
+    public double noiseSigned(double x) {
+        return n.GetSimplexFractal(x, 0D);
+    }
+
+    @Override
     public double noise(double x, double z) {
         return f(n.GetSimplexFractal(x, z));
     }
 
     @Override
+    public double noiseSigned(double x, double z) {
+        return n.GetSimplexFractal(x, z);
+    }
+
+    @Override
     public double noise(double x, double y, double z) {
         return f(n.GetSimplexFractal(x, y, z));
+    }
+
+    @Override
+    public double noiseSigned(double x, double y, double z) {
+        return n.GetSimplexFractal(x, y, z);
     }
 
     @Override

@@ -3,96 +3,67 @@ package art.arcane.volmlib.util.noise;
 import art.arcane.volmlib.util.math.RNG;
 
 public class SierpinskiTriangleNoise implements NoiseGenerator, OctaveNoise {
-    private static final double TRI_SCALE = 0.18D;
-    private static final double TRI_PROJECTION = 0.8660254037844386D;
-    private static final double HEAT_SCALE = 0.33D;
-    private final SimplexNoise heatSimplex;
-    private int octaves;
+    private static final double TRIANGLE_SIDE = 8D;
+    private static final double INVERSE_HEIGHT = 2D / (Math.sqrt(3D) * TRIANGLE_SIDE);
+    private static final double HEAT_SCALE = 6D;
+    private static final int DEPTH = 4;
+    private final SimplexNoise heat;
 
     public SierpinskiTriangleNoise(long seed) {
-        RNG rng = new RNG(seed);
-        this.heatSimplex = new SimplexNoise(rng.nextParallelRNG(177L).lmax());
-        this.octaves = 1;
-    }
-
-    private double clip(double value) {
-        if (value < 0D) {
-            return 0D;
-        }
-
-        if (value > 1D) {
-            return 1D;
-        }
-
-        return value;
-    }
-
-    private double heat(double x, double z) {
-        if (octaves <= 1) {
-            return heatSimplex.noise(x * HEAT_SCALE, z * HEAT_SCALE);
-        }
-
-        double frequency = 1D;
-        double amplitude = 1D;
-        double total = 0D;
-        double max = 0D;
-
-        for (int i = 0; i < octaves; i++) {
-            total += heatSimplex.noise((x * HEAT_SCALE) * frequency, (z * HEAT_SCALE) * frequency) * amplitude;
-            max += amplitude;
-            frequency *= 2D;
-            amplitude *= 0.5D;
-        }
-
-        if (max == 0D) {
-            return 0.5D;
-        }
-
-        return clip(total / max);
-    }
-
-    private double mask(double x, double z) {
-        double sx = (x * TRI_SCALE) + ((z * TRI_SCALE) * 0.5D);
-        double sz = (z * TRI_SCALE) * TRI_PROJECTION;
-        long ix = (long) Math.floor(Math.abs(sx));
-        long iz = (long) Math.floor(Math.abs(sz));
-        return ((ix & iz) == 0L) ? 1D : 0D;
-    }
-
-    private double sample(double x, double z) {
-        double m = mask(x, z);
-        double h = heat(x, z);
-        if (m >= 0.5D) {
-            return clip((h * 0.65D) + 0.35D);
-        }
-
-        return clip(h * 0.12D);
+        this.heat = new SimplexNoise(new RNG(seed).nextParallelRNG(177L).lmax());
     }
 
     @Override
     public double noise(double x) {
-        return sample(x, 0D);
+        return sample(x, 0D, 0D);
     }
 
     @Override
     public double noise(double x, double z) {
-        return sample(x, z);
+        return sample(x, 0D, z);
     }
 
     @Override
     public double noise(double x, double y, double z) {
-        if (z == 0D) {
-            return sample(x, y);
-        }
-
-        double a = sample(x, z);
-        double b = sample(y, x);
-        double c = sample(z, y);
-        return (a + b + c) / 3D;
+        return sample(x, y, z);
     }
 
     @Override
-    public void setOctaves(int o) {
-        this.octaves = Math.max(1, o);
+    public void setOctaves(int octaves) {
+        heat.setOctaves(octaves);
+    }
+
+    private boolean contains(double x, double z) {
+        double v = z * INVERSE_HEIGHT;
+        double u = (x / TRIANGLE_SIDE) - (v * 0.5D);
+        u -= Math.floor(u);
+        v -= Math.floor(v);
+
+        if (u + v > 1D) {
+            u = 1D - u;
+            v = 1D - v;
+        }
+
+        for (int depth = 0; depth < DEPTH; depth++) {
+            if (u >= 0.5D) {
+                u = (u * 2D) - 1D;
+                v *= 2D;
+            } else if (v >= 0.5D) {
+                u *= 2D;
+                v = (v * 2D) - 1D;
+            } else if (u + v <= 0.5D) {
+                u *= 2D;
+                v *= 2D;
+            } else {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private double sample(double x, double y, double z) {
+        double value = heat.noise(x * HEAT_SCALE, y * HEAT_SCALE, z * HEAT_SCALE);
+        return contains(x, z) ? (value * 0.65D) + 0.35D : value * 0.12D;
     }
 }

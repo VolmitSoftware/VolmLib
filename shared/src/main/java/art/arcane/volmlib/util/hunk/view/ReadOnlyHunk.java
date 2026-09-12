@@ -1,9 +1,10 @@
 package art.arcane.volmlib.util.hunk.view;
 
+import art.arcane.volmlib.util.hunk.Hunk;
 import art.arcane.volmlib.util.hunk.HunkLike;
 
 @SuppressWarnings("ClassCanBeRecord")
-public class ReadOnlyHunk<T> implements HunkLike<T> {
+public class ReadOnlyHunk<T> implements Hunk<T> {
     private final HunkLike<T> src;
 
     public ReadOnlyHunk(HunkLike<T> src) {

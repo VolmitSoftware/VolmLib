@@ -16,27 +16,10 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-package art.arcane.volmlib.util.noise;
+package art.arcane.volmlib.util.interpolation;
 
-public class CachedNoise implements NoiseGenerator {
-    private final CachedNoiseMap n;
-
-    public CachedNoise(NoiseGenerator generator, int size) {
-        n = new CachedNoiseMap(size, generator);
-    }
-
-    @Override
-    public double noise(double x) {
-        return n.get((int) Math.round(x), 0);
-    }
-
-    @Override
-    public double noise(double x, double z) {
-        return n.get((int) Math.round(x), (int) Math.round(z));
-    }
-
-    @Override
-    public double noise(double x, double y, double z) {
-        return n.get((int) Math.round(x), (int) Math.round(z));
-    }
+/**
+ * An immutable minimum/maximum noise pair produced by bounds interpolation.
+ */
+public record NoiseBounds(double min, double max) {
 }

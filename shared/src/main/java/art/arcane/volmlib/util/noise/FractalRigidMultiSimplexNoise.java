@@ -20,7 +20,6 @@ package art.arcane.volmlib.util.noise;
 
 import art.arcane.volmlib.util.math.RNG;
 import art.arcane.volmlib.util.noise.FastNoiseDouble.FractalType;
-
 public class FractalRigidMultiSimplexNoise implements NoiseGenerator, OctaveNoise {
     private final FastNoiseDouble n;
 
@@ -31,7 +30,7 @@ public class FractalRigidMultiSimplexNoise implements NoiseGenerator, OctaveNois
     }
 
     public double f(double v) {
-        return (v / 2D) + 0.5D;
+        return 1D + (v - 1D) * n.getFractalBounding();
     }
 
     @Override

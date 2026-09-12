@@ -21,15 +21,16 @@ package art.arcane.volmlib.util.noise;
 import art.arcane.volmlib.util.function.NoiseProvider;
 import art.arcane.volmlib.util.interpolation.InterpolationMethod;
 import art.arcane.volmlib.util.interpolation.IrisInterpolation;
-
-public class InterpolatedNoise implements NoiseGenerator {
+public class InterpolatedNoise implements NoiseGenerator, OctaveNoise {
     private final InterpolationMethod method;
+    private final NoiseGenerator generator;
     private final NoiseProvider p;
 
     public InterpolatedNoise(long seed, NoiseType type, InterpolationMethod method) {
         this.method = method;
-        NoiseGenerator g = type.create(seed);
-        p = g::noise;
+        generator = type.create(seed);
+        double coordinateScale = type.getCoordinateScale();
+        p = (x, z) -> generator.noise(x * coordinateScale, z * coordinateScale);
     }
 
     @Override
@@ -39,15 +40,18 @@ public class InterpolatedNoise implements NoiseGenerator {
 
     @Override
     public double noise(double x, double z) {
-        return IrisInterpolation.getNoise(method, (int) x, (int) z, 32, p);
+        return Math.max(0D, Math.min(1D, IrisInterpolation.getNoise(method, x, z, 32, p)));
     }
 
     @Override
     public double noise(double x, double y, double z) {
-        if (z == 0) {
-            return noise(x, y);
-        }
+        return noise(x, z);
+    }
 
-        return IrisInterpolation.getNoise(method, (int) x, (int) z, 32, p);
+    @Override
+    public void setOctaves(int octaves) {
+        if (generator instanceof OctaveNoise octaveNoise) {
+            octaveNoise.setOctaves(octaves);
+        }
     }
 }

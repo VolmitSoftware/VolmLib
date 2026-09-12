@@ -100,16 +100,23 @@ public final class PropertiesLanguagePreferenceStore implements LanguagePreferen
         }
     }
 
+    /**
+     * Rejects a preferences directory that has been replaced by a symlink or by a non-directory,
+     * which is how a write meant for the plugin's data folder gets redirected somewhere else.
+     *
+     * Only the directory itself is checked. Walking every ancestor up to the filesystem root pulled
+     * system-owned links into scope - /var and /tmp are symlinks on macOS - so every path beneath
+     * them was refused even with nothing in the data folder tampered with, which is what made the
+     * language preference tests fail there. Relinking those directories already means host
+     * compromise, so they are outside what this store can defend.
+     */
     private static void requireSafeDirectory(Path directory) throws IOException {
-        Path current = directory;
-        while (current != null) {
-            if (Files.exists(current, LinkOption.NOFOLLOW_LINKS)) {
-                if (Files.isSymbolicLink(current)
-                        || !Files.isDirectory(current, LinkOption.NOFOLLOW_LINKS)) {
-                    throw new IOException("Language preferences directory is not a regular directory: " + current);
-                }
-            }
-            current = current.getParent();
+        if (!Files.exists(directory, LinkOption.NOFOLLOW_LINKS)) {
+            return;
+        }
+
+        if (Files.isSymbolicLink(directory) || !Files.isDirectory(directory, LinkOption.NOFOLLOW_LINKS)) {
+            throw new IOException("Language preferences directory is not a regular directory: " + directory);
         }
     }
 }

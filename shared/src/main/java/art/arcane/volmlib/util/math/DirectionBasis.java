@@ -2,6 +2,7 @@ package art.arcane.volmlib.util.math;
 
 import art.arcane.volmlib.util.collection.GBiset;
 import art.arcane.volmlib.util.collection.KList;
+import art.arcane.volmlib.util.data.Cuboid.CuboidDirection;
 import art.arcane.volmlib.util.collection.KMap;
 import org.bukkit.Axis;
 import org.bukkit.block.BlockFace;
@@ -302,6 +303,17 @@ public enum DirectionBasis {
             case S -> BlockFace.SOUTH;
             case U -> BlockFace.UP;
             case W -> BlockFace.WEST;
+        };
+    }
+
+    public CuboidDirection getCuboidDirection() {
+        return switch (this) {
+            case D -> CuboidDirection.Down;
+            case E -> CuboidDirection.East;
+            case N -> CuboidDirection.North;
+            case S -> CuboidDirection.South;
+            case U -> CuboidDirection.Up;
+            case W -> CuboidDirection.West;
         };
     }
 

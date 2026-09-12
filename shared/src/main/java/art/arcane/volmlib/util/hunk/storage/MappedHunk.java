@@ -27,10 +27,6 @@ public class MappedHunk<T> extends StorageHunk<T> {
         return true;
     }
 
-    public boolean isEmpty() {
-        return data.isEmpty();
-    }
-
     @Override
     public void setRaw(int x, int y, int z, T t) {
         if (t == null) {
@@ -46,7 +42,7 @@ public class MappedHunk<T> extends StorageHunk<T> {
         return data.get(index(x, y, z));
     }
 
-    public MappedHunk<T> iterateSync(Consumer4<Integer, Integer, Integer, T> c) {
+    public MappedHunk<T> iterateEntriesSync(Consumer4<Integer, Integer, Integer, T> c) {
         int idx;
         int z;
 
@@ -60,7 +56,7 @@ public class MappedHunk<T> extends StorageHunk<T> {
         return this;
     }
 
-    public MappedHunk<T> iterateSyncIO(Consumer4IO<Integer, Integer, Integer, T> c) throws IOException {
+    public MappedHunk<T> iterateEntriesSyncIO(Consumer4IO<Integer, Integer, Integer, T> c) throws IOException {
         int idx;
         int z;
 
@@ -74,7 +70,7 @@ public class MappedHunk<T> extends StorageHunk<T> {
         return this;
     }
 
-    public void empty(T b) {
+    public void clear() {
         data.clear();
     }
 

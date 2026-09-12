@@ -20,7 +20,6 @@ package art.arcane.volmlib.util.stream.convert;
 
 import art.arcane.volmlib.util.stream.BasicStream;
 import art.arcane.volmlib.util.stream.ProceduralStream;
-
 public class To3DStream<T> extends BasicStream<T> {
     public To3DStream(ProceduralStream<T> stream) {
         super(stream);
