@@ -101,13 +101,6 @@ public class DirectorRuntimeEngineLocalizationTest {
                         MessageArgument.untrusted("reason", "broken")
                 )
         );
-        assertEquals(
-                "Usage: test create <name=...>",
-                DirectorTextResolver.ENGLISH.resolve(
-                        DirectorRuntimeMessages.USAGE,
-                        MessageArgument.untrusted("usage", "test create <name=...>")
-                )
-        );
     }
 
     @Test
@@ -121,8 +114,7 @@ public class DirectorRuntimeEngineLocalizationTest {
                         "director.runtime.error.conversion_failed",
                         "director.runtime.error.default_parse_failed",
                         "director.runtime.error.missing_argument",
-                        "director.runtime.error.execution_failed",
-                        "director.runtime.usage"
+                        "director.runtime.error.execution_failed"
                 ),
                 DirectorRuntimeMessages.keys().stream().map(TextKey::id).toList()
         );
@@ -151,7 +143,6 @@ public class DirectorRuntimeEngineLocalizationTest {
                 DirectorRuntimeMessages.UNKNOWN_PARAMETER.id(),
                 DirectorRuntimeMessages.UNEXPECTED_ARGUMENT.id(),
                 DirectorRuntimeMessages.UNCLOSED_GROUP.id(),
-                DirectorRuntimeMessages.USAGE.id(),
                 DirectorRuntimeMessages.CONVERSION_FAILED.id(),
                 DirectorRuntimeMessages.DEFAULT_PARSE_FAILED.id(),
                 DirectorRuntimeMessages.MISSING_ARGUMENT.id(),

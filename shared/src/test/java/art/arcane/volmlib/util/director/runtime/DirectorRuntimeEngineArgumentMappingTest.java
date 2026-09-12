@@ -108,12 +108,24 @@ public class DirectorRuntimeEngineArgumentMappingTest {
     }
 
     @Test
-    public void failureReportsUsageToSender() {
-        run("create", "MyWorld", "flat");
+    public void mappingFailureReportsOnlyItsSpecificError() {
+        DirectorExecutionResult result = run("create", "MyWorld", "flat");
 
-        assertTrue(sender.messages.stream().anyMatch(message -> message.contains("flat")));
-        assertTrue(sender.messages.stream().anyMatch(message -> message.toLowerCase().contains("usage")));
-        assertTrue(sender.messages.stream().anyMatch(message -> message.contains("<name=...>")));
+        assertTrue(result.isHandled());
+        assertFalse(result.isSuccess());
+        assertEquals(List.of("Unexpected argument \"flat\". Optional parameters must be keyed, e.g. seed=123"),
+                sender.messages);
+        assertEquals(sender.messages.get(0), result.getMessage());
+    }
+
+    @Test
+    public void unknownParameterReportsOnlyItsSpecificError() {
+        DirectorExecutionResult result = run("create", "MyWorld", "zzzqqq=5");
+
+        assertTrue(result.isHandled());
+        assertFalse(result.isSuccess());
+        assertEquals(List.of("Unknown parameter key: zzzqqq"), sender.messages);
+        assertEquals(sender.messages.get(0), result.getMessage());
     }
 
     @Test
