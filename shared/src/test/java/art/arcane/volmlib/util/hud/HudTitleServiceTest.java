@@ -13,9 +13,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doAnswer;
@@ -158,6 +161,44 @@ public class HudTitleServiceTest {
     clearInvocations(player);
     claim.retire();
     verifyNoInteractions(player);
+  }
+
+  @Test
+  public void test_resolve_higherPriorityClaim_preemptsTheLocalHolder() {
+    List<HudTitleClaim> preempted = new ArrayList<>();
+    HudTitleClaim ambient = service.open(player, "gloss:surface:welcome", HudPriority.AMBIENT, 1500L, preempted::add);
+    assertTrue(ambient.resolve());
+
+    HudTitleClaim modal = service.open(player, "gloss:surface:alert", HudPriority.MODAL, 1500L, claim -> {
+    });
+    assertTrue(modal.resolve());
+
+    assertEquals(List.of(ambient), preempted);
+    assertFalse(ambient.granted());
+  }
+
+  @Test
+  public void test_resolve_sameClaimTwice_neverPreemptsItself() {
+    List<HudTitleClaim> preempted = new ArrayList<>();
+    HudTitleClaim claim = service.open(player, "gloss:surface:welcome", HudPriority.AMBIENT, 1500L, preempted::add);
+    assertTrue(claim.resolve());
+    assertTrue(claim.resolve());
+    assertTrue(preempted.isEmpty());
+  }
+
+  @Test
+  public void test_show_granted_sendsTheTitle() {
+    HudTitleClaim claim = service.open(player, "gloss:surface:welcome", HudPriority.NOTICE, 1500L);
+    assertTrue(claim.show("§6Welcome", "§7to the server", 10, 40, 10));
+    verify(player).sendTitle("§6Welcome", "§7to the server", 10, 40, 10);
+  }
+
+  @Test
+  public void test_show_denied_sendsNothing() {
+    seedForeignBid("React", HudPriority.MODAL);
+    HudTitleClaim claim = service.open(player, "gloss:surface:welcome", HudPriority.AMBIENT, 1500L);
+    assertFalse(claim.show("§6Welcome", "", 10, 40, 10));
+    verify(player, never()).sendTitle(anyString(), anyString(), anyInt(), anyInt(), anyInt());
   }
 
   @Test

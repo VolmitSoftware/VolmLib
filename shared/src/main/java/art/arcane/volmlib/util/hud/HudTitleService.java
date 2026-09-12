@@ -9,13 +9,18 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Consumer;
 
 public final class HudTitleService {
   public static final String METADATA_KEY = "volmit.hud.title";
+  private static final Consumer<HudTitleClaim> IGNORE_PREEMPTION = claim -> {
+  };
 
   private final Plugin plugin;
   private final HudLocalLedger ledger = new HudLocalLedger();
+  private final ConcurrentHashMap<String, HudTitleClaim> localWinners = new ConcurrentHashMap<>();
   private final AtomicLong sessionIds = new AtomicLong();
   private final AtomicLong resolveCounter = new AtomicLong();
 
@@ -24,39 +29,58 @@ public final class HudTitleService {
   }
 
   public HudTitleClaim open(Player player, String purpose, int priority, long ttlMillis) {
+    return open(player, purpose, priority, ttlMillis, IGNORE_PREEMPTION);
+  }
+
+  public HudTitleClaim open(Player player, String purpose, int priority, long ttlMillis, Consumer<HudTitleClaim> onPreempted) {
     Objects.requireNonNull(player);
     Objects.requireNonNull(purpose);
+    Objects.requireNonNull(onPreempted);
     if (purpose.indexOf('|') >= 0) {
       throw new IllegalArgumentException("purpose must not contain '|': " + purpose);
     }
     if (ttlMillis <= 0L) {
       throw new IllegalArgumentException("ttlMillis must be positive: " + ttlMillis);
     }
-    return new HudTitleClaim(this, player, purpose, priority, ttlMillis, sessionIds.incrementAndGet(), System.currentTimeMillis());
+    return new HudTitleClaim(this, player, purpose, priority, ttlMillis, sessionIds.incrementAndGet(), System.currentTimeMillis(), onPreempted);
   }
 
   public void clear(Player player) {
+    localWinners.remove(localKey(player.getUniqueId()));
     ledger.clearPrefix(player.getUniqueId() + "|");
     player.removeMetadata(METADATA_KEY, plugin);
   }
 
   public void shutdown() {
+    localWinners.clear();
     ledger.clear();
   }
 
-  boolean resolve(Player player, String purpose, int priority, long ttlMillis, long sessionId, long sinceMillis) {
+  boolean resolve(HudTitleClaim claim) {
     long now = System.currentTimeMillis();
     if ((resolveCounter.incrementAndGet() & 255L) == 0L) {
       ledger.sweep(now);
     }
-    if (!ledger.claim(localKey(player.getUniqueId()), sessionId, priority, sinceMillis, ttlMillis, now)) {
+    String key = localKey(claim.playerId());
+    if (!ledger.claim(key, claim.sessionId(), claim.priority(), claim.sinceMillis(), claim.ttlMillis(), now)) {
       return false;
     }
-    return claimGlobal(player, purpose, priority, ttlMillis, sinceMillis, now);
+    HudTitleClaim previous = localWinners.put(key, claim);
+    if (previous != null && previous != claim) {
+      previous.preempt();
+    }
+    if (claimGlobal(claim.player(), claim.purpose(), claim.priority(), claim.ttlMillis(), claim.sinceMillis(), now)) {
+      return true;
+    }
+    forget(key, claim.sessionId());
+    ledger.release(key, claim.sessionId());
+    return false;
   }
 
   void release(Player player, long sessionId) {
-    if (ledger.release(localKey(player.getUniqueId()), sessionId)) {
+    String key = localKey(player.getUniqueId());
+    forget(key, sessionId);
+    if (ledger.release(key, sessionId)) {
       player.removeMetadata(METADATA_KEY, plugin);
     }
   }
@@ -93,7 +117,13 @@ public final class HudTitleService {
   }
 
   void retire(UUID playerId, long sessionId) {
-    ledger.release(localKey(playerId), sessionId);
+    String key = localKey(playerId);
+    forget(key, sessionId);
+    ledger.release(key, sessionId);
+  }
+
+  private void forget(String key, long sessionId) {
+    localWinners.computeIfPresent(key, (ignored, current) -> current.sessionId() == sessionId ? null : current);
   }
 
   private boolean claimGlobal(Player player, String purpose, int priority, long ttlMillis, long sinceMillis, long nowMillis) {

@@ -81,6 +81,22 @@ public class Board {
         return ownedScoreboard;
     }
 
+    /**
+     * The objective the client currently scores this sidebar against, or null while no backend is
+     * live. Callers that decorate the sidebar's own outbound packets match on this name.
+     */
+    public String objectiveName() {
+        if (useNormalBackend) {
+            return objective == null ? null : objective.getName();
+        }
+        return packetSidebar.isSupported() ? packetSidebar.objectiveName() : null;
+    }
+
+    /** The score entry name this sidebar uses for a zero-based line, or null when out of range. */
+    public static String entryForLine(int line) {
+        return line < 0 || line >= MAX_LINES ? null : CACHED_ENTRIES[line];
+    }
+
     public void setBoardSettings(BoardSettings boardSettings) {
         this.boardSettings = boardSettings;
     }
@@ -543,6 +559,10 @@ public class Board {
 
         private boolean isSupported() {
             return supported;
+        }
+
+        private String objectiveName() {
+            return objectiveName;
         }
 
         private boolean render(String title, String[] lines, ScoreDirection direction, boolean hideScores) {

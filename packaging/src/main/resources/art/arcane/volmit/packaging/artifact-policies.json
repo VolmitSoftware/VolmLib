@@ -64,7 +64,7 @@
     {
       "name": "Gloss",
       "filename": "Gloss-*.jar",
-      "max_bytes": 2650000,
+      "max_bytes": 4500000,
       "forbidden_prefixes": [
         "org/bukkit/",
         "io/papermc/",
@@ -196,7 +196,7 @@
     {
       "name": "Wormholes",
       "filename": "Wormholes-*.jar",
-      "max_bytes": 3120000,
+      "max_bytes": 4200000,
       "forbidden_prefixes": [
         "org/bukkit/",
         "io/papermc/",

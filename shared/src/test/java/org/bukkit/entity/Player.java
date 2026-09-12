@@ -33,6 +33,9 @@ public interface Player {
   default void updateCommands() {
   }
 
+  default void sendTitle(String title, String subtitle, int fadeIn, int stay, int fadeOut) {
+  }
+
   default InventoryView getOpenInventory() {
     return null;
   }
