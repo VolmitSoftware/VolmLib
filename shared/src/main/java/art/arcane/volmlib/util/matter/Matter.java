@@ -65,9 +65,9 @@ public interface Matter {
             long end = start + size;
 
             try {
-                String canonicalName = din.readUTF();
-                Class<?> type = Class.forName(canonicalName);
-                MatterSlice<?> slice = matter.createSlice(type, matter);
+                String id = din.readUTF();
+                Class<?> type = IrisMatter.getSliceType(id);
+                MatterSlice<?> slice = type == null ? null : matter.createSlice(type, matter);
 
                 if (slice != null) {
                     slice.read(din);

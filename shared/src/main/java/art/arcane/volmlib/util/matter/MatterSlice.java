@@ -200,7 +200,11 @@ public interface MatterSlice<T> extends HunkLike<T>, Writable<T> {
     }
 
     default void write(DataOutputStream dos) throws IOException {
-        dos.writeUTF(getType().getCanonicalName());
+        String id = IrisMatter.getSliceId(getType());
+        if (id == null) {
+            throw new IOException("Unregistered matter slice type " + getType().getName());
+        }
+        dos.writeUTF(id);
 
         if (this instanceof PaletteOrHunk<?> palette && palette.isPalette()) {
             palette.palette().writeDos(dos);
