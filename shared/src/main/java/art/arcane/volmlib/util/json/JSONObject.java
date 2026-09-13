@@ -1111,6 +1111,9 @@ public class JSONObject {
      * @return The truth.
      */
     public boolean optBoolean(String key, boolean defaultValue) {
+        if (key != null && !this.has(key)) {
+            return defaultValue;
+        }
         try {
             return this.getBoolean(key);
         } catch (Exception e) {
