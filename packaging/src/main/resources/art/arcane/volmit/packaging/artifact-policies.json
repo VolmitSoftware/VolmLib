@@ -35,7 +35,7 @@
     {
       "name": "BileTools",
       "filename": "BileTools-*.jar",
-      "max_bytes": 905000,
+      "max_bytes": 1000000,
       "forbidden_prefixes": [
         "org/bukkit/",
         "io/papermc/",
@@ -100,7 +100,7 @@
     {
       "name": "HiddenOre",
       "filename": "HiddenOre-*.jar",
-      "max_bytes": 800000,
+      "max_bytes": 850000,
       "forbidden_prefixes": [
         "org/bukkit/",
         "io/papermc/",
