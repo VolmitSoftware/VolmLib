@@ -41,6 +41,8 @@ import java.util.List;
 
 @Data
 public class CNG {
+    private static final int UNSIGNED_MEMO_CAPACITY = 64;
+    private static final ThreadLocal<UnsignedMemo> UNSIGNED_MEMO = ThreadLocal.withInitial(UnsignedMemo::new);
     public static final NoiseInjector ADD = (s, v) -> new double[]{s + v, 1};
     public static final NoiseInjector SRC_SUBTRACT = (s, v) -> new double[]{s - v < 0 ? 0 : s - v, -1};
     public static final NoiseInjector DST_SUBTRACT = (s, v) -> new double[]{v - s < 0 ? 0 : s - v, -1};
@@ -662,6 +664,10 @@ public class CNG {
     }
 
     private double getNoise(double x, double z) {
+        return getNoise(x, z, null);
+    }
+
+    private double getNoise(double x, double z, UnsignedMemo memo) {
         ensureFastPathState();
         double scl = effectiveScale;
 
@@ -669,8 +675,10 @@ public class CNG {
             return generator.noise(x * scl, z * scl) * opacity;
         }
 
-        double fx = x + ((fracture.noiseFast2D(x, z) - 0.5D) * fscale);
-        double fz = z + ((fracture.noiseFast2D(z, x) - 0.5D) * fscale);
+        double fractureX = memo == null ? fracture.noiseFast2D(x, z) : fracture.memoizedNoise2D(x, z, memo);
+        double fx = x + ((fractureX - 0.5D) * fscale);
+        double fractureZ = memo == null ? fracture.noiseFast2D(z, x) : fracture.memoizedNoise2D(z, x, memo);
+        double fz = z + ((fractureZ - 0.5D) * fscale);
         return generator.noise(fx * scl, fz * scl) * opacity;
     }
 
@@ -861,15 +869,121 @@ public class CNG {
     }
 
     public double noiseFast2D(double x, double z) {
+        if (fracture == null || fracture.fracture == null || !canMemoizeUnsignedFracture()) {
+            return sampleUnsigned2D(x, z, null);
+        }
+        UnsignedMemo memo = UNSIGNED_MEMO.get();
+        if (memo.active) {
+            return sampleUnsigned2D(x, z, null);
+        }
+        memo.active = true;
+        try {
+            return sampleUnsigned2D(x, z, memo);
+        } finally {
+            memo.clear();
+        }
+    }
+
+    private double sampleUnsigned2D(double x, double z, UnsignedMemo memo) {
         if (isCachedCoordinate(x, z)) {
             return getCachedNoise(x, z);
         }
 
         if (isIdentityPostFastPath()) {
-            return getNoise(x, z);
+            return getNoise(x, z, memo);
         }
 
-        return applyPost(getNoise(x, z), x, z);
+        return applyPost(getNoise(x, z, memo), x, z);
+    }
+
+    private double memoizedNoise2D(double x, double z, UnsignedMemo memo) {
+        long bx = Double.doubleToRawLongBits(x);
+        long bz = Double.doubleToRawLongBits(z);
+        int slot = memo.slot(this, bx, bz);
+        if (memo.owners[slot] != null) {
+            return memo.values[slot];
+        }
+        double value = sampleUnsigned2D(x, z, memo);
+        if (memo.size < UNSIGNED_MEMO_CAPACITY) {
+            slot = memo.slot(this, bx, bz);
+            if (memo.owners[slot] == null) {
+                memo.touched[memo.size++] = slot;
+            }
+            memo.owners[slot] = this;
+            memo.xs[slot] = bx;
+            memo.zs[slot] = bz;
+            memo.values[slot] = value;
+        }
+        return value;
+    }
+
+    private boolean canMemoizeUnsignedFracture() {
+        CNG node = this;
+        for (int depth = 0; depth < 4; depth++) {
+            node = node.fracture;
+            if (node == null) {
+                return false;
+            }
+        }
+        node = this;
+        for (int depth = 0; depth < UNSIGNED_MEMO_CAPACITY; depth++) {
+            if (node.getClass() != CNG.class || node.noscale || node.children != null || node.cache != null
+                    || node.customGenerator != null || node.injector != ADD || !pureUnsignedBase(node.generator)) {
+                return false;
+            }
+            node = node.fracture;
+            if (node == null) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean pureUnsignedBase(NoiseGenerator generator) {
+        if (generator == null) {
+            return false;
+        }
+        for (int depth = 0; depth < UNSIGNED_MEMO_CAPACITY; depth++) {
+            Class<?> type = generator.getClass();
+            if (type == OffsetNoiseGenerator.class) {
+                generator = ((OffsetNoiseGenerator) generator).getBase();
+            } else {
+                return type == SimplexNoise.class || type == PerlinNoise.class
+                        || type == FractalBillowSimplexNoise.class || type == FractalFBMSimplexNoise.class;
+            }
+        }
+        return false;
+    }
+
+    private static final class UnsignedMemo {
+        private final CNG[] owners = new CNG[UNSIGNED_MEMO_CAPACITY * 2];
+        private final long[] xs = new long[UNSIGNED_MEMO_CAPACITY * 2];
+        private final long[] zs = new long[UNSIGNED_MEMO_CAPACITY * 2];
+        private final double[] values = new double[UNSIGNED_MEMO_CAPACITY * 2];
+        private final int[] touched = new int[UNSIGNED_MEMO_CAPACITY];
+        private int size;
+        private boolean active;
+
+        private int slot(CNG owner, long x, long z) {
+            long hash = x * 0x9E3779B97F4A7C15L ^ z * 0xC2B2AE3D27D4EB4FL
+                    ^ System.identityHashCode(owner) * 0x165667B19E3779F9L;
+            hash ^= hash >>> 33;
+            hash *= 0xFF51AFD7ED558CCDL;
+            hash ^= hash >>> 33;
+            int slot = (int) hash & (owners.length - 1);
+            while (owners[slot] != null && (owners[slot] != owner || xs[slot] != x || zs[slot] != z)) {
+                slot = (slot + 1) & (owners.length - 1);
+            }
+            return slot;
+        }
+
+        private void clear() {
+            for (int index = 0; index < size; index++) {
+                owners[touched[index]] = null;
+            }
+            size = 0;
+            active = false;
+        }
     }
 
     private static final int COORD_CACHE_SIZE = 1 << 16;

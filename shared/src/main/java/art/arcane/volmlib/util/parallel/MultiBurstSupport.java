@@ -71,6 +71,14 @@ public class MultiBurstSupport implements ExecutorService {
         return last.get();
     }
 
+    protected ForkJoinPool createPool(
+            int parallelism,
+            ForkJoinPool.ForkJoinWorkerThreadFactory factory,
+            Thread.UncaughtExceptionHandler handler
+    ) {
+        return new ForkJoinPool(parallelism, factory, handler, true);
+    }
+
     private ExecutorService getService() {
         last.set(millis.getAsLong());
         if (closed) {
@@ -90,7 +98,7 @@ public class MultiBurstSupport implements ExecutorService {
                 return service;
             }
 
-            service = new ForkJoinPool(threadCountResolver.applyAsInt(parallelism.getAsInt()),
+            service = createPool(threadCountResolver.applyAsInt(parallelism.getAsInt()),
                     new ForkJoinPool.ForkJoinWorkerThreadFactory() {
                         int m = 0;
 
@@ -102,8 +110,7 @@ public class MultiBurstSupport implements ExecutorService {
                             return worker;
                         }
                     },
-                    (t, e) -> this.errorHandler.accept(e),
-                    true);
+                    (t, e) -> this.errorHandler.accept(e));
             return service;
         }
     }

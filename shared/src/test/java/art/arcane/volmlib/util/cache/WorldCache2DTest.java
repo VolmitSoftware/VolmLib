@@ -2,6 +2,9 @@ package art.arcane.volmlib.util.cache;
 
 import org.junit.Test;
 
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.Assert.assertEquals;
@@ -9,6 +12,25 @@ import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertThrows;
 
 public class WorldCache2DTest {
+    @Test
+    public void capacityCanGrowAndShrinkWithoutChangingValues() {
+        WorldCache2D<Integer> cache = WorldCache2D.ofInts((x, z) -> x - z,
+                2, () -> new ChunkCache2D<>("iris"));
+        cache.setMaximumChunks(8);
+        for (int chunk = 0; chunk < 8; chunk++) {
+            assertEquals(chunk * 16, cache.get(chunk * 16, 0).intValue());
+        }
+        assertEquals(8L * 256L, cache.getSize());
+        cache.setMaximumChunks(2);
+        assertEquals(2L * 256L, cache.getSize());
+        assertEquals(2L * 256L, cache.getMaxSize());
+        for (int chunk = 0; chunk < 8; chunk++) {
+            assertEquals(chunk * 16, cache.get(chunk * 16, 0).intValue());
+        }
+        assertThrows(IllegalArgumentException.class, () -> cache.setMaximumChunks(0));
+        assertThrows(IllegalArgumentException.class, () -> cache.setMaximumChunks(-1));
+    }
+
     @Test
     public void interleavedFillsAndReadsRetainSignedChunkIdentity() {
         AtomicInteger calls = new AtomicInteger();
@@ -101,5 +123,50 @@ public class WorldCache2DTest {
         assertEquals(3, cache.get(0, 0).intValue());
         assertEquals(3, calls.get());
         assertEquals(256L, cache.getSize());
+    }
+
+    @Test
+    public void quietStencilReadsObserveEvictionByAnotherThread() throws Exception {
+        AtomicInteger firstColumnReads = new AtomicInteger();
+        WorldCache2D<Integer> cache = WorldCache2D.ofInts((x, z) -> x == 0 && z == 0
+                ? firstColumnReads.incrementAndGet() : x, 64, () -> new ChunkCache2D<>("iris"));
+        assertEquals(1, cache.get(0, 0).intValue());
+        assertEquals(16, cache.get(16, 0).intValue());
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            executor.submit(() -> {
+                for (int chunk = 1024; chunk < 1152; chunk++) {
+                    cache.get(chunk << 4, 0);
+                }
+            }).get(5L, TimeUnit.SECONDS);
+            assertEquals(2, cache.get(0, 0).intValue());
+            assertEquals(2, firstColumnReads.get());
+            assertEquals(64L * 256L, cache.getSize());
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    public void everyRecurringStencilKeyStaysHotDuringEvictionChurn() {
+        int[] hotColumnReads = new int[12];
+        WorldCache2D<Integer> cache = WorldCache2D.ofInts((x, z) -> {
+            int chunk = x >> 4;
+            return chunk >= 0 && chunk < hotColumnReads.length ? ++hotColumnReads[chunk] : -1;
+        }, 256, () -> new ChunkCache2D<>("iris"));
+
+        for (int round = 0; round < 128; round++) {
+            for (int chunk = 0; chunk < hotColumnReads.length; chunk++) {
+                assertEquals(1, cache.get(chunk << 4, 0).intValue());
+            }
+            for (int cold = 0; cold < 4; cold++) {
+                assertEquals(-1, cache.get((1024 + round * 4 + cold) << 4, 0).intValue());
+            }
+        }
+
+        for (int reads : hotColumnReads) {
+            assertEquals(1, reads);
+        }
+        assertEquals(256L * 256L, cache.getSize());
     }
 }
