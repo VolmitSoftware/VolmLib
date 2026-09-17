@@ -171,7 +171,7 @@ public class HyperLockSupport {
                 if (errorHandler != null) {
                     errorHandler.accept(e);
                 }
-                return;
+                throw new IllegalStateException("Interrupted while acquiring HyperLock at " + x + "," + z, e);
             }
 
             if (warningHandler != null) {

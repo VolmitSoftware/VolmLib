@@ -1,11 +1,10 @@
 package art.arcane.volmlib.util.mantle;
 
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Semaphore;
-import java.util.function.Function;
-import java.util.function.Supplier;
 
 /**
  * Shared concurrent access support for mantle-like region tables.
@@ -38,84 +37,45 @@ public abstract class MantleAccessSupport<P> {
                 return loaded;
             }
 
-            try {
-                return loadRegionBlocking(x, z);
-            } catch (RuntimeException e) {
-                warn("Failed to get " + regionName() + " " + x + " " + z + " due to runtime exception");
-                report(e);
-            } catch (Throwable e) {
-                warn("Failed to get " + regionName() + " " + x + " " + z + " due to unknown exception");
-                report(e);
-            }
+            return loadRegionBlocking(x, z);
+        } catch (RuntimeException | Error failure) {
+            reportAccessFailure(x, z, failure);
+            throw failure;
         } finally {
             if (unload) {
                 unloadSemaphore.release();
             }
         }
-
-        if (Thread.currentThread().isInterrupted()) {
-            throw new IllegalStateException("Interrupted while retrying access to " + regionName() + " " + x + " " + z);
-        }
-
-        warn("Retrying to get " + x + " " + z + " " + regionRetryName());
-        return accessRegion(x, z);
     }
 
     protected CompletableFuture<P> accessRegionFuture(int x, int z) {
-        final boolean trim = trimSemaphore.tryAcquire();
-        final boolean unload = unloadSemaphore.tryAcquire();
-        final Function<P, P> release = p -> {
+        boolean trim = trimSemaphore.tryAcquire();
+        boolean unload = unloadSemaphore.tryAcquire();
+        CompletableFuture<P> access;
+        try {
+            P loaded = acquireLoadedRegion(x, z);
+            access = loaded != null
+                    ? CompletableFuture.completedFuture(loaded)
+                    : Objects.requireNonNull(loadRegionSafe(x, z), "Region load returned no completion future");
+        } catch (Throwable failure) {
+            access = CompletableFuture.failedFuture(failure);
+        }
+        return access.whenComplete((region, failure) -> {
             if (trim) {
                 trimSemaphore.release();
             }
             if (unload) {
                 unloadSemaphore.release();
             }
-            return p;
-        };
-
-        final Supplier<CompletableFuture<P>> fallback = () -> loadRegionSafe(x, z)
-                .exceptionally(e -> {
-                    Throwable root = rootCause(e);
-                    if (root instanceof InterruptedException) {
-                        warn("Failed to get " + regionName() + " " + x + " " + z + " due to thread interruption");
-                    } else {
-                        warn("Failed to get " + regionName() + " " + x + " " + z + " due to unknown exception");
-                    }
-
-                    report(root);
-                    return null;
-                })
-                .thenCompose(p -> {
-                    release.apply(p);
-                    if (p != null) {
-                        return CompletableFuture.completedFuture(p);
-                    }
-
-                    warn("Retrying to get " + x + " " + z + " " + regionRetryName());
-                    return accessRegionFuture(x, z);
-                });
-
-        if (!trim || !unload) {
-            P loaded = acquireLoadedRegion(x, z);
-            if (loaded != null) {
-                return CompletableFuture.completedFuture(release.apply(loaded));
+            if (failure != null) {
+                reportAccessFailure(x, z, rootCause(failure));
             }
+        }).copy();
+    }
 
-            return loadRegionSafe(x, z)
-                    .thenApply(release)
-                    .exceptionallyCompose(e -> {
-                        report(rootCause(e));
-                        return fallback.get();
-                    });
-        }
-
-        P p = acquireLoadedRegion(x, z);
-        if (p != null) {
-            return CompletableFuture.completedFuture(release.apply(p));
-        }
-
-        return fallback.get();
+    private void reportAccessFailure(int x, int z, Throwable failure) {
+        warn("Failed to access " + regionRetryName() + " " + x + " " + z);
+        report(failure);
     }
 
     private static Throwable rootCause(Throwable t) {
