@@ -5,6 +5,7 @@ import net.md_5.bungee.api.chat.BaseComponent;
 import org.bukkit.command.CommandSender;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryView;
+import org.bukkit.inventory.PlayerInventory;
 import org.bukkit.metadata.MetadataValue;
 import org.bukkit.plugin.Plugin;
 
@@ -12,6 +13,10 @@ import java.util.List;
 import java.util.UUID;
 
 public interface Player {
+  default PlayerInventory getInventory() {
+    return null;
+  }
+
   default UUID getUniqueId() {
     return new UUID(0L, 0L);
   }
