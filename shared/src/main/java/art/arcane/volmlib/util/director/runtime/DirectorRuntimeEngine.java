@@ -25,6 +25,8 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
+import org.bukkit.entity.Player;
+
 public final class DirectorRuntimeEngine implements DirectorCommandEngine {
     private final DirectorRuntimeNode root;
     private final DirectorParserRegistry parsers;
@@ -483,7 +485,7 @@ public final class DirectorRuntimeEngine implements DirectorCommandEngine {
                 suggestions.add(parameter.getDescriptor().getName() + "=" + value);
             }
 
-            if (suggestions.isEmpty()) {
+            if (suggestions.isEmpty() && !valuePrefix.isEmpty()) {
                 suggestions.add(parameter.getDescriptor().getName() + "=" + valuePrefix);
             }
 
@@ -572,6 +574,8 @@ public final class DirectorRuntimeEngine implements DirectorCommandEngine {
         } else if (type == Boolean.class || type == boolean.class) {
             suggestions.add("true");
             suggestions.add("false");
+        } else if (type == String.class) {
+            addNamedStringSuggestions(descriptor, input, suggestions);
         }
 
         if (normalized.isEmpty()) {
@@ -585,6 +589,28 @@ public final class DirectorRuntimeEngine implements DirectorCommandEngine {
                 })
                 .sorted(String::compareToIgnoreCase)
                 .toList();
+    }
+
+    private void addNamedStringSuggestions(
+            DirectorParameterDescriptor descriptor, String input, Set<String> suggestions) {
+        String name = descriptor.getName() == null ? "" : descriptor.getName().toLowerCase(Locale.ROOT);
+        if (name.equals("player") || name.equals("playername")) {
+            DirectorParameterHandler<?> playerHandler = resolveLegacyHandler(Player.class);
+            if (playerHandler != null) {
+                try {
+                    for (Object possibility : playerHandler.getPossibilities(input)) {
+                        String rendered = playerHandler.toStringForce(possibility);
+                        if (rendered != null && !rendered.trim().isEmpty()) {
+                            suggestions.add(rendered);
+                        }
+                    }
+                } catch (Throwable ignored) {
+                }
+            }
+            if ("*".equals(descriptor.getDefaultValue())) {
+                suggestions.add("*");
+            }
+        }
     }
 
     private DirectorParameterHandler<?> resolveLegacyHandler(Class<?> type) {
