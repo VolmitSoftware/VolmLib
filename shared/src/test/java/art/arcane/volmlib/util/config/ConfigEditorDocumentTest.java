@@ -13,6 +13,19 @@ import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertThrows;
 
 public class ConfigEditorDocumentTest {
+    @Test
+    public void exposesDefaultsWithoutChangingSourceOrOverridingConfiguredValues() throws IOException {
+        String source = "# custom\n[feedback]\nchat = false\n";
+        ConfigEditorDocument document = ConfigEditorDocument.fromTomlWithDefaults(source,
+                "[feedback]\nchat = true\ntitle = true\n[general]\nenabled = true\n");
+        assertEquals(source, document.source());
+        assertEquals(new JsonPrimitive(false), document.value(List.of("feedback", "chat")));
+        assertEquals(new JsonPrimitive(true), document.value(List.of("feedback", "title")));
+        assertEquals(new JsonPrimitive(true), document.value(List.of("general", "enabled")));
+        assertEquals(2, document.entries(List.of("feedback")).size());
+        document.edit(List.of("feedback", "title"), new JsonPrimitive(false));
+    }
+
     private static final String SOURCE = """
             # Main configuration
             language = "en_US" # Keep this comment

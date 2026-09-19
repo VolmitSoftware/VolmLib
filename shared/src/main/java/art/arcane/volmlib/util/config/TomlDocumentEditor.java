@@ -56,12 +56,44 @@ public final class TomlDocumentEditor {
             updated = prefix + TomlCodec.toInlineToml(new JsonPrimitive(requestedPath.get(0)))
                     + " = " + rendered + newline + source.substring(insertion);
         } else {
-            throw new IOException("TOML setting has no editable value: " + requestedPath);
+            updated = insertValue(source, scanner, requestedPath, rendered);
         }
         if (!parse(updated).equals(expected)) {
             throw new IOException("TOML edit would change unrelated settings: " + requestedPath);
         }
         return updated;
+    }
+
+    private static String insertValue(String source, SourceScanner scanner, List<String> path, String rendered) {
+        String newline = source.contains("\r\n") ? "\r\n" : "\n";
+        for (int size = path.size() - 1; size > 0; size--) {
+            List<String> parent = path.subList(0, size);
+            Span inline = scanner.values.get(parent);
+            if (inline != null && source.charAt(inline.start()) == '{') {
+                int insertion = inline.end() - 1;
+                String separator = source.substring(inline.start() + 1, insertion).isBlank() ? "" : ", ";
+                return source.substring(0, insertion) + separator + renderKey(path.subList(size, path.size()))
+                        + " = " + rendered + source.substring(insertion);
+            }
+            Integer insertion = scanner.tables.get(parent);
+            if (insertion != null && size == path.size() - 1) {
+                String prefix = source.substring(0, insertion);
+                return prefix + (prefix.endsWith("\n") ? "" : newline)
+                        + renderKey(path.subList(size, path.size())) + " = " + rendered + newline
+                        + source.substring(insertion);
+            }
+        }
+        return source + (!source.isEmpty() && !source.endsWith("\n") ? newline : "")
+                + "[" + renderKey(path.subList(0, path.size() - 1)) + "]" + newline
+                + renderKey(path.subList(path.size() - 1, path.size())) + " = " + rendered + newline;
+    }
+
+    private static String renderKey(List<String> path) {
+        List<String> keys = new ArrayList<>(path.size());
+        for (String segment : path) {
+            keys.add(segment.matches("[A-Za-z0-9_-]+") ? segment : TomlCodec.toInlineToml(new JsonPrimitive(segment)));
+        }
+        return String.join(".", keys);
     }
 
     private static String replaceArray(String source, SourceScanner scanner, List<String> path,
@@ -166,8 +198,8 @@ public final class TomlDocumentEditor {
             if (current.isJsonObject()) {
                 JsonObject table = current.getAsJsonObject();
                 resolved.add(segment);
-                if (!table.has(segment) && !(last && position == 0)) {
-                    throw new IOException("TOML setting does not exist: " + path);
+                if (!table.has(segment) && !last) {
+                    table.add(segment, new JsonObject());
                 }
                 if (last) {
                     table.add(segment, value.deepCopy());
@@ -209,6 +241,7 @@ public final class TomlDocumentEditor {
         private final Map<List<String>, Span> values = new HashMap<>();
         private final Map<List<String>, List<Integer>> arrayCommas = new HashMap<>();
         private final Map<List<String>, Integer> arrayIndices = new HashMap<>();
+        private final Map<List<String>, Integer> tables = new HashMap<>();
         private List<String> table = List.of();
         private int position;
         private int firstStatement;
@@ -251,6 +284,8 @@ public final class TomlDocumentEditor {
                 }
             }
             table = List.copyOf(resolved);
+            int end = source.indexOf('\n', position);
+            tables.put(table, end < 0 ? source.length() : end + 1);
         }
 
         private void readAssignment(List<String> parent) throws IOException {

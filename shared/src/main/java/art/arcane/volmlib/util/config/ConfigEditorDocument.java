@@ -29,6 +29,13 @@ public final class ConfigEditorDocument {
         return new ConfigEditorDocument(required, parsed.getAsJsonObject());
     }
 
+    public static ConfigEditorDocument fromTomlWithDefaults(String source, String defaults) throws IOException {
+        ConfigEditorDocument document = fromToml(source);
+        JsonObject merged = fromToml(defaults).root.deepCopy();
+        mergeConfigured(merged, document.root);
+        return new ConfigEditorDocument(document.source, merged);
+    }
+
     public String source() {
         return source;
     }
@@ -71,6 +78,17 @@ public final class ConfigEditorDocument {
 
     public Edit edit(List<String> path, JsonElement value) {
         return new Edit(this, path, value);
+    }
+
+    private static void mergeConfigured(JsonObject defaults, JsonObject configured) {
+        for (Map.Entry<String, JsonElement> entry : configured.entrySet()) {
+            JsonElement fallback = defaults.get(entry.getKey());
+            if (fallback != null && fallback.isJsonObject() && entry.getValue().isJsonObject()) {
+                mergeConfigured(fallback.getAsJsonObject(), entry.getValue().getAsJsonObject());
+            } else {
+                defaults.add(entry.getKey(), entry.getValue().deepCopy());
+            }
+        }
     }
 
     private JsonElement resolve(List<String> path) {

@@ -14,6 +14,23 @@ import static org.junit.Assert.assertTrue;
 
 public class TomlDocumentEditorTest {
     @Test
+    public void insertsNestedSettingsWhilePreservingCommentsAndOtherSections() throws IOException {
+        String source = "# Header\r\n[feedback] # Notifications\r\n# Keep this comment\r\nchat = false\r\n[general]\r\nenabled = true\r\n";
+        String updated = TomlDocumentEditor.set(source, List.of("feedback", "title"), new JsonPrimitive(true));
+        assertEquals(source.replace("# Notifications\r\n", "# Notifications\r\ntitle = true\r\n"), updated);
+    }
+
+    @Test
+    public void insertsMissingSectionsAndInlineTableMembers() throws IOException {
+        String source = "# Header\n[general]\nenabled = true\n";
+        String updated = TomlDocumentEditor.set(source, List.of("feedback", "title"), new JsonPrimitive(true));
+        assertTrue(TomlCodec.toJsonElement(updated).getAsJsonObject().getAsJsonObject("feedback").get("title").getAsBoolean());
+        assertTrue(updated.startsWith(source));
+        assertEquals("feedback = { chat = false , title = true} # Keep\n",
+                TomlDocumentEditor.set("feedback = { chat = false } # Keep\n", List.of("feedback", "title"), new JsonPrimitive(true)));
+    }
+
+    @Test
     public void changesOnlyTheRequestedValueAndRetainsCommentsAndLineEndings() throws IOException {
         String source = "# Main settings\r\n\"language\"\t= 'en_US'  # Used by the server\r\n"
                 + "metrics = true\r\n\r\n# First drop\r\n[[drops]]\r\nitem = 'diamond'\r\n";
@@ -191,11 +208,11 @@ public class TomlDocumentEditorTest {
     }
 
     @Test
-    public void rejectsMalformedDocumentsMissingNestedPathsAndStructuralReplacement() {
+    public void rejectsMalformedDocumentsScalarParentsAndStructuralReplacement() {
         assertThrows(IOException.class,
                 () -> TomlDocumentEditor.set("language = \"unfinished\n", List.of("language"), new JsonPrimitive("de_DE")));
         assertThrows(IOException.class,
-                () -> TomlDocumentEditor.set("[veins]\nmaximum = 3\n", List.of("veins", "missing"), new JsonPrimitive(2)));
+                () -> TomlDocumentEditor.set("[veins]\nmaximum = 3\n", List.of("veins", "maximum", "missing"), new JsonPrimitive(2)));
         assertThrows(IllegalArgumentException.class,
                 () -> TomlDocumentEditor.set("[veins]\nmaximum = 3\n", List.of("veins"), new JsonObject()));
     }
