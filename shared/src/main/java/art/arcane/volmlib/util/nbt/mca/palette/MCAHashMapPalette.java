@@ -20,6 +20,7 @@ package art.arcane.volmlib.util.nbt.mca.palette;
 
 import art.arcane.volmlib.util.nbt.tag.CompoundTag;
 import art.arcane.volmlib.util.nbt.tag.ListTag;
+import art.arcane.volmlib.util.nbt.tag.Tag;
 
 import java.util.function.Function;
 import java.util.function.Predicate;
@@ -31,13 +32,13 @@ public class MCAHashMapPalette<T> implements MCAPalette<T> {
 
     private final MCAPaletteResize<T> resizeHandler;
 
-    private final Function<CompoundTag, T> reader;
+    private final Function<Tag<?>, T> reader;
 
     private final Function<T, CompoundTag> writer;
 
     private final int bits;
 
-    public MCAHashMapPalette(MCAIdMapper<T> var0, int var1, MCAPaletteResize<T> var2, Function<CompoundTag, T> var3, Function<T, CompoundTag> var4) {
+    public MCAHashMapPalette(MCAIdMapper<T> var0, int var1, MCAPaletteResize<T> var2, Function<Tag<?>, T> var3, Function<T, CompoundTag> var4) {
         this.registry = var0;
         this.bits = var1;
         this.resizeHandler = var2;
@@ -72,13 +73,13 @@ public class MCAHashMapPalette<T> implements MCAPalette<T> {
         return this.values.size();
     }
 
-    public void read(ListTag var0) {
+    public void read(ListTag<?> var0) {
         this.values.clear();
         for (int var1 = 0; var1 < var0.size(); var1++)
-            this.values.add(this.reader.apply((CompoundTag) var0.get(var1)));
+            this.values.add(this.reader.apply(var0.get(var1)));
     }
 
-    public void write(ListTag var0) {
+    public void write(ListTag<CompoundTag> var0) {
         for (int var1 = 0; var1 < getSize(); var1++)
             var0.add(this.writer.apply(this.values.byId(var1)));
     }

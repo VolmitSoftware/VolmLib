@@ -31,5 +31,5 @@ public interface MCAPalette<T> {
 
     int getSize();
 
-    void read(ListTag paramListTag);
+    void read(ListTag<?> paramListTag);
 }

@@ -91,6 +91,36 @@ tasks.register('compileCurrentSpigotCompatibility', JavaCompile) {
     options.release.set(25)
 }
 
+Map<String, String> minecraft26_3Apis = [
+        Paper: 'io.papermc.paper:paper-api:26.3.build.25-alpha',
+        Spigot: 'org.spigotmc:spigot-api:26.3-R0.1-SNAPSHOT'
+]
+minecraft26_3Apis.each { String platform, String coordinate ->
+    Configuration compatibility = configurations.create("minecraft26_3${platform}") {
+        canBeConsumed = false
+        canBeResolved = true
+        attributes {
+            attribute(Usage.USAGE_ATTRIBUTE, objects.named(Usage, Usage.JAVA_API))
+            attribute(TargetJvmVersion.TARGET_JVM_VERSION_ATTRIBUTE, 25)
+        }
+    }
+    dependencies.add(compatibility.name, coordinate)
+    TaskProvider<JavaCompile> compileCompatibility = tasks.register("compile26_3${platform}Compatibility", JavaCompile) {
+        source = sourceSets.main.java
+        classpath = compatibility + files(sourceSets.main.compileClasspath.filter { File dependency ->
+            !dependency.name.startsWith('paper-api-')
+        })
+        destinationDirectory.set(layout.buildDirectory.dir("classes/java/minecraft26_3${platform}"))
+        options.annotationProcessorPath = configurations.annotationProcessor
+        options.compilerArgs.add('-parameters')
+        options.encoding = 'UTF-8'
+        options.release.set(25)
+    }
+    tasks.named('check').configure {
+        dependsOn(compileCompatibility)
+    }
+}
+
 tasks.named('check').configure {
     dependsOn(tasks.named('compileSpigotCompatibility'))
     dependsOn(tasks.named('compileCurrentPaperCompatibility'))

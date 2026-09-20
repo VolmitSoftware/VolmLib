@@ -20,14 +20,15 @@ package art.arcane.volmlib.util.nbt.mca;
 
 import art.arcane.volmlib.util.nbt.tag.CompoundTag;
 import art.arcane.volmlib.util.nbt.tag.StringTag;
+import art.arcane.volmlib.util.nbt.tag.Tag;
 
 public final class MCABlockStateCodecSupport {
     private MCABlockStateCodecSupport() {
     }
 
-    public static CompoundTag encodeBlockState(String blockDataString, String namespacedMaterialKey) {
+    public static CompoundTag encodeBlockState(String blockDataString, String namespacedMaterialKey, Format format) {
         CompoundTag tag = new CompoundTag();
-        tag.putString("Name", namespacedMaterialKey);
+        tag.putString(format.nameKey(), namespacedMaterialKey);
 
         if (blockDataString.contains("[")) {
             String raw = blockDataString.split("\\Q[\\E")[1].replaceAll("\\Q]\\E", "");
@@ -43,20 +44,31 @@ public final class MCABlockStateCodecSupport {
                 props.put(m[0], new StringTag(m[1]));
             }
 
-            tag.put("Properties", props);
+            tag.put(format.propertiesKey(), props);
         }
 
         return tag;
     }
 
-    public static String decodeBlockStateString(CompoundTag tag) {
+    public static String decodeBlockStateString(Tag<?> tag, Format format) {
         if (tag == null) {
             return null;
         }
 
-        StringBuilder p = new StringBuilder(tag.getString("Name"));
-        if (tag.containsKey("Properties")) {
-            CompoundTag props = tag.getCompoundTag("Properties");
+        if (format == Format.LOWERCASE && tag instanceof StringTag name) {
+            return name.getValue();
+        }
+        if (!(tag instanceof CompoundTag compound)) {
+            throw new IllegalArgumentException("Expected a compound block state");
+        }
+        if (format == Format.LOWERCASE && compound.size() == 1
+                && compound.get("") instanceof StringTag name) {
+            return name.getValue();
+        }
+
+        StringBuilder p = new StringBuilder(compound.getString(format.nameKey()));
+        if (compound.containsKey(format.propertiesKey())) {
+            CompoundTag props = compound.getCompoundTag(format.propertiesKey());
             p.append('[');
 
             for (String i : props.keySet()) {
@@ -70,5 +82,26 @@ public final class MCABlockStateCodecSupport {
         }
 
         return p.toString();
+    }
+
+    public enum Format {
+        CAPITALIZED("Name", "Properties"),
+        LOWERCASE("id", "properties");
+
+        private final String nameKey;
+        private final String propertiesKey;
+
+        Format(String nameKey, String propertiesKey) {
+            this.nameKey = nameKey;
+            this.propertiesKey = propertiesKey;
+        }
+
+        public String nameKey() {
+            return nameKey;
+        }
+
+        public String propertiesKey() {
+            return propertiesKey;
+        }
     }
 }

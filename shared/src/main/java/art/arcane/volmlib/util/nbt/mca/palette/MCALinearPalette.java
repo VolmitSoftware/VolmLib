@@ -18,8 +18,8 @@
 
 package art.arcane.volmlib.util.nbt.mca.palette;
 
-import art.arcane.volmlib.util.nbt.tag.CompoundTag;
 import art.arcane.volmlib.util.nbt.tag.ListTag;
+import art.arcane.volmlib.util.nbt.tag.Tag;
 
 import java.util.function.Function;
 import java.util.function.Predicate;
@@ -31,13 +31,13 @@ public class MCALinearPalette<T> implements MCAPalette<T> {
 
     private final MCAPaletteResize<T> resizeHandler;
 
-    private final Function<CompoundTag, T> reader;
+    private final Function<Tag<?>, T> reader;
 
     private final int bits;
 
     private int size;
 
-    public MCALinearPalette(MCAIdMapper<T> var0, int var1, MCAPaletteResize<T> var2, Function<CompoundTag, T> var3) {
+    public MCALinearPalette(MCAIdMapper<T> var0, int var1, MCAPaletteResize<T> var2, Function<Tag<?>, T> var3) {
         this.registry = var0;
         this.values = (T[]) new Object[1 << var1];
         this.bits = var1;
@@ -78,9 +78,9 @@ public class MCALinearPalette<T> implements MCAPalette<T> {
         return this.size;
     }
 
-    public void read(ListTag var0) {
+    public void read(ListTag<?> var0) {
         for (int var1 = 0; var1 < var0.size(); var1++) {
-            this.values[var1] = this.reader.apply((CompoundTag) var0.get(var1));
+            this.values[var1] = this.reader.apply(var0.get(var1));
         }
         this.size = var0.size();
     }

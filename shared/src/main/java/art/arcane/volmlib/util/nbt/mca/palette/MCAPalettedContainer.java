@@ -20,6 +20,7 @@ package art.arcane.volmlib.util.nbt.mca.palette;
 
 import art.arcane.volmlib.util.nbt.tag.CompoundTag;
 import art.arcane.volmlib.util.nbt.tag.ListTag;
+import art.arcane.volmlib.util.nbt.tag.Tag;
 import it.unimi.dsi.fastutil.ints.Int2IntOpenHashMap;
 
 import java.util.function.Function;
@@ -35,7 +36,7 @@ public class MCAPalettedContainer<T> implements MCAPaletteResize<T> {
 
     private final MCAIdMapper<T> registry;
 
-    private final Function<CompoundTag, T> reader;
+    private final Function<Tag<?>, T> reader;
 
     private final Function<T, CompoundTag> writer;
 
@@ -47,7 +48,7 @@ public class MCAPalettedContainer<T> implements MCAPaletteResize<T> {
 
     private int bits;
 
-    public MCAPalettedContainer(MCAPalette<T> var0, MCAIdMapper<T> var1, Function<CompoundTag, T> var2, Function<T, CompoundTag> var3, T var4) {
+    public MCAPalettedContainer(MCAPalette<T> var0, MCAIdMapper<T> var1, Function<Tag<?>, T> var2, Function<T, CompoundTag> var3, T var4) {
         this.globalPalette = var0;
         this.registry = var1;
         this.reader = var2;
@@ -122,7 +123,7 @@ public class MCAPalettedContainer<T> implements MCAPaletteResize<T> {
         return (var1 == null) ? this.defaultValue : var1;
     }
 
-    public void read(ListTag var0, long[] var1) {
+    public void read(ListTag<?> var0, long[] var1) {
         int var2 = Math.max(4, MCAMth.ceillog2(var0.size()));
         if (var2 != this.bits)
             setBits(var2);
@@ -156,7 +157,7 @@ public class MCAPalettedContainer<T> implements MCAPaletteResize<T> {
             }
             var6[i] = var5;
         }
-        ListTag<CompoundTag> paletteList = (ListTag<CompoundTag>) ListTag.createUnchecked(CompoundTag.class);
+        ListTag<CompoundTag> paletteList = new ListTag<>(CompoundTag.class);
         var3.write(paletteList);
         var0.put(var1, paletteList);
         int var8 = Math.max(4, MCAMth.ceillog2(paletteList.size()));

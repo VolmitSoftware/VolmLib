@@ -19,9 +19,11 @@
 package art.arcane.volmlib.util.nbt.mca;
 
 import art.arcane.volmlib.util.nbt.tag.CompoundTag;
+import art.arcane.volmlib.util.nbt.tag.Tag;
 
 import java.io.File;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
@@ -93,13 +95,24 @@ public final class NBTWorldSupport {
         };
     }
 
-    public static <B> BlockStateCodec<B> blockStateCodec(
+    public static <B> BlockStateCodec<B> blockStateCodec(BlockStateCodecOptions<B> options) {
+        return new BlockStateCodec<>(options);
+    }
+
+    public record BlockStateCodecOptions<B>(
             Function<String, B> resolver,
             Supplier<B> fallback,
             Function<B, String> blockDataString,
-            Function<B, String> namespacedMaterialKey
+            Function<B, String> namespacedMaterialKey,
+            MCABlockStateCodecSupport.Format format
     ) {
-        return new BlockStateCodec<>(resolver, fallback, blockDataString, namespacedMaterialKey);
+        public BlockStateCodecOptions {
+            Objects.requireNonNull(resolver);
+            Objects.requireNonNull(fallback);
+            Objects.requireNonNull(blockDataString);
+            Objects.requireNonNull(namespacedMaterialKey);
+            Objects.requireNonNull(format);
+        }
     }
 
     public static final class BlockStateCodec<B> {
@@ -108,25 +121,22 @@ public final class NBTWorldSupport {
         private final Supplier<B> fallback;
         private final Function<B, String> blockDataString;
         private final Function<B, String> namespacedMaterialKey;
+        private final MCABlockStateCodecSupport.Format format;
 
-        private BlockStateCodec(
-                Function<String, B> resolver,
-                Supplier<B> fallback,
-                Function<B, String> blockDataString,
-                Function<B, String> namespacedMaterialKey
-        ) {
-            this.resolver = resolver;
-            this.fallback = fallback;
-            this.blockDataString = blockDataString;
-            this.namespacedMaterialKey = namespacedMaterialKey;
+        private BlockStateCodec(BlockStateCodecOptions<B> options) {
+            this.resolver = options.resolver();
+            this.fallback = options.fallback();
+            this.blockDataString = options.blockDataString();
+            this.namespacedMaterialKey = options.namespacedMaterialKey();
+            this.format = options.format();
         }
 
-        public B decode(CompoundTag tag) {
+        public B decode(Tag<?> tag) {
             if (tag == null) {
                 return fallback.get();
             }
 
-            B resolved = resolver.apply(MCABlockStateCodecSupport.decodeBlockStateString(tag));
+            B resolved = resolver.apply(MCABlockStateCodecSupport.decodeBlockStateString(tag, format));
             return resolved == null ? fallback.get() : resolved;
         }
 
@@ -134,7 +144,8 @@ public final class NBTWorldSupport {
             return cache.computeIfAbsent(blockData, data ->
                     MCABlockStateCodecSupport.encodeBlockState(
                             blockDataString.apply(data),
-                            namespacedMaterialKey.apply(data)
+                            namespacedMaterialKey.apply(data),
+                            format
                     )
             );
         }

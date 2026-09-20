@@ -50,6 +50,6 @@ public class MCAGlobalPalette<T> implements MCAPalette<T> {
         return this.registry.size();
     }
 
-    public void read(ListTag var0) {
+    public void read(ListTag<?> var0) {
     }
 }
