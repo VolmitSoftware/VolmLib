@@ -2,4 +2,12 @@ rootProject.name = 'VolmLib'
 
 include(':shared')
 include(':packaging')
-include(':native-bukkit')
+include(':native-api')
+include(':native-terrain-api')
+include(':native-common')
+project(':native-common').projectDir = file('native/common')
+include(':native:v26_2_R1')
+include(':native:v1_21_R7')
+include(':native:v26_3_R1')
+include(':native-minecraft26_2-sources')
+project(':native-minecraft26_2-sources').projectDir = file('native/minecraft-common')

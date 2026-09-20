@@ -1,0 +1,20 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "art.arcane.volmlib.nativelib.minecraft26_2.modded.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [
+    "EntityPersistenceMixin",
+    "MobAwarenessMixin",
+    "StructureTemplatePaletteConcurrencyMixin",
+    "WorldGenerationWriteGuardMixin",
+    "ChunkMapTerrainReceiptAccess",
+    "ChunkTerrainReceiptMixin",
+    "LevelChunkTerrainReceiptMixin",
+    "SerializableTerrainReceiptMixin",
+    "LivingEntityLootMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

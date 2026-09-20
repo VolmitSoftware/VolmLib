@@ -1,0 +1,36 @@
+plugins {
+    id 'java-library'
+    id 'maven-publish'
+}
+
+group = 'com.github.VolmitSoftware.VolmLib'
+
+java {
+    toolchain.languageVersion = JavaLanguageVersion.of(25)
+    withSourcesJar()
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.compilerArgs.add('-parameters')
+    options.encoding = 'UTF-8'
+    options.release.set(17)
+}
+
+dependencies {
+    api(project(':native-api'))
+    compileOnly(project(':shared'))
+    compileOnly('org.jetbrains:annotations:26.0.2')
+    compileOnly('org.spigotmc:spigot-api:1.20.1-R0.1-SNAPSHOT')
+    testImplementation(project(':shared'))
+    testImplementation('org.spigotmc:spigot-api:1.20.1-R0.1-SNAPSHOT')
+    testImplementation('junit:junit:4.13.2')
+}
+
+publishing {
+    publications {
+        mavenJava(MavenPublication) {
+            artifactId = 'native-terrain-api'
+            from components.java
+        }
+    }
+}

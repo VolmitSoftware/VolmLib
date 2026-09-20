@@ -11,6 +11,7 @@ import java.util.Enumeration;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
@@ -107,6 +108,13 @@ public final class ShrinkRules {
         lines.add("-printconfiguration " + quote(request.report("configuration")));
         lines.addAll(SHARED_KEEPS);
         lines.addAll(archiveKeeps(request.artifact()));
+        for (Map.Entry<String, Set<String>> binding : NativeProviderBindings.providers(request.artifact()).entrySet()) {
+            String capability = binding.getKey().replace('/', '.');
+            lines.add("-keep interface " + capability + " { *; }");
+            for (String provider : binding.getValue()) {
+                lines.add("-keep class " + provider.replace('/', '.') + " { public <init>(); }");
+            }
+        }
         for (String name : adviceClasses) {
             lines.add(keepAll(name));
         }

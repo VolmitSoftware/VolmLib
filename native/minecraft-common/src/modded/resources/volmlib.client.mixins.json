@@ -1,0 +1,13 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "art.arcane.volmlib.nativelib.minecraft26_2.client.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "client": [
+    "NativeWorldOpenFlowsMixin",
+    "NativeWorldTypeEntryMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

@@ -1,0 +1,88 @@
+plugins {
+    id 'io.papermc.paperweight.userdev' version '2.0.0-beta.21' apply false
+}
+
+Properties nativeTargets = new Properties()
+rootProject.file('packaging/src/main/resources/META-INF/volmlib/native-targets.properties').withInputStream { stream ->
+    nativeTargets.load(stream)
+}
+
+subprojects {
+    apply plugin: 'java-library'
+    apply plugin: 'maven-publish'
+    apply plugin: 'io.papermc.paperweight.userdev'
+
+    group = 'com.github.VolmitSoftware.VolmLib'
+
+    String nativeBundle = nativeTargets.getProperty(project.name + '.bundle')
+    String nativeJava = nativeTargets.getProperty(project.name + '.java')
+    if (nativeBundle == null || nativeJava == null) {
+        throw new GradleException("No native development metadata for ${project.name}")
+    }
+    int nativeJavaVersion = Integer.parseInt(nativeJava)
+
+    java {
+        toolchain.languageVersion = JavaLanguageVersion.of(nativeJavaVersion)
+        withSourcesJar()
+    }
+
+    if (project.name == 'v26_2_R1') {
+        sourceSets.main.java.srcDir(rootProject.file('native/minecraft-common/src/main/java'))
+        sourceSets.main.java.exclude('**/minecraft26_2/modded/**')
+    }
+
+    tasks.withType(JavaCompile).configureEach {
+        options.compilerArgs.add('-parameters')
+        options.encoding = 'UTF-8'
+        options.release.set(nativeJavaVersion)
+    }
+
+    dependencies {
+        paperweight.paperDevBundle(nativeBundle)
+        compileOnly(platform('net.kyori:adventure-bom:4.26.1'))
+        testImplementation(platform('net.kyori:adventure-bom:4.26.1'))
+        api(project(':native-api'))
+        compileOnly(project(':native-terrain-api'))
+        testImplementation(project(':native-terrain-api'))
+        implementation(project(':native-common'))
+        compileOnly(project(':shared'))
+        compileOnly('org.projectlombok:lombok:1.18.44')
+        annotationProcessor('org.projectlombok:lombok:1.18.44')
+        compileOnly('net.bytebuddy:byte-buddy:1.18.11')
+        compileOnly('net.bytebuddy:byte-buddy-agent:1.18.11')
+        compileOnly('it.unimi.dsi:fastutil:8.5.13')
+        testImplementation(project(':shared'))
+        testImplementation('junit:junit:4.13.2')
+        testImplementation('org.junit.jupiter:junit-jupiter:5.11.4')
+        testRuntimeOnly('org.junit.vintage:junit-vintage-engine:5.11.4')
+        testRuntimeOnly('org.junit.platform:junit-platform-launcher:1.11.4')
+        testImplementation('org.mockito:mockito-core:5.18.0')
+        testImplementation('net.bytebuddy:byte-buddy:1.18.11')
+        testImplementation('net.bytebuddy:byte-buddy-agent:1.18.11')
+    }
+
+    tasks.withType(Test).configureEach {
+        useJUnitPlatform()
+        systemProperty('net.bytebuddy.experimental', 'true')
+        jvmArgs('-XX:+EnableDynamicAgentLoading')
+    }
+
+    configurations.configureEach {
+        resolutionStrategy.capabilitiesResolution.withCapability('org.lz4:lz4-java') {
+            selectHighestVersion()
+        }
+    }
+
+    tasks.named('jar', Jar).configure {
+        manifest.attributes('paperweight-mappings-namespace': 'mojang')
+    }
+
+    publishing {
+        publications {
+            mavenJava(MavenPublication) {
+                artifactId = 'native-' + project.name
+                from components.java
+            }
+        }
+    }
+}

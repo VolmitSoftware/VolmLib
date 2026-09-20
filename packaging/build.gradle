@@ -46,3 +46,14 @@ tasks.named('test') {
     useJUnitPlatform()
     maxParallelForks = testForkCount
 }
+
+tasks.named('processResources') {
+    from('../native/minecraft-common/src/fabric/resources/volmlib.accesswidener') {
+        into('META-INF/volmlib/native-access/minecraft26_2/fabric')
+    }
+    for (String loader : ['forge', 'neoforge']) {
+        from("../native/minecraft-common/src/${loader}/resources/META-INF/accesstransformer.cfg") {
+            into("META-INF/volmlib/native-access/minecraft26_2/${loader}")
+        }
+    }
+}

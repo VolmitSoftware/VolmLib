@@ -75,6 +75,15 @@ class JarReachabilityTest {
     }
 
     @Test
+    void retainsExternalRuntimeRootsAndTheirDependencies() throws IOException {
+        Map<String, byte[]> entries = new LinkedHashMap<>();
+        entries.put("META-INF/volmit/runtime-roots.list", "lib/ExternalApi\n".getBytes(StandardCharsets.UTF_8));
+        add(entries, "lib/ExternalApi", writer("lib/ExternalApi", "lib/Parent"));
+        addEmpty(entries, "lib/Parent", "lib/Dead");
+        assertEquals(Set.of("lib/Dead.class"), unused(entries, List.of()));
+    }
+
+    @Test
     void retainsGenericSignaturesAnnotationsAndDynamicConstants() throws IOException {
         Map<String, byte[]> entries = new LinkedHashMap<>();
         ClassWriter consumer = writer("plugin/Main", "java/lang/Object");
@@ -121,6 +130,31 @@ class JarReachabilityTest {
         entries.put("META-INF/versions/25/lib/Base.class", version.toByteArray());
 
         assertEquals(Set.of("lib/Dead.class"), unused(entries, List.of()));
+    }
+
+    @Test
+    void retainsRelocatedVersionProvidersOnlyForReachableCapabilities() throws IOException {
+        Map<String, byte[]> entries = new LinkedHashMap<>();
+        ClassWriter consumer = writer("plugin/Main", "java/lang/Object");
+        consumer.visitField(Opcodes.ACC_PUBLIC, "capability", "Llib/nativelib/terrain/Access;", null, null).visitEnd();
+        add(entries, "plugin/Main", consumer);
+        for (String capability : List.of("Access", "Unused")) {
+            ClassWriter contract = writer("lib/nativelib/terrain/" + capability, "java/lang/Object");
+            AnnotationVisitor binding = contract.visitAnnotation("Llib/nativelib/NativeBinding;", true);
+            binding.visit("value", "terrain.Native" + capability);
+            binding.visitEnd();
+            add(entries, "lib/nativelib/terrain/" + capability, contract);
+        }
+        add(entries, "lib/nativelib/v26_2_R1/terrain/NativeAccess",
+                writer("lib/nativelib/v26_2_R1/terrain/NativeAccess", "lib/SharedAccess"));
+        addEmpty(entries, "lib/nativelib/NativeBinding", "lib/SharedAccess",
+                "lib/nativelib/v26_3_R1/terrain/NativeAccess",
+                "lib/nativelib/v26_2_R1/terrain/NativeUnused",
+                "lib/nativelib/common/terrain/NativeAccess", "lib/nativelib/terrain/NativeAccess");
+
+        assertEquals(Set.of("lib/nativelib/terrain/Unused.class",
+                "lib/nativelib/v26_2_R1/terrain/NativeUnused.class",
+                "lib/nativelib/common/terrain/NativeAccess.class", "lib/nativelib/terrain/NativeAccess.class"), unused(entries, List.of()));
     }
 
     private Set<String> unused(Map<String, byte[]> entries, List<String> keepPrefixes) throws IOException {

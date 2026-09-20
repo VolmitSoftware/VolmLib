@@ -1,0 +1,58 @@
+plugins {
+    id 'java-library'
+    id 'maven-publish'
+    id 'io.papermc.paperweight.userdev' version '2.0.0-beta.21'
+}
+
+group = 'com.github.VolmitSoftware.VolmLib'
+
+java {
+    toolchain.languageVersion = JavaLanguageVersion.of(25)
+    withSourcesJar()
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.compilerArgs.add('-parameters')
+    options.encoding = 'UTF-8'
+    options.release.set(25)
+}
+
+dependencies {
+    paperweight.paperDevBundle(providers.gradleProperty('nativeDevBundle').getOrElse('26.1.2.build.74-stable'))
+    api(project(':native-api'))
+    compileOnly(project(':shared'))
+    testImplementation(project(':shared'))
+    compileOnly('com.frengor:ultimateadvancementapi-shadeable:2.7.2')
+    compileOnly('it.unimi.dsi:fastutil:8.5.13')
+    testImplementation('junit:junit:4.13.2')
+    testImplementation('org.mockito:mockito-core:5.18.0')
+    testImplementation('org.assertj:assertj-core:3.26.3')
+    testImplementation('org.junit.jupiter:junit-jupiter:5.11.4')
+    testRuntimeOnly('org.junit.vintage:junit-vintage-engine:5.11.4')
+    testRuntimeOnly('org.junit.platform:junit-platform-launcher:1.11.4')
+}
+
+repositories {
+    exclusiveContent {
+        forRepository {
+            maven { url = uri('https://nexus.frengor.com/repository/public/') }
+        }
+        filter {
+            includeGroup('com.frengor')
+        }
+    }
+}
+
+tasks.withType(Test).configureEach {
+    useJUnitPlatform()
+    systemProperty('net.bytebuddy.experimental', 'true')
+}
+
+publishing {
+    publications {
+        mavenJava(MavenPublication) {
+            artifactId = 'native-common'
+            from components.java
+        }
+    }
+}

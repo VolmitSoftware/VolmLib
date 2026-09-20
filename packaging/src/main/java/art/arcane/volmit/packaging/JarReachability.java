@@ -39,6 +39,17 @@ public final class JarReachability {
         Map<String, Set<String>> families = new HashMap<>();
         Set<String> roots = new LinkedHashSet<>();
         try (JarFile jar = new JarFile(artifact)) {
+            roots.addAll(MixinResourceRoots.read(jar));
+            JarEntry runtimeRoots = jar.getJarEntry("META-INF/volmit/runtime-roots.list");
+            if (runtimeRoots != null) {
+                try (InputStream input = jar.getInputStream(runtimeRoots)) {
+                    for (String root : new String(input.readAllBytes(), StandardCharsets.UTF_8).split("\\R")) {
+                        if (!root.isBlank()) {
+                            roots.add(root.trim());
+                        }
+                    }
+                }
+            }
             Enumeration<JarEntry> entries = jar.entries();
             while (entries.hasMoreElements()) {
                 JarEntry entry = entries.nextElement();
@@ -75,6 +86,7 @@ public final class JarReachability {
             }
         }
 
+        Map<String, Set<String>> providers = NativeProviderBindings.providers(artifact);
         Set<String> retained = new HashSet<>();
         Deque<String> pending = new ArrayDeque<>(roots);
         while (!pending.isEmpty()) {
@@ -83,6 +95,7 @@ public final class JarReachability {
                 continue;
             }
             pending.addAll(references.get(name));
+            pending.addAll(providers.getOrDefault(name, Set.of()));
             pending.addAll(families.getOrDefault(family(name), Set.of()));
         }
         Set<String> unused = new LinkedHashSet<>();

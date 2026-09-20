@@ -17,6 +17,8 @@ import org.objectweb.asm.Opcodes;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.net.URL;
+import java.net.URLClassLoader;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -32,6 +34,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class PluginPackagingPluginTest {
     private static final long SPIGOT_CAP = 7_600_000L;
@@ -94,6 +97,27 @@ class PluginPackagingPluginTest {
         BuildResult missingReport = runner("jar").build();
         assertEquals(TaskOutcome.SUCCESS, missingReport.task(":jar").getOutcome());
         assertTrue(Files.exists(directory.resolve("build/reports/packaging/distribution.json")));
+    }
+
+    @Test
+    void shrinkRetainsRelocatedNativeProviderConstructionAndInheritedOperations() throws Exception {
+        fixture(1_000_000, "", false);
+        source("lib/nativelib/NativeBinding.java", "package lib.nativelib; import java.lang.annotation.*; @Retention(RetentionPolicy.RUNTIME) @Target(ElementType.TYPE) public @interface NativeBinding { String value(); }");
+        source("lib/nativelib/terrain/Access.java", "package lib.nativelib.terrain; @lib.nativelib.NativeBinding(\"terrain.NativeAccess\") public interface Access { int read(); }");
+        source("lib/nativelib/common/AccessBase.java", "package lib.nativelib.common; public class AccessBase implements lib.nativelib.terrain.Access { public int read() { return helper(); } private int helper() { return 42; } public int unused() { return 5; } }");
+        source("lib/nativelib/v26_2_R1/terrain/NativeAccess.java", "package lib.nativelib.v26_2_R1.terrain; public final class NativeAccess extends lib.nativelib.common.AccessBase { public NativeAccess() {} }");
+        source("owned/NativeUse.java", "package owned; public class NativeUse { public int read(lib.nativelib.terrain.Access access) { return access.read(); } }");
+        Files.writeString(directory.resolve("build.gradle"), "\npluginPackaging.artifacts.distribution.shrinkKeep = ['-keep class owned.NativeUse { *; }']\n", java.nio.file.StandardOpenOption.APPEND);
+        runner("jar").build();
+        Path artifact = directory.resolve("build/libs/example.jar");
+        try (URLClassLoader loader = new URLClassLoader(new URL[]{artifact.toUri().toURL()}, null)) {
+            Class<?> implementation = loader.loadClass("lib.nativelib.v26_2_R1.terrain.NativeAccess");
+            Object access = implementation.getConstructor().newInstance();
+            assertEquals(42, implementation.getMethod("read").invoke(access));
+            assertThrows(NoSuchMethodException.class, () -> implementation.getMethod("unused"));
+            Class<?> contract = loader.loadClass("lib.nativelib.terrain.Access");
+            assertEquals(1, contract.getAnnotations().length);
+        }
     }
 
     @Test

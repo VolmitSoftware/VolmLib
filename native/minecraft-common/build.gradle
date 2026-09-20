@@ -1,0 +1,42 @@
+plugins {
+    id 'base'
+    id 'maven-publish'
+}
+
+group = 'com.github.VolmitSoftware.VolmLib'
+
+TaskProvider<Jar> nativeSources = tasks.register('nativeSources', Jar) {
+    archiveBaseName = 'native-minecraft26_2-sources'
+    from('src/main/java')
+    from('src/modded/java') { into('modded') }
+    from('src/fabric/java') { into('fabric') }
+    from('src/forge/java') { into('forge') }
+    from('src/neoforge/java') { into('neoforge') }
+    ['modded', 'fabric', 'forge', 'neoforge'].each { String loader ->
+        from("src/${loader}/resources") { into("resources/${loader}") }
+    }
+}
+
+configurations {
+    named('default') {
+        canBeConsumed = true
+        canBeResolved = false
+    }
+}
+
+artifacts {
+    add('default', nativeSources)
+}
+
+tasks.named('assemble').configure {
+    dependsOn(nativeSources)
+}
+
+publishing {
+    publications {
+        mavenJava(MavenPublication) {
+            artifactId = 'native-minecraft26_2-sources'
+            artifact(nativeSources)
+        }
+    }
+}

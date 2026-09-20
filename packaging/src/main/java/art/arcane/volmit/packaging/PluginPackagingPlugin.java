@@ -8,6 +8,7 @@ import org.gradle.api.artifacts.Configuration;
 import org.gradle.api.file.FileCollection;
 import org.gradle.api.logging.Logger;
 import org.gradle.api.plugins.JavaPluginExtension;
+import org.gradle.api.plugins.JavaPlugin;
 import org.gradle.api.provider.ProviderFactory;
 import org.gradle.api.tasks.PathSensitivity;
 import org.gradle.api.tasks.SourceSet;
@@ -48,8 +49,28 @@ public class PluginPackagingPlugin implements Plugin<Project> {
                     task.setDescription("Fails when main sources bypass the plugin logger; exemptions only shrink.");
                     task.getReport().set(project.getLayout().getBuildDirectory().file("reports/logging-policy.txt"));
                 });
+        TaskProvider<VerifyNativeBoundary> nativeBoundary = project.getTasks().register(
+                "verifyNativeBoundary", VerifyNativeBoundary.class, task -> {
+                    task.setGroup("verification");
+                    task.setDescription("Verifies that native server access stays in VolmLib implementations.");
+                    task.getReport().set(project.getLayout().getBuildDirectory().file("reports/native-boundary.txt"));
+                });
+        TaskProvider<VerifyNativeClassBoundary> nativeClasses = project.getTasks().register(
+                "verifyNativeClassBoundary", VerifyNativeClassBoundary.class, task -> {
+                    task.setGroup("verification");
+                    task.setDescription("Verifies compiled native descriptors and inferred native bindings.");
+                    task.getReport().set(project.getLayout().getBuildDirectory().file("reports/native-class-boundary.txt"));
+                    task.dependsOn(nativeBoundary);
+                });
+        project.allprojects(child -> child.getPlugins().withType(JavaPlugin.class, ignored -> {
+            SourceSet main = child.getExtensions().getByType(JavaPluginExtension.class).getSourceSets()
+                    .getByName(SourceSet.MAIN_SOURCE_SET_NAME);
+            nativeBoundary.configure(task -> task.getSources().from(main.getAllJava()));
+            nativeClasses.configure(task -> task.getClasses().from(main.getOutput().getClassesDirs()));
+            child.getTasks().named(main.getCompileJavaTaskName()).configure(task -> task.mustRunAfter(nativeBoundary));
+        }));
         project.getTasks().matching(task -> task.getName().equals("check"))
-                .configureEach(task -> task.dependsOn(verify, loggingPolicy));
+                .configureEach(task -> task.dependsOn(verify, loggingPolicy, nativeBoundary, nativeClasses));
         PackagingMode mode = PackagingMode.resolve(project.getProviders());
         project.afterEvaluate(ignored -> {
             for (PackagingArtifact artifact : extension.getArtifacts()) {
