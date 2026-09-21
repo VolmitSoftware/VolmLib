@@ -6,6 +6,8 @@ import art.arcane.volmlib.util.localization.MessageArgs;
 import art.arcane.volmlib.util.localization.MessageCatalog;
 import art.arcane.volmlib.util.localization.MessageKey;
 import art.arcane.volmlib.util.localization.TextKey;
+import art.arcane.volmlib.util.plugin.ComponentMessenger;
+import art.arcane.volmlib.util.plugin.ComponentText;
 import art.arcane.volmlib.util.scheduling.FoliaScheduler;
 import com.google.gson.JsonPrimitive;
 import org.bukkit.Bukkit;
@@ -30,6 +32,10 @@ import java.util.List;
 import java.util.HashSet;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadFactory;
+import java.util.logging.Logger;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -43,8 +49,125 @@ import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.withSettings;
+import static org.mockito.Mockito.doAnswer;
 
 public class BukkitConfigEditorTest {
+    @Test
+    public void customFeedbackWaitsForPersistedValuesAndDoesNotConfirmFailedWrites() throws Exception {
+        verifySaveFeedback(true);
+    }
+
+    @Test
+    public void defaultFeedbackStillReportsProgressAndSavedPath() throws Exception {
+        verifySaveFeedback(false);
+    }
+
+    private void verifySaveFeedback(boolean customized) throws Exception {
+        Plugin plugin = mock(Plugin.class);
+        Server server = mock(Server.class);
+        Player player = mock(Player.class, withSettings().extraInterfaces(CommandSender.class, Entity.class));
+        Entity entity = (Entity) player;
+        Inventory inventory = mock(Inventory.class);
+        InventoryView view = mock(InventoryView.class);
+        ExecutorService worker = mock(ExecutorService.class);
+        AtomicReference<Runnable> pending = new AtomicReference<>();
+        List<BukkitConfigEditor.Change> changes = new ArrayList<>();
+        List<String> messages = new ArrayList<>();
+        List<TextKey> customMessages = new ArrayList<>();
+        ConfigEditorDocument original = ConfigEditorDocument.fromToml("volume = 0.7");
+        ConfigEditorDocument persisted = ConfigEditorDocument.fromToml("volume = 1.0");
+        AtomicReference<Boolean> fail = new AtomicReference<>(false);
+        when(plugin.getName()).thenReturn("Example");
+        when(plugin.getLogger()).thenReturn(mock(Logger.class));
+        when(plugin.getServer()).thenReturn(server);
+        when(plugin.isEnabled()).thenReturn(true);
+        when(server.getPluginManager()).thenReturn(mock(PluginManager.class));
+        when(server.createInventory(any(InventoryHolder.class), eq(54), anyString())).thenReturn(inventory);
+        when(player.getUniqueId()).thenReturn(UUID.randomUUID());
+        when(player.isOnline()).thenReturn(true);
+        when(((CommandSender) player).hasPermission("example.config")).thenReturn(true);
+        when(player.getOpenInventory()).thenReturn(view);
+        when(view.getTopInventory()).thenReturn(inventory);
+        when(player.openInventory(inventory)).thenReturn(view);
+        doAnswer(invocation -> {
+            pending.set(invocation.getArgument(0));
+            return null;
+        }).when(worker).execute(any(Runnable.class));
+        try (MockedStatic<Bukkit> bukkit = mockStatic(Bukkit.class);
+             MockedStatic<Executors> executors = mockStatic(Executors.class);
+             MockedStatic<FoliaScheduler> scheduler = mockStatic(FoliaScheduler.class);
+             MockedStatic<ComponentMessenger> messenger = mockStatic(ComponentMessenger.class)) {
+            bukkit.when(Bukkit::getItemFactory).thenReturn(mock(ItemFactory.class));
+            executors.when(() -> Executors.newSingleThreadExecutor(any(ThreadFactory.class))).thenReturn(worker);
+            scheduler.when(() -> FoliaScheduler.runEntity(eq(plugin), eq(entity), any(Runnable.class)))
+                    .thenAnswer(invocation -> {
+                        ((Runnable) invocation.getArgument(2)).run();
+                        return true;
+                    });
+            scheduler.when(() -> FoliaScheduler.runEntity(eq(plugin), eq(entity), any(Runnable.class), eq(0L), any(Runnable.class)))
+                    .thenAnswer(invocation -> {
+                        ((Runnable) invocation.getArgument(2)).run();
+                        return true;
+                    });
+            messenger.when(() -> ComponentMessenger.send(eq((CommandSender) player), any(ComponentText.class)))
+                    .thenAnswer(invocation -> {
+                        messages.add(((ComponentText) invocation.getArgument(1)).plain());
+                        return null;
+                    });
+            try (BukkitConfigEditor editor = BukkitConfigEditor.register(plugin, new BukkitConfigEditor.Options(
+                    () -> original, edit -> {
+                        if (fail.get()) {
+                            throw new IOException("File changed externally");
+                        }
+                        return persisted;
+                    }, new BukkitConfigEditor.Presentation("example.config", DirectorMiniMenu.Theme.irisGreen(),
+                    DirectorTextResolver.ENGLISH)))) {
+                if (customized) {
+                    editor.configureFeedback(new BukkitConfigEditor.Feedback(false, (sender, change) -> {
+                        changes.add(change);
+                        return ComponentText.literal("Example > " + change.setting() + ": " + change.before() + " -> " + change.after());
+                    }, (sender, key, arguments) -> {
+                        customMessages.add(key);
+                        return ComponentText.literal("Example > " + DirectorTextResolver.ENGLISH.resolve(key, arguments));
+                    }));
+                }
+                editor.apply(player, original.edit(List.of("volume"), new JsonPrimitive(2.0)), null);
+                assertTrue(changes.isEmpty());
+                assertEquals(customized ? List.of() : List.of("Saving configuration..."), messages);
+                pending.getAndSet(null).run();
+                if (customized) {
+                    assertEquals(List.of(new BukkitConfigEditor.Change("volume", "0.7", "1.0")), changes);
+                    assertEquals(List.of("Example > volume: 0.7 -> 1.0"), messages);
+                    assertTrue(customMessages.isEmpty());
+                } else {
+                    assertEquals(List.of("Saving configuration...", "Saved volume. Changes apply automatically."), messages);
+                }
+                messages.clear();
+                fail.set(true);
+                editor.apply(player, original.edit(List.of("volume"), new JsonPrimitive(2.0)), null);
+                pending.getAndSet(null).run();
+                assertEquals(customized ? 1 : 0, changes.size());
+                if (customized) {
+                    assertEquals(List.of(BukkitConfigMessages.FAILED), customMessages);
+                    assertEquals(List.of("Example > Unable to edit configuration: File changed externally"), messages);
+                } else {
+                    assertEquals(List.of("Saving configuration...", "Unable to edit configuration: File changed externally"), messages);
+                }
+            }
+        }
+    }
+
+    @Test
+    public void directEditingResolvesDefaultedValuesAndRejectsSections() throws IOException {
+        ConfigEditorDocument document = ConfigEditorDocument.fromTomlWithDefaults("[feedback]\nvolume = 0.7\n",
+                "[feedback]\nsound = \"minecraft:ui.button.click\"\nvolume = 0.7\n");
+        assertEquals("minecraft:ui.button.click",
+                BukkitConfigEditor.editableEntry(document, List.of("feedback", "sound")).value().getAsString());
+        assertThrows(IllegalArgumentException.class, () -> BukkitConfigEditor.editableEntry(document, List.of("feedback")));
+        assertThrows(IllegalArgumentException.class, () -> BukkitConfigEditor.editableEntry(document, List.of("feedback", "missing")));
+        assertThrows(IllegalArgumentException.class, () -> BukkitConfigEditor.editableEntry(document, List.of()));
+    }
+
     @Test
     public void closesAnInventoryOpenedWhileTheEditorIsShuttingDown() {
         Plugin plugin = mock(Plugin.class);
