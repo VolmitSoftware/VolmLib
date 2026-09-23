@@ -43,6 +43,12 @@ repositories {
     }
 }
 
+configurations.named('testRuntimeClasspath') {
+    resolutionStrategy.capabilitiesResolution.withCapability('org.lz4:lz4-java') {
+        selectHighestVersion()
+    }
+}
+
 tasks.withType(Test).configureEach {
     useJUnitPlatform()
     systemProperty('net.bytebuddy.experimental', 'true')

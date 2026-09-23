@@ -50,11 +50,17 @@ public class CloverNoiseParityTest {
 
     @Test
     public void threeDimensionalCoordinateGridPreservesExactNoiseBits() {
-        long[] expected = {-4534805072329300766L, 938556028071277557L, -6813256383186365522L,
-                -4452859942568220233L, 5365194784097108235L};
-
-        for (int index = 0; index < SEEDS.length; index++) {
-            assertEquals("seed=" + SEEDS[index], expected[index], coordinateDigest(new CloverNoise(SEEDS[index]), 0));
+        for (long seed : SEEDS) {
+            CloverNoise noise = new CloverNoise(seed);
+            CloverNoiseReference reference = new CloverNoiseReference(seed);
+            for (int index = 0; index < 8192; index++) {
+                double x = ((index * 1580030173L) % 60000000L - 30000000L) / 64D + 0.371D;
+                double y = ((index * 91437L) % 384L - 64L) / 64D + 0.231D;
+                double z = ((index * 59260789L) % 60000000L - 30000000L) / 64D - 0.219D;
+                assertEquals("seed=" + seed + ", index=" + index,
+                        Double.doubleToRawLongBits(reference.noise(x, y, z)),
+                        Double.doubleToRawLongBits(noise.noise(x, y, z)));
+            }
         }
     }
 

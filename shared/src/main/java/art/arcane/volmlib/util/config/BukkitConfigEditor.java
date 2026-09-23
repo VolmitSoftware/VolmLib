@@ -6,6 +6,7 @@ import art.arcane.volmlib.util.director.help.DirectorMiniMenu;
 import art.arcane.volmlib.util.inventorygui.BukkitInventoryShutdown;
 import art.arcane.volmlib.util.localization.LanguageAudience;
 import art.arcane.volmlib.util.localization.MessageArgument;
+import art.arcane.volmlib.util.localization.MessageArgs;
 import art.arcane.volmlib.util.localization.TextKey;
 import art.arcane.volmlib.util.plugin.ComponentMessenger;
 import art.arcane.volmlib.util.plugin.ComponentText;
@@ -50,6 +51,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.function.Consumer;
+import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.logging.Level;
 
@@ -71,6 +73,7 @@ public final class BukkitConfigEditor implements Listener, AutoCloseable {
     private final Map<UUID, Prompt> prompts = new ConcurrentHashMap<>();
     private final Map<UUID, BukkitInventoryShutdown.View> openInventories = new ConcurrentHashMap<>();
     private volatile EditorLayout layout;
+    private volatile Feedback feedback;
     private volatile boolean closed;
 
     private BukkitConfigEditor(Plugin plugin, Options options) {
@@ -93,6 +96,13 @@ public final class BukkitConfigEditor implements Listener, AutoCloseable {
         open(sender, null);
     }
 
+    public synchronized void configureFeedback(Feedback feedback) {
+        if (closed || !sessions.isEmpty()) {
+            throw new IllegalStateException("Configure editor feedback before opening it");
+        }
+        this.feedback = Objects.requireNonNull(feedback, "feedback");
+    }
+
     public void open(CommandSender sender, Consumer<Player> returnAction) {
         Objects.requireNonNull(sender, "sender");
         if (!(sender instanceof Player player)) {
@@ -101,6 +111,56 @@ public final class BukkitConfigEditor implements Listener, AutoCloseable {
             return;
         }
         FoliaScheduler.runEntity(plugin, player, () -> openOwned(player, returnAction));
+    }
+
+    public void edit(Player player, List<String> path, Consumer<Player> returnAction) {
+        List<String> requestedPath = List.copyOf(path);
+        if (requestedPath.isEmpty()) {
+            throw new IllegalArgumentException("A setting path is required");
+        }
+        FoliaScheduler.runEntity(plugin, player, () -> {
+            Session session = startDirectSession(player, returnAction);
+            if (session == null) {
+                return;
+            }
+            session.busy = true;
+            submit(session, options.loader()::load, document -> {
+                session.busy = false;
+                session.view = new View(document, List.of(), 0);
+                try {
+                    ConfigEditorDocument.Entry entry = editableEntry(document, requestedPath);
+                    prompt(session, entry, entryPresentation(requestedPath));
+                } catch (IllegalArgumentException failure) {
+                    failed(session, failure);
+                }
+            });
+        });
+    }
+
+    public void apply(Player player, ConfigEditorDocument.Edit edit, Consumer<Player> returnAction) {
+        Objects.requireNonNull(edit, "edit");
+        FoliaScheduler.runEntity(plugin, player, () -> {
+            Session session = startDirectSession(player, returnAction);
+            if (session != null) {
+                session.view = new View(edit.original(), List.of(), 0);
+                save(session, edit);
+            }
+        });
+    }
+
+    static ConfigEditorDocument.Entry editableEntry(ConfigEditorDocument document, List<String> path) {
+        if (path.isEmpty()) {
+            throw new IllegalArgumentException("A setting path is required");
+        }
+        for (ConfigEditorDocument.Entry entry : document.entries(path.subList(0, path.size() - 1))) {
+            if (entry.path().equals(path)) {
+                if (entry.kind() == ConfigEditorDocument.Kind.TABLE || entry.kind() == ConfigEditorDocument.Kind.TABLE_ARRAY) {
+                    throw new IllegalArgumentException("Choose a setting rather than a section");
+                }
+                return entry;
+            }
+        }
+        throw new IllegalArgumentException("Unknown setting: " + displayPath(path));
     }
 
     public synchronized void configureLayout(EditorLayout layout) {
@@ -201,6 +261,18 @@ public final class BukkitConfigEditor implements Listener, AutoCloseable {
         }
     }
 
+    private Session startDirectSession(Player player, Consumer<Player> returnAction) {
+        if (!allowed(player)) {
+            return null;
+        }
+        cancel(player.getUniqueId());
+        Session session = new Session(player, returnAction);
+        session.direct = true;
+        sessions.put(session.owner, session);
+        show(session, new View(null, List.of(), 0));
+        return active(session) ? session : null;
+    }
+
     private void openOwned(Player player, Consumer<Player> returnAction) {
         if (!allowed(player)) {
             return;
@@ -294,20 +366,24 @@ public final class BukkitConfigEditor implements Listener, AutoCloseable {
                 message(session.player, BukkitConfigMessages.FAILED, MessageArgument.untrusted("reason", reason(failure)));
             }
         } else {
-            Prompt prompt = new Prompt(session, entry);
-            prompts.put(session.player.getUniqueId(), prompt);
-            session.player.closeInventory();
-            message(session.player, BukkitConfigMessages.PROMPT,
-                    MessageArgument.untrusted("path", presentation == null ? displayPath(entry.path())
-                            : ComponentText.markup(text(session.player, presentation.name())).plain()));
-            message(session.player, BukkitConfigMessages.CURRENT,
-                    MessageArgument.untrusted("value", preview(entry.value())));
-            message(session.player, inputGuidance(entry.kind(), presentation));
-            if (!FoliaScheduler.runEntity(plugin, session.player, () -> expire(prompt), PROMPT_TICKS,
-                    () -> prompts.remove(session.player.getUniqueId(), prompt))) {
-                prompts.remove(session.player.getUniqueId(), prompt);
-                cancel(session.player.getUniqueId());
-            }
+            prompt(session, entry, presentation);
+        }
+    }
+
+    private void prompt(Session session, ConfigEditorDocument.Entry entry, EntryPresentation presentation) {
+        Prompt prompt = new Prompt(session, entry);
+        prompts.put(session.player.getUniqueId(), prompt);
+        session.player.closeInventory();
+        message(session.player, BukkitConfigMessages.PROMPT,
+                MessageArgument.untrusted("path", presentation == null ? displayPath(entry.path())
+                        : ComponentText.markup(text(session.player, presentation.name())).plain()));
+        message(session.player, BukkitConfigMessages.CURRENT,
+                MessageArgument.untrusted("value", preview(entry.value())));
+        message(session.player, inputGuidance(entry.kind(), presentation));
+        if (!FoliaScheduler.runEntity(plugin, session.player, () -> expire(prompt), PROMPT_TICKS,
+                () -> prompts.remove(session.player.getUniqueId(), prompt))) {
+            prompts.remove(session.player.getUniqueId(), prompt);
+            cancel(session.player.getUniqueId());
         }
     }
 
@@ -348,11 +424,22 @@ public final class BukkitConfigEditor implements Listener, AutoCloseable {
             return;
         }
         session.busy = true;
-        message(session.player, BukkitConfigMessages.SAVING);
+        Feedback presentation = feedback;
+        if (presentation == null || presentation.showProgress()) {
+            message(session.player, BukkitConfigMessages.SAVING);
+        }
         submit(session, () -> options.writer().save(edit), document -> {
             session.busy = false;
-            message(session.player, BukkitConfigMessages.SAVED,
-                    MessageArgument.untrusted("path", displayPath(edit.path())));
+            if (presentation == null) {
+                message(session.player, BukkitConfigMessages.SAVED,
+                        MessageArgument.untrusted("path", displayPath(edit.path())));
+            } else {
+                EntryPresentation entry = entryPresentation(edit.path());
+                String name = entry == null ? displayPath(edit.path())
+                        : ComponentText.markup(text(session.player, entry.name())).plain();
+                Change change = new Change(name, preview(edit.expected()), preview(document.value(edit.path())));
+                ComponentMessenger.send(session.player, presentation.saved().apply(session.player, change));
+            }
             show(session, new View(document, session.view.path(), session.view.page()));
         });
     }
@@ -399,6 +486,14 @@ public final class BukkitConfigEditor implements Listener, AutoCloseable {
     private void show(Session session, View requested) {
         Player player = session.player;
         if (!active(session) || !allowed(player)) {
+            return;
+        }
+        if (session.direct && session.view != null) {
+            cancel(session.owner);
+            player.closeInventory();
+            if (session.returnAction != null) {
+                session.returnAction.accept(player);
+            }
             return;
         }
         List<ConfigEditorDocument.Entry> entries = requested.document() == null ? List.of()
@@ -619,6 +714,15 @@ public final class BukkitConfigEditor implements Listener, AutoCloseable {
     }
 
     private void message(Player player, TextKey key, MessageArgument... arguments) {
+        Feedback presentation = feedback;
+        if (presentation != null) {
+            MessageArgs.Builder values = MessageArgs.builder();
+            for (MessageArgument argument : arguments) {
+                values.add(argument);
+            }
+            ComponentMessenger.send(player, presentation.message().format(player, key, values.build()));
+            return;
+        }
         String message = text(player, key, arguments);
         ComponentMessenger.send(player, layout == null ? styled(message, options.presentation().theme().description())
                 : styledMarkup(message, options.presentation().theme().description()));
@@ -746,6 +850,22 @@ public final class BukkitConfigEditor implements Listener, AutoCloseable {
         }
     }
 
+    public record Feedback(boolean showProgress, BiFunction<Player, Change, ComponentText> saved,
+                           MessageFormatter message) {
+        public Feedback {
+            Objects.requireNonNull(saved, "saved");
+            Objects.requireNonNull(message, "message");
+        }
+    }
+
+    public record Change(String setting, String before, String after) {
+    }
+
+    @FunctionalInterface
+    public interface MessageFormatter {
+        ComponentText format(Player player, TextKey key, MessageArgs arguments);
+    }
+
     public record Presentation(String permission, DirectorMiniMenu.Theme theme, DirectorTextResolver textResolver) {
         public Presentation {
             Objects.requireNonNull(permission, "permission");
@@ -805,6 +925,7 @@ public final class BukkitConfigEditor implements Listener, AutoCloseable {
         private final Consumer<Player> returnAction;
         private View view;
         private boolean busy;
+        private boolean direct;
 
         private Session(Player player, Consumer<Player> returnAction) {
             this.player = player;
@@ -849,3 +970,4 @@ public final class BukkitConfigEditor implements Listener, AutoCloseable {
         }
     }
 }
+
