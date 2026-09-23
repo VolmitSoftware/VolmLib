@@ -8,6 +8,8 @@ group = 'com.github.VolmitSoftware.VolmLib'
 TaskProvider<Jar> nativeSources = tasks.register('nativeSources', Jar) {
     archiveBaseName = 'native-minecraft26_2-sources'
     from('src/main/java')
+    from('src/26.2/java') { into('versions/26.2') }
+    from('src/26.3/java') { into('versions/26.3') }
     from('src/modded/java') { into('modded') }
     from('src/fabric/java') { into('fabric') }
     from('src/forge/java') { into('forge') }

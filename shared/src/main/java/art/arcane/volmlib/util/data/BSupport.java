@@ -399,8 +399,9 @@ public abstract class BSupport<P> {
             return onto.equals(CACTUS) || onto.equals(SAND) || onto.equals(RED_SAND);
         }
 
-        if ((onto.equals(CRIMSON_NYLIUM) || onto.equals(WARPED_NYLIUM)) &&
-                (mat.equals(CRIMSON_FUNGUS) || mat.equals(CRIMSON_ROOTS) || mat.equals(WARPED_FUNGUS) || mat.equals(WARPED_ROOTS))) {
+        if ((onto.equals(CRIMSON_NYLIUM) || onto.equals(WARPED_NYLIUM) || onto.equals(SOUL_SOIL)) &&
+                (mat.equals(CRIMSON_FUNGUS) || mat.equals(CRIMSON_ROOTS) || mat.equals(WARPED_FUNGUS)
+                        || mat.equals(WARPED_ROOTS) || mat.equals(NETHER_SPROUTS))) {
             return true;
         }
 
@@ -595,6 +596,16 @@ public abstract class BSupport<P> {
         }
 
         return null;
+    }
+
+    public BlockData decodeBlockData(String key) {
+        String normalized = key.trim();
+        BlockData direct = resolveDirectKey(normalized);
+        if (direct != null) {
+            return direct;
+        }
+        BlockData external = resolveExternalBlockData(normalized);
+        return external == null ? Bukkit.createBlockData(normalized) : external;
     }
 
     public BlockData getNoCompat(String bdxf) {

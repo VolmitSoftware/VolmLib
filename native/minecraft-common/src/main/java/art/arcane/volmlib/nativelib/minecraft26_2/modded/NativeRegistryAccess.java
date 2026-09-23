@@ -28,7 +28,7 @@ import net.minecraft.core.Registry;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.Identifier;
-import net.minecraft.server.MinecraftServer;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.enchantment.Enchantment;
@@ -48,12 +48,14 @@ import java.util.function.Consumer;
 
 public final class NativeRegistryAccess {
 
-    private final Supplier<NativeModdedServer> server;
+    private final Supplier<HolderLookup.Provider> registries;
+    private final Supplier<HolderLookup.Provider> reloadableRegistries;
     private final Consumer<String> warnings;
 
-    public NativeRegistryAccess(Supplier<NativeModdedServer> server, Consumer<String> warnings) {
-        this.server = server;
-        this.warnings = warnings;
+    public NativeRegistryAccess(Configuration configuration) {
+        registries = configuration.registries();
+        reloadableRegistries = configuration.reloadableRegistries();
+        warnings = configuration.warnings();
     }
 
     public NativeBlockState deepSlateOre(NativeBlockState block, NativeBlockState ore) {
@@ -66,11 +68,12 @@ public final class NativeRegistryAccess {
         if (identifier == null) {
             return null;
         }
-        Registry<Biome> registry = biomeRegistry();
+        HolderLookup.RegistryLookup<Biome> registry = registry(Registries.BIOME);
         if (registry == null) {
             return null;
         }
-        Biome biome = registry.getValue(identifier);
+        Biome biome = registry.get(ResourceKey.create(Registries.BIOME, identifier))
+                .map(holder -> holder.value()).orElse(null);
         return biome == null ? null : ModdedBiome.of(biome, identifier.toString());
     }
 
@@ -103,28 +106,24 @@ public final class NativeRegistryAccess {
 
     public List<String> biomeKeys() {
         List<String> keys = new ArrayList<>();
-        Registry<Biome> registry = biomeRegistry();
+        HolderLookup.RegistryLookup<Biome> registry = registry(Registries.BIOME);
         if (registry == null) {
             warnings.accept("biome");
             return keys;
         }
-        for (Identifier identifier : registry.keySet()) {
-            keys.add(identifier.toString());
-        }
+        registry.listElementIds().forEach(key -> keys.add(key.identifier().toString()));
         return keys;
     }
 
     public List<String> structureKeys() {
         List<String> keys = new ArrayList<>();
-        NativeModdedServer host = server.get();
-        MinecraftServer instance = host == null ? null : host.server();
-        if (instance == null) {
+        HolderLookup.Provider access = registries.get();
+        if (access == null) {
             warnings.accept("structure");
             return keys;
         }
-        for (Identifier identifier : instance.registryAccess().lookupOrThrow(Registries.STRUCTURE).keySet()) {
-            keys.add(identifier.toString());
-        }
+        access.lookupOrThrow(Registries.STRUCTURE).listElementIds()
+                .forEach(key -> keys.add(key.identifier().toString()));
         return keys;
     }
 
@@ -146,14 +145,12 @@ public final class NativeRegistryAccess {
 
     public List<String> enchantmentKeys() {
         List<String> keys = new ArrayList<>();
-        Registry<Enchantment> registry = enchantmentRegistry();
+        HolderLookup.RegistryLookup<Enchantment> registry = registry(Registries.ENCHANTMENT);
         if (registry == null) {
             warnings.accept("enchantment");
             return keys;
         }
-        for (Identifier identifier : registry.keySet()) {
-            keys.add(identifier.toString());
-        }
+        registry.listElementIds().forEach(key -> keys.add(key.identifier().toString()));
         return keys;
     }
 
@@ -167,14 +164,12 @@ public final class NativeRegistryAccess {
 
     public List<String> lootTableKeys() {
         List<String> keys = new ArrayList<>();
-        NativeModdedServer host = server.get();
-        MinecraftServer instance = host == null ? null : host.server();
-        if (instance == null) {
+        HolderLookup.Provider access = reloadableRegistries.get();
+        if (access == null) {
             warnings.accept("loot table");
             return keys;
         }
-        HolderLookup.RegistryLookup<LootTable> registry = instance.reloadableRegistries().lookup()
-                .lookupOrThrow(Registries.LOOT_TABLE);
+        HolderLookup.RegistryLookup<LootTable> registry = access.lookupOrThrow(Registries.LOOT_TABLE);
         registry.listElementIds().forEach(key -> keys.add(key.identifier().toString()));
         return keys;
     }
@@ -205,22 +200,9 @@ public final class NativeRegistryAccess {
         return signature.toString();
     }
 
-    private Registry<Biome> biomeRegistry() {
-        NativeModdedServer host = server.get();
-        MinecraftServer instance = host == null ? null : host.server();
-        if (instance == null) {
-            return null;
-        }
-        return instance.registryAccess().lookupOrThrow(Registries.BIOME);
-    }
-
-    private Registry<Enchantment> enchantmentRegistry() {
-        NativeModdedServer host = server.get();
-        MinecraftServer instance = host == null ? null : host.server();
-        if (instance == null) {
-            return null;
-        }
-        return instance.registryAccess().lookupOrThrow(Registries.ENCHANTMENT);
+    private <T> HolderLookup.RegistryLookup<T> registry(ResourceKey<? extends Registry<? extends T>> key) {
+        HolderLookup.Provider access = registries.get();
+        return access == null ? null : access.lookupOrThrow(key);
     }
 
     private static <T extends Comparable<T>> NativeBlockProperty convertProperty(Property<T> property, BlockState defaultState) {
@@ -238,5 +220,10 @@ public final class NativeRegistryAccess {
             allowedValues.add(property.getName(value));
         }
         return new NativeBlockProperty(property.getName(), "string", property.getName(defaultValue), List.copyOf(allowedValues), null);
+    }
+
+    public record Configuration(Supplier<HolderLookup.Provider> registries,
+                                Supplier<HolderLookup.Provider> reloadableRegistries,
+                                Consumer<String> warnings) {
     }
 }

@@ -29,17 +29,16 @@ import lombok.Getter;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
+import java.util.Objects;
 
 public abstract class RawMatter<T> extends PaletteOrHunk<T> implements MatterSlice<T> {
-    protected final KMap<Class<?>, MatterWriter<?, T>> writers;
-    protected final KMap<Class<?>, MatterReader<?, T>> readers;
+    private volatile KMap<Class<?>, MatterWriter<?, T>> writers;
+    private volatile KMap<Class<?>, MatterReader<?, T>> readers;
     @Getter
     private final Class<T> type;
 
     public RawMatter(int width, int height, int depth, Class<T> type) {
         super(width, height, depth, true, () -> new MappedHunk<>(width, height, depth));
-        writers = new KMap<>();
-        readers = new KMap<>();
         this.type = type;
     }
 
@@ -53,22 +52,32 @@ public abstract class RawMatter<T> extends PaletteOrHunk<T> implements MatterSli
         MatterSlice.super.set(x, y, z, value);
     }
 
-    protected <W> void registerWriter(Class<W> mediumType, MatterWriter<W, T> injector) {
+    protected synchronized <W> void registerWriter(Class<W> mediumType, MatterWriter<W, T> injector) {
+        if (writers == null) {
+            writers = new KMap<>();
+        }
         writers.put(mediumType, injector);
     }
 
-    protected <W> void registerReader(Class<W> mediumType, MatterReader<W, T> injector) {
+    protected synchronized <W> void registerReader(Class<W> mediumType, MatterReader<W, T> injector) {
+        if (readers == null) {
+            readers = new KMap<>();
+        }
         readers.put(mediumType, injector);
     }
 
     @Override
     public <W> MatterWriter<W, T> writeInto(Class<W> mediumType) {
-        return (MatterWriter<W, T>) writers.get(mediumType);
+        Objects.requireNonNull(mediumType, "mediumType");
+        KMap<Class<?>, MatterWriter<?, T>> registered = writers;
+        return registered == null ? null : (MatterWriter<W, T>) registered.get(mediumType);
     }
 
     @Override
     public <W> MatterReader<W, T> readFrom(Class<W> mediumType) {
-        return (MatterReader<W, T>) readers.get(mediumType);
+        Objects.requireNonNull(mediumType, "mediumType");
+        KMap<Class<?>, MatterReader<?, T>> registered = readers;
+        return registered == null ? null : (MatterReader<W, T>) registered.get(mediumType);
     }
 
     @Override

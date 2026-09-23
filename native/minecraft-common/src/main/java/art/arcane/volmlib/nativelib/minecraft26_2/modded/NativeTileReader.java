@@ -22,11 +22,11 @@ import art.arcane.volmlib.util.collection.KMap;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.Strictness;
-import net.minecraft.core.Registry;
+import net.minecraft.core.HolderLookup;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.Identifier;
-import net.minecraft.server.MinecraftServer;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.item.DyeColor;
 import net.minecraft.world.level.block.entity.BannerPattern;
 
@@ -90,10 +90,10 @@ public final class NativeTileReader {
             Identifier.parse("minecraft:globe"),
             Identifier.parse("minecraft:half_vertical_right"));
 
-    private final Supplier<NativeModdedServer> server;
+    private final Supplier<HolderLookup.Provider> registries;
 
-    public NativeTileReader(Supplier<NativeModdedServer> server) {
-        this.server = server;
+    public NativeTileReader(Supplier<HolderLookup.Provider> registries) {
+        this.registries = registries;
     }
 
     private static final class ReplayInputStream extends InputStream {
@@ -322,13 +322,12 @@ public final class NativeTileReader {
     }
 
     private boolean bannerPatternExists(Identifier key) {
-        NativeModdedServer host = server.get();
-        MinecraftServer instance = host == null ? null : host.server();
-        if (instance == null) {
+        HolderLookup.Provider access = registries.get();
+        if (access == null) {
             return true;
         }
-        Registry<BannerPattern> registry = instance.registryAccess().lookupOrThrow(Registries.BANNER_PATTERN);
-        return registry.containsKey(key);
+        HolderLookup.RegistryLookup<BannerPattern> registry = access.lookupOrThrow(Registries.BANNER_PATTERN);
+        return registry.get(ResourceKey.create(Registries.BANNER_PATTERN, key)).isPresent();
     }
 
     private static KMap<String, Object> readLootable(DataInputStream din) throws IOException {

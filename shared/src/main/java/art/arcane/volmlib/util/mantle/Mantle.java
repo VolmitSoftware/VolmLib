@@ -15,7 +15,10 @@ import art.arcane.volmlib.util.parallel.MultiBurstSupport;
 import org.bukkit.Chunk;
 
 import java.io.File;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -26,6 +29,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Predicate;
 
 /**
  * Shared concrete mantle runtime with plugin hook points for chunk data behavior,
@@ -315,6 +319,45 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
         return get(x >> 5, z >> 5).getOrCreate(x & 31, z & 31).isFlagged(flag);
     }
 
+    @ChunkCoordinates
+    public boolean hasLoadedFlag(int x, int z, MantleFlag flag) {
+        P plate = loadedRegions.get(key(x >> 5, z >> 5));
+        if (plate == null || plate.isClosed()) {
+            return false;
+        }
+        C chunk = plate.get(x & 31, z & 31);
+        return chunk != null && !chunk.isClosed() && chunk.isFlagged(flag);
+    }
+
+    @ChunkCoordinates
+    public boolean withLoadedChunk(int x, int z, Predicate<C> action) {
+        int regionX = x >> 5;
+        int regionZ = z >> 5;
+        long regionKey = key(regionX, regionZ);
+        P plate = loadedRegions.get(regionKey);
+        if (plate == null || plate.isClosed()) {
+            return false;
+        }
+        C chunk = plate.get(x & 31, z & 31);
+        if (chunk == null || chunk.isClosed()) {
+            return false;
+        }
+        synchronized (chunk) {
+            if (!hyperLock.tryLock(regionX, regionZ)) {
+                return false;
+            }
+            try {
+                if (closed.get() || loadedRegions.get(regionKey) != plate || plate.isClosed()
+                        || plate.get(x & 31, z & 31) != chunk || chunk.isClosed()) {
+                    return false;
+                }
+                return action.test(chunk);
+            } finally {
+                hyperLock.unlock(regionX, regionZ);
+            }
+        }
+    }
+
     @BlockCoordinates
     public <T> void set(int x, int y, int z, T t) {
         ensureOpen();
@@ -538,6 +581,44 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
             }
         }
         return Set.copyOf(deferred);
+    }
+
+    public synchronized boolean saveOldestIdleTectonicPlate() {
+        ensureOpen();
+        long cutoff = nowMillis() - USE_STAMP_INTERVAL_MILLIS;
+        List<IdleRegion> candidates = new ArrayList<>(lastUse.size());
+        lastUse.forEach((id, used) -> {
+            if (used < cutoff) {
+                candidates.add(new IdleRegion(id, used));
+            }
+        });
+        candidates.sort(Comparator.comparingLong(IdleRegion::lastUse).thenComparingLong(IdleRegion::id));
+        for (IdleRegion candidate : candidates) {
+            if (Thread.currentThread().isInterrupted()) {
+                return false;
+            }
+            int regionX = CacheKey.keyX(candidate.id());
+            int regionZ = CacheKey.keyZ(candidate.id());
+            if (!hyperLock.tryLock(regionX, regionZ)) {
+                continue;
+            }
+            try {
+                Long used = lastUse.get(candidate.id());
+                if (used == null || used.longValue() != candidate.lastUse()
+                        || !loadedRegions.containsKey(candidate.id())) {
+                    continue;
+                }
+                if (saveTectonicPlateLocked(candidate.id(), System.nanoTime())) {
+                    return true;
+                }
+            } finally {
+                hyperLock.unlock(regionX, regionZ);
+            }
+        }
+        return false;
+    }
+
+    private record IdleRegion(long id, long lastUse) {
     }
 
     public void deleteChunkSlice(int x, int z, Class<?> type) {

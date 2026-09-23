@@ -47,14 +47,22 @@ public class Mantle<M> extends art.arcane.volmlib.util.mantle.Mantle<TectonicPla
 
     @Override
     protected <T> void removeChunkValue(MantleChunk<M> chunk, int x, int y, int z, Class<T> type) {
-        M section = chunk.getOrCreate(y >> 4);
-        adapter().remove(section, x & 15, y & 15, z & 15, type);
+        if (chunk.isClosed()) {
+            throw new IllegalStateException("Chunk is closed!");
+        }
+        M section = chunk.get(y >> 4);
+        if (section != null) {
+            adapter().remove(section, x & 15, y & 15, z & 15, type);
+        }
     }
 
     @Override
     protected <T> T getChunkValue(MantleChunk<M> chunk, int x, int y, int z, Class<T> type) {
-        M section = chunk.getOrCreate(y >> 4);
-        return adapter().get(section, x & 15, y & 15, z & 15, type);
+        if (chunk.isClosed()) {
+            throw new IllegalStateException("Chunk is closed!");
+        }
+        M section = chunk.get(y >> 4);
+        return section == null ? null : adapter().get(section, x & 15, y & 15, z & 15, type);
     }
 
     @Override

@@ -105,6 +105,30 @@ public class BSupportTest {
         }
     }
 
+    @Test
+    public void netherGroundCoverAcceptsNyliumAndSoulSoilButRejectsBarrenBlocks() {
+        try (MockedStatic<Bukkit> bukkit = mockStatic(Bukkit.class)) {
+            bukkit.when(() -> Bukkit.createBlockData(Material.AIR)).thenReturn(blockData(Material.AIR));
+            BSupport<Object> support = new BSupport<Object>() {
+            };
+            for (Material plant : new Material[]{Material.CRIMSON_ROOTS, Material.WARPED_ROOTS, Material.NETHER_SPROUTS}) {
+                for (Material substrate : new Material[]{Material.CRIMSON_NYLIUM, Material.WARPED_NYLIUM,
+                        Material.SOUL_SOIL, Material.GRASS_BLOCK, Material.COARSE_DIRT, Material.PODZOL}) {
+                    assertTrue(plant + " on " + substrate, support.canPlaceOnto(plant, substrate));
+                }
+                for (Material substrate : new Material[]{Material.NETHERRACK, Material.SOUL_SAND,
+                        Material.STONE, Material.GRAVEL, Material.AIR, Material.WATER}) {
+                    assertFalse(plant + " on " + substrate, support.canPlaceOnto(plant, substrate));
+                }
+            }
+            for (Material fungus : new Material[]{Material.CRIMSON_FUNGUS, Material.WARPED_FUNGUS}) {
+                for (Material substrate : new Material[]{Material.CRIMSON_NYLIUM, Material.WARPED_NYLIUM, Material.SOUL_SOIL}) {
+                    assertTrue(fungus + " on " + substrate, support.canPlaceOnto(fungus, substrate));
+                }
+            }
+        }
+    }
+
     private static BlockData blockData(Material material) {
         return (BlockData) Proxy.newProxyInstance(
                 BlockData.class.getClassLoader(),

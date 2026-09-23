@@ -135,11 +135,14 @@ final class BukkitVolmitCommand extends Command implements PluginIdentifiableCom
     }
 
     private void refreshCommands(Server server) {
-        if (!FoliaScheduler.isFoliaThreading(server)) {
-            synchronizeCommands(server);
-        }
         Plugin schedulerOwner = schedulerOwner(server);
         if (schedulerOwner == null) {
+            return;
+        }
+        if (!FoliaScheduler.isFoliaThreading(server)) {
+            if (!FoliaScheduler.runGlobal(schedulerOwner, () -> synchronizeCommands(server), 1L)) {
+                plugin.getLogger().warning("Unable to schedule the shared /volmit command tree refresh");
+            }
             return;
         }
         List<Player> players = new ArrayList<>(server.getOnlinePlayers());

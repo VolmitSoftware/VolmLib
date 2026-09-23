@@ -1079,8 +1079,7 @@ public final class NativeStructureSurfaceFitter {
                 }
                 return fluid;
             }
-            if (state.isSolid() && !state.is(Blocks.CACTUS)
-                    || NativeStructureVegetationClearer.isTreeBlock(state)) {
+            if (NativeStructureVegetationClearer.isTreeBlock(state)) {
                 return air;
             }
             world.setBlock(position, air, 2);

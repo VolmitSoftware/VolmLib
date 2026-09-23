@@ -85,8 +85,11 @@ public class MantleChunk<M> extends art.arcane.volmlib.util.mantle.MantleChunk<M
     }
 
     public <T> T get(int x, int y, int z, Class<T> type) {
-        M section = getOrCreate(y >> 4);
-        return adapter().get(section, x & 15, y & 15, z & 15, type);
+        if (isClosed()) {
+            throw new IllegalStateException("Chunk is closed!");
+        }
+        M section = get(y >> 4);
+        return section == null ? null : adapter().get(section, x & 15, y & 15, z & 15, type);
     }
 
     public <T> void iterate(Class<T> type, Consumer4<Integer, Integer, Integer, T> iterator) {

@@ -47,6 +47,8 @@ public final class ModdedBlockState implements NativeBlockState {
     private volatile Boolean foliage;
     private volatile Boolean treeBlock;
     private volatile Boolean decorant;
+    private volatile Boolean updatable;
+    private volatile Boolean storage;
 
     private ModdedBlockState(BlockState state, Map<Property<?>, Comparable<?>> parsedProperties, String key, String deferredPlacementKey) {
         this.state = state;
@@ -203,7 +205,12 @@ public final class ModdedBlockState implements NativeBlockState {
 
     @Override
     public boolean isUpdatable() {
-        return NativeBlockProperties.isUpdatable(state);
+        Boolean cached = updatable;
+        if (cached == null) {
+            cached = NativeBlockProperties.isUpdatable(state);
+            updatable = cached;
+        }
+        return cached;
     }
 
     @Override
@@ -243,7 +250,12 @@ public final class ModdedBlockState implements NativeBlockState {
 
     @Override
     public boolean isStorage() {
-        return NativeBlockProperties.isStorage(state);
+        Boolean cached = storage;
+        if (cached == null) {
+            cached = NativeBlockProperties.isStorage(state);
+            storage = cached;
+        }
+        return cached;
     }
 
     @Override

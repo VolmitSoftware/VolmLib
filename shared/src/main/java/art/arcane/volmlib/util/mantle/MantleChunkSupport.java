@@ -186,8 +186,8 @@ public abstract class MantleChunkSupport<M> extends FlaggedChunk {
         dos.writeByte(sections.length());
         writeFlags(dos);
 
-        ByteArrayOutputStream bytes = new ByteArrayOutputStream(8192);
-        DataOutputStream sub = new DataOutputStream(bytes);
+        ByteArrayOutputStream bytes = null;
+        DataOutputStream sub = null;
         for (int i = 0; i < sections.length(); i++) {
             trimIndex(i);
             if (exists(i)) {
@@ -197,11 +197,17 @@ public abstract class MantleChunkSupport<M> extends FlaggedChunk {
                         dos.writeInt(0);
                         continue;
                     }
+                    if (bytes == null) {
+                        bytes = new ByteArrayOutputStream(8192);
+                        sub = new DataOutputStream(bytes);
+                    }
                     writeSection(section, sub);
                     dos.writeInt(bytes.size());
                     bytes.writeTo(dos);
                 } finally {
-                    bytes.reset();
+                    if (bytes != null) {
+                        bytes.reset();
+                    }
                 }
             } else {
                 dos.writeInt(0);

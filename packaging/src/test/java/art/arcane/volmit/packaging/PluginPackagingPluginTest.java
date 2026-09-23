@@ -121,6 +121,32 @@ class PluginPackagingPluginTest {
     }
 
     @Test
+    void shrinkRetainsAnnotationSelectedNestedDirectorHandlers() throws Exception {
+        fixture(1_000_000, "", false);
+        source("fixture/director/DirectorParameterHandler.java", "package fixture.director; public interface DirectorParameterHandler { String parse(String input); }");
+        source("fixture/director/annotations/Param.java", "package fixture.director.annotations; import java.lang.annotation.*; @Retention(RetentionPolicy.RUNTIME) @Target(ElementType.PARAMETER) public @interface Param { Class<?> customHandler(); }");
+        source("owned/NestedCommand.java", """
+                package owned;
+                public class NestedCommand {
+                    @fixture.director.annotations.Director
+                    public void run(@fixture.director.annotations.Param(customHandler = ModeHandler.class) String mode) {}
+                    private static String parseMode(String input) { return input.toUpperCase(); }
+                    public static final class ModeHandler implements fixture.director.DirectorParameterHandler {
+                        public String parse(String input) { return parseMode(input); }
+                    }
+                }
+                """);
+        runner("jar").build();
+        Path artifact = directory.resolve("build/libs/example.jar");
+        try (URLClassLoader loader = new URLClassLoader(new URL[]{artifact.toUri().toURL()}, null)) {
+            Class<?> command = loader.loadClass("owned.NestedCommand");
+            java.lang.annotation.Annotation parameter = command.getMethod("run", String.class).getParameterAnnotations()[0][0];
+            Class<?> handler = (Class<?>) parameter.annotationType().getMethod("customHandler").invoke(parameter);
+            assertEquals("SPATIAL", handler.getMethod("parse", String.class).invoke(handler.getConstructor().newInstance(), "spatial"));
+        }
+    }
+
+    @Test
     void shrinkRemovesDeadCodeAndKeepsReflectiveRoots() throws IOException {
         fixture(1_000_000, "", false);
         BuildResult result = runner("jar").build();

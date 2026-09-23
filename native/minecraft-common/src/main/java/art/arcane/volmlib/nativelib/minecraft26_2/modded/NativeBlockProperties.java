@@ -162,11 +162,7 @@ public final class NativeBlockProperties {
         if (state == null) {
             return false;
         }
-        return isSolidMaterial(state.getBlock());
-    }
-
-    private static boolean isSolidMaterial(Block block) {
-        return block.defaultBlockState().blocksMotion();
+        return NativeBlockMaterial.isSolid(state.getBlock());
     }
 
     public static boolean isOccluding(BlockState state) {
@@ -239,9 +235,9 @@ public final class NativeBlockProperties {
             return onto == Blocks.CACTUS || onto == Blocks.SAND || onto == Blocks.RED_SAND;
         }
 
-        if ((onto == Blocks.CRIMSON_NYLIUM || onto == Blocks.WARPED_NYLIUM)
+        if ((onto == Blocks.CRIMSON_NYLIUM || onto == Blocks.WARPED_NYLIUM || onto == Blocks.SOUL_SOIL)
                 && (mat == Blocks.CRIMSON_FUNGUS || mat == Blocks.CRIMSON_ROOTS
-                || mat == Blocks.WARPED_FUNGUS || mat == Blocks.WARPED_ROOTS)) {
+                || mat == Blocks.WARPED_FUNGUS || mat == Blocks.WARPED_ROOTS || mat == Blocks.NETHER_SPROUTS)) {
             return true;
         }
 
@@ -260,13 +256,13 @@ public final class NativeBlockProperties {
         }
 
         if (onto == Blocks.DIRT_PATH) {
-            if (!isSolidMaterial(mat)) {
+            if (!NativeBlockMaterial.isSolid(mat)) {
                 return false;
             }
         }
 
         if (PLACE_ONTO_LEAVES.contains(onto)) {
-            return isSolidMaterial(mat);
+            return NativeBlockMaterial.isSolid(mat);
         }
 
         return true;

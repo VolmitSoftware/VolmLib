@@ -21,7 +21,7 @@ public final class NativeBiomeRegistryImpl implements NativeBiomeRegistry<Holder
         this(((CraftServer) Bukkit.getServer()).getServer().registryAccess().lookup(Registries.BIOME).orElse(null));
     }
 
-    private NativeBiomeRegistryImpl(Registry<Biome> registry) {
+    public NativeBiomeRegistryImpl(Registry<Biome> registry) {
         this.registry = registry;
     }
 

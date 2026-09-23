@@ -1000,7 +1000,9 @@ public class CNG {
 
     private static int coordSlot(long a, long b, int salt) {
         long h = (a * 0x9E3779B97F4A7C15L) ^ (b * 0xC2B2AE3D27D4EB4FL) ^ (salt * 0x165667B19E3779F9L);
-        h ^= (h >>> 32);
+        h ^= h >>> 33;
+        h *= 0xFF51AFD7ED558CCDL;
+        h ^= h >>> 33;
         return (int) (h & COORD_CACHE_MASK);
     }
 

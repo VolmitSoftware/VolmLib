@@ -47,6 +47,7 @@ public class BukkitVolmitCommandTest {
     private final Map<String, HelpTopic> helpTopics = new LinkedHashMap<>();
     private final List<Plugin> refreshOwners = new ArrayList<>();
     private final List<Runnable> refreshTasks = new ArrayList<>();
+    private final List<Runnable> globalTasks = new ArrayList<>();
     private Server server;
     private CommandMap commandMap;
     private SimpleServicesManager services;
@@ -91,6 +92,11 @@ public class BukkitVolmitCommandTest {
             if (invocation.getMethod().getName().equals("isFoliaThreading")) {
                 return folia;
             }
+            if (invocation.getMethod().getName().equals("runGlobal")) {
+                assertEquals(1L, ((Long) invocation.getArgument(2)).longValue());
+                globalTasks.add(invocation.getArgument(1));
+                return true;
+            }
             if (invocation.getMethod().getName().equals("runEntity")) {
                 refreshOwners.add(invocation.getArgument(0));
                 refreshTasks.add(invocation.getArgument(2));
@@ -124,9 +130,23 @@ public class BukkitVolmitCommandTest {
         assertTrue(command.execute(sender, "volmit", arguments));
         assertEquals(List.of("fr_FR"), command.tabComplete(sender, "volmit", arguments));
         verify(commandMap, times(1)).register("volmit", "volmit", command);
+        verify(((CommandServer) server), never()).syncCommands();
+        globalTasks.remove(0).run();
         verify(((CommandServer) server), times(1)).syncCommands();
         verify(switcher).commandVolmit(sender, arguments);
         verify(switcher).completeVolmit(sender, arguments);
+    }
+
+    @Test
+    public void paperDefersTreePublicationUntilCommandRemovalIsComplete() {
+        BukkitVolmitCommand command = new BukkitVolmitCommand(plugin, switcher);
+        command.claim();
+        globalTasks.remove(0).run();
+        command.release();
+        assertTrue(commands.isEmpty());
+        verify(((CommandServer) server), times(1)).syncCommands();
+        globalTasks.remove(0).run();
+        verify(((CommandServer) server), times(2)).syncCommands();
     }
 
     @Test

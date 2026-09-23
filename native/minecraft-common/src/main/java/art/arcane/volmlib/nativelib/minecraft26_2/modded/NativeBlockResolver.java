@@ -115,6 +115,19 @@ public final class NativeBlockResolver {
         return null;
     }
 
+    public ModdedBlockState decode(String key) {
+        String normalized = key.trim();
+        try {
+            return strictParse(normalized);
+        } catch (IllegalArgumentException failure) {
+            ModdedBlockState custom = policy.resolveCustomBlock(normalized);
+            if (custom != null) {
+                return custom;
+            }
+            throw failure;
+        }
+    }
+
     public static ModdedBlockState strictParse(String key) {
         Parsed parsed = parseStrict(key);
         return stateFrom(parsed);

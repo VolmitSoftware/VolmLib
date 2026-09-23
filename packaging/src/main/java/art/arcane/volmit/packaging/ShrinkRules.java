@@ -61,6 +61,7 @@ public final class ShrinkRules {
             "-keep class **.bytebuddy.** { *; }",
             "-keep class **.caffeine.** { *; }",
             "-keep class **.director.** { *; }",
+            "-keep class * implements **.director.DirectorParameterHandler { *; }",
             "-keep class **.matter.slices.** { *; }",
             "-keep class **.papi.** { *; }",
             "-keep class **.*API { *; }",
