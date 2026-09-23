@@ -43,6 +43,24 @@ public class JarCompactorTest {
     Path temporaryFolder;
 
     @Test
+    public void cachedReleaseCompressionProducesIdenticalArtifacts() throws Exception {
+        Path original = temporaryFolder.resolve("original.jar");
+        try (JarOutputStream output = new JarOutputStream(Files.newOutputStream(original))) {
+            writeEntry(output, "example/content.txt", "Registry configuration\n".repeat(200).getBytes(StandardCharsets.UTF_8));
+            writeEntry(output, "example/empty.txt", new byte[0]);
+        }
+        Path repeated = temporaryFolder.resolve("repeated.jar");
+        Files.copy(original, repeated);
+        CompactionOptions options = new CompactionOptions(Set.of(), true, true, true,
+                temporaryFolder.resolve("compression-cache"));
+
+        JarCompactor.compact(original.toFile(), options);
+        JarCompactor.compact(repeated.toFile(), options);
+
+        assertArrayEquals(Files.readAllBytes(original), Files.readAllBytes(repeated));
+    }
+
+    @Test
     public void preservesResourcesAndClassLoaderDirectoryDiscovery() throws Exception {
         File artifact = temporaryFolder.resolve("artifact.jar").toFile();
         byte[] content = "Plugin artifact content".getBytes(StandardCharsets.UTF_8);
@@ -54,7 +72,7 @@ public class JarCompactorTest {
             output.closeEntry();
         }
 
-        JarCompactor.compact(artifact, new CompactionOptions(Set.of(), false, false, false));
+        JarCompactor.compact(artifact, new CompactionOptions(Set.of(), false, false, false, temporaryFolder.resolve("compression-cache")));
 
         try (JarFile jar = new JarFile(artifact, false)) {
             assertNotNull(jar.getJarEntry("example/"));
@@ -88,7 +106,7 @@ public class JarCompactorTest {
         Map<String, EntryIdentity> original = identity(artifact);
         long originalBytes = artifact.length();
 
-        JarCompactor.compact(artifact, new CompactionOptions(Set.of(), false, false, false));
+        JarCompactor.compact(artifact, new CompactionOptions(Set.of(), false, false, false, temporaryFolder.resolve("compression-cache")));
 
         assertEquals(original, identity(artifact));
         assertTrue(artifact.length() < originalBytes);
@@ -104,7 +122,7 @@ public class JarCompactorTest {
             }
         }
         byte[] first = Files.readAllBytes(artifact.toPath());
-        JarCompactor.compact(artifact, new CompactionOptions(Set.of(), false, false, false));
+        JarCompactor.compact(artifact, new CompactionOptions(Set.of(), false, false, false, temporaryFolder.resolve("compression-cache")));
         assertArrayEquals(first, Files.readAllBytes(artifact.toPath()));
     }
 
@@ -114,7 +132,7 @@ public class JarCompactorTest {
         byte[] original = "not a zip archive".getBytes(StandardCharsets.UTF_8);
         Files.write(artifact.toPath(), original);
 
-        assertThrows(IOException.class, () -> JarCompactor.compact(artifact, new CompactionOptions(Set.of(), false, false, false)));
+        assertThrows(IOException.class, () -> JarCompactor.compact(artifact, new CompactionOptions(Set.of(), false, false, false, temporaryFolder.resolve("compression-cache"))));
 
         assertArrayEquals(original, Files.readAllBytes(artifact.toPath()));
         assertEquals(1, temporaryFolder.toFile().listFiles().length);
@@ -141,8 +159,8 @@ public class JarCompactorTest {
         corrupt[payloadOffset] ^= 1;
         Files.write(artifact.toPath(), corrupt);
 
-        assertThrows(IOException.class, () -> JarCompactor.compact(artifact, new CompactionOptions(Set.of(), false, false, false)));
-        assertThrows(IOException.class, () -> JarCompactor.compact(artifact, new CompactionOptions(Set.of("value.txt"), false, false, false)));
+        assertThrows(IOException.class, () -> JarCompactor.compact(artifact, new CompactionOptions(Set.of(), false, false, false, temporaryFolder.resolve("compression-cache"))));
+        assertThrows(IOException.class, () -> JarCompactor.compact(artifact, new CompactionOptions(Set.of("value.txt"), false, false, false, temporaryFolder.resolve("compression-cache"))));
 
         assertArrayEquals(corrupt, Files.readAllBytes(artifact.toPath()));
     }
@@ -159,7 +177,7 @@ public class JarCompactorTest {
         }
         byte[] original = Files.readAllBytes(artifact.toPath());
 
-        assertThrows(IOException.class, () -> JarCompactor.compact(artifact, new CompactionOptions(Set.of(), false, false, false)));
+        assertThrows(IOException.class, () -> JarCompactor.compact(artifact, new CompactionOptions(Set.of(), false, false, false, temporaryFolder.resolve("compression-cache"))));
 
         assertArrayEquals(original, Files.readAllBytes(artifact.toPath()));
     }
@@ -174,7 +192,7 @@ public class JarCompactorTest {
             writeEntry(output, "retained/Used.class", new byte[]{1, 2, 3});
         }
 
-        JarCompactor.compact(artifact, new CompactionOptions(Set.of("retained/Unused.class"), false, false, false));
+        JarCompactor.compact(artifact, new CompactionOptions(Set.of("retained/Unused.class"), false, false, false, temporaryFolder.resolve("compression-cache")));
 
         try (JarFile archive = new JarFile(artifact)) {
             Enumeration<JarEntry> entries = archive.entries();
@@ -200,7 +218,7 @@ public class JarCompactorTest {
         Map<String, EntryIdentity> expected = identity(artifact);
         expected.keySet().removeIf(name -> name.endsWith("/"));
 
-        JarCompactor.compact(artifact, new CompactionOptions(Set.of(), true, false, false));
+        JarCompactor.compact(artifact, new CompactionOptions(Set.of(), true, false, false, temporaryFolder.resolve("compression-cache")));
 
         assertEquals(expected, identity(artifact));
         try (JarFile archive = new JarFile(artifact)) {
@@ -218,8 +236,8 @@ public class JarCompactorTest {
         }
         byte[] original = Files.readAllBytes(artifact.toPath());
 
-        assertThrows(IOException.class, () -> JarCompactor.compact(artifact, new CompactionOptions(Set.of("retained/"), false, false, false)));
-        assertThrows(IOException.class, () -> JarCompactor.compact(artifact, new CompactionOptions(Set.of("retained/"), true, false, false)));
+        assertThrows(IOException.class, () -> JarCompactor.compact(artifact, new CompactionOptions(Set.of("retained/"), false, false, false, temporaryFolder.resolve("compression-cache"))));
+        assertThrows(IOException.class, () -> JarCompactor.compact(artifact, new CompactionOptions(Set.of("retained/"), true, false, false, temporaryFolder.resolve("compression-cache"))));
 
         assertArrayEquals(original, Files.readAllBytes(artifact.toPath()));
     }
@@ -238,7 +256,7 @@ public class JarCompactorTest {
         byte[] original = Files.readAllBytes(artifact.toPath());
         Files.setLastModifiedTime(artifact.toPath(), FileTime.fromMillis(42_000L));
 
-        JarCompactor.compact(artifact, new CompactionOptions(Set.of(), false, false, false));
+        JarCompactor.compact(artifact, new CompactionOptions(Set.of(), false, false, false, temporaryFolder.resolve("compression-cache")));
 
         assertArrayEquals(original, Files.readAllBytes(artifact.toPath()));
         assertEquals(42_000L, Files.getLastModifiedTime(artifact.toPath()).toMillis());
@@ -257,7 +275,7 @@ public class JarCompactorTest {
         }
         byte[] original = Files.readAllBytes(artifact.toPath());
 
-        JarCompactor.compact(artifact, new CompactionOptions(Set.of(), false, false, false));
+        JarCompactor.compact(artifact, new CompactionOptions(Set.of(), false, false, false, temporaryFolder.resolve("compression-cache")));
 
         assertArrayEquals(original, Files.readAllBytes(artifact.toPath()));
     }
@@ -276,7 +294,7 @@ public class JarCompactorTest {
                 writeEntry(output, "example/resource.bin", resource);
             }
 
-            JarCompactor.compact(artifact, new CompactionOptions(Set.of(), false, true, release));
+            JarCompactor.compact(artifact, new CompactionOptions(Set.of(), false, true, release, temporaryFolder.resolve("compression-cache")));
 
             try (JarFile archive = new JarFile(artifact)) {
                 assertNotNull(archive.getJarEntry("example/"));
@@ -294,7 +312,7 @@ public class JarCompactorTest {
                 }
             }
             byte[] first = Files.readAllBytes(artifact.toPath());
-            JarCompactor.compact(artifact, new CompactionOptions(Set.of(), false, true, release));
+            JarCompactor.compact(artifact, new CompactionOptions(Set.of(), false, true, release, temporaryFolder.resolve("compression-cache")));
             assertArrayEquals(first, Files.readAllBytes(artifact.toPath()));
         }
     }
@@ -308,7 +326,7 @@ public class JarCompactorTest {
         byte[] original = Files.readAllBytes(artifact.toPath());
 
         assertThrows(IOException.class,
-                () -> JarCompactor.compact(artifact, new CompactionOptions(Set.of(), false, true, false)));
+                () -> JarCompactor.compact(artifact, new CompactionOptions(Set.of(), false, true, false, temporaryFolder.resolve("compression-cache"))));
 
         assertArrayEquals(original, Files.readAllBytes(artifact.toPath()));
         assertEquals(1, temporaryFolder.toFile().listFiles().length);
@@ -336,7 +354,7 @@ public class JarCompactorTest {
         Files.write(artifact.toPath(), corrupt);
 
         IOException failure = assertThrows(IOException.class,
-                () -> JarCompactor.compact(artifact, new CompactionOptions(Set.of(), false, true, true)));
+                () -> JarCompactor.compact(artifact, new CompactionOptions(Set.of(), false, true, true, temporaryFolder.resolve("compression-cache"))));
 
         assertTrue(failure.getMessage().contains("CRC"));
         assertArrayEquals(corrupt, Files.readAllBytes(artifact.toPath()));

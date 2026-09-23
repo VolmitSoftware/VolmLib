@@ -63,7 +63,8 @@ public final class JarCompactor {
         Map<String, EntryIdentity> expected = new LinkedHashMap<>();
         Set<String> names = new HashSet<>();
         byte[] buffer = new byte[BUFFER_BYTES];
-        ReleaseDeflater releaseDeflater = options.releaseCompression() ? new ReleaseDeflater() : null;
+        ReleaseDeflater releaseDeflater = options.releaseCompression()
+                ? new ReleaseDeflater(options.compressionCache()) : null;
         try (ZipFile input = ZipFile.builder().setPath(source).get();
              ZipArchiveOutputStream output = new ZipArchiveOutputStream(destination);
              JarFile archiveMetadata = new JarFile(source.toFile(), false)) {
@@ -187,9 +188,10 @@ public final class JarCompactor {
     }
 
     public record CompactionOptions(Set<String> removedEntries, boolean stripDirectories,
-                                    boolean stripLocalVariables, boolean releaseCompression) {
+                                    boolean stripLocalVariables, boolean releaseCompression, Path compressionCache) {
         public CompactionOptions {
             removedEntries = Set.copyOf(removedEntries);
+            Objects.requireNonNull(compressionCache, "compressionCache");
         }
     }
 

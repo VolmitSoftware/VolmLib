@@ -211,7 +211,7 @@ public class PluginPackagingPlugin implements Plugin<Project> {
             }
             Set<String> removed = JarReachability.unusedClasses(artifact, policy.getPrunePrefixes(), roots);
             JarCompactor.compact(artifact, new JarCompactor.CompactionOptions(removed, policy.isStripDirectories(),
-                    policy.isStripLocalVariables(), policy.isReleaseCompression()));
+                    policy.isStripLocalVariables(), policy.isReleaseCompression(), libraryCache.toPath().resolve("compression")));
             JarArtifactAudit.write(artifact, policy, mode, report, before, removed, shrink);
             task.getLogger().lifecycle("{}: {} -> {} bytes; shrink {} ({} classes, {} tolerated warnings, {} advice classes restored); {} unused dependency classes removed",
                     artifact.getName(), before, artifact.length(), shrink.applied() ? "applied" : shrink.reason(),
