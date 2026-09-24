@@ -338,6 +338,25 @@ public class DataContainer<T> {
         data = data.setBits(bits);
     }
 
+    public void copyTo(int[] positions, T[] destination) {
+        if (destination.length != positions.length) {
+            throw new IllegalArgumentException("Position and destination lengths must match");
+        }
+        for (int position : positions) {
+            Validate.inclusiveBetween(0L, length - 1L, position);
+        }
+        read.lock();
+        try {
+            DataBits localData = data;
+            for (int index = 0; index < positions.length; index++) {
+                int id = logicalId(localData, positions[index]);
+                destination[index] = id <= 0 ? null : palette.get(id);
+            }
+        } finally {
+            read.unlock();
+        }
+    }
+
     public T get(int position) {
         Validate.inclusiveBetween(0L, (length - 1L), position);
         read.lock();

@@ -41,6 +41,42 @@ public class DataContainerMemoryTest {
     };
 
     @Test
+    public void selectedPositionCopiesMatchScalarReadsBeforeAndAfterExpansion() {
+        DataContainer<Integer> container = new DataContainer<>(INTEGERS, 4096);
+        int[] positions = {0, 1, 4, 16, 64, 256, 1024, 4095, 0};
+        Integer[] copied = new Integer[positions.length];
+        for (int position = 0; position < 4096; position++) {
+            if ((position & 0x333) == 0) {
+                container.set(position, position + 1);
+            }
+        }
+        for (int pass = 0; pass < 2; pass++) {
+            Arrays.fill(copied, -1);
+            container.copyTo(positions, copied);
+            for (int index = 0; index < positions.length; index++) {
+                assertEquals(container.get(positions[index]), copied[index]);
+            }
+            container.set(1, 8192);
+            container.set(4095, 4096);
+            container.set(64, null);
+        }
+    }
+
+    @Test
+    public void invalidPositionCopiesDoNotPartiallyOverwriteDestination() {
+        DataContainer<Integer> container = new DataContainer<>(INTEGERS, 4096);
+        container.set(0, 71);
+        Integer[] destination = {1, 2};
+        assertThrows(IllegalArgumentException.class, () -> container.copyTo(new int[]{0, 4096}, destination));
+        assertArrayEquals(new Integer[]{1, 2}, destination);
+        assertThrows(IllegalArgumentException.class, () -> container.copyTo(new int[]{-1, 0}, destination));
+        assertThrows(IllegalArgumentException.class, () -> container.copyTo(new int[]{0}, destination));
+        container.copyTo(new int[0], new Integer[0]);
+        container.set(0, 72);
+        assertEquals(Integer.valueOf(72), container.get(0));
+    }
+
+    @Test
     public void denseWidthsKeepOriginalSerializedPaletteLayout() throws Exception {
         for (int cardinality : new int[]{0, 1, 2, 3, 4, 7, 8, 15, 16, 31, 32, 255}) {
             for (int length : new int[]{4093, 4096}) {
