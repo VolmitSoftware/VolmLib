@@ -49,6 +49,7 @@ public class ReactiveFolder {
     private final Set<File> pendingCreated = new LinkedHashSet<>();
     private final Set<File> pendingChanged = new LinkedHashSet<>();
     private final Set<File> pendingDeleted = new LinkedHashSet<>();
+    private final Set<File> signaledFiles = new HashSet<>();
     private final Map<File, FileState> pendingStates = new HashMap<>();
     private final Map<File, FileState> appliedStates = new HashMap<>();
     private final Map<File, FileState> reconciledStates = new HashMap<>();
@@ -102,6 +103,7 @@ public class ReactiveFolder {
         pendingCreated.clear();
         pendingChanged.clear();
         pendingDeleted.clear();
+        signaledFiles.clear();
         pendingStates.clear();
         appliedStates.clear();
         reconciledStates.clear();
@@ -160,7 +162,7 @@ public class ReactiveFolder {
             }
         }
 
-        if (reconciliationBatchPending) {
+        if (reconciliationBatchPending && signaledFiles.isEmpty()) {
             if (reconciliationCycleActive || reconciliationDigest != null) {
                 return false;
             }
@@ -313,6 +315,7 @@ public class ReactiveFolder {
         pendingCreated.clear();
         pendingChanged.clear();
         pendingDeleted.clear();
+        signaledFiles.clear();
         pendingStates.clear();
         appliedStates.clear();
         reconciledStates.clear();
@@ -326,6 +329,7 @@ public class ReactiveFolder {
     }
 
     private boolean record(File file, Set<File> target) {
+        signaledFiles.add(file);
         FileState current = state(file);
         if (!current.missing()) {
             reconciliationPriority.add(file);
@@ -561,6 +565,7 @@ public class ReactiveFolder {
                 pendingCreated.remove(file);
                 pendingChanged.remove(file);
                 pendingDeleted.remove(file);
+                signaledFiles.remove(file);
                 pendingStates.remove(file);
             } else if (alreadyPending) {
                 pendingStates.put(file, current);
@@ -629,6 +634,7 @@ public class ReactiveFolder {
             pendingCreated.remove(file);
             pendingChanged.remove(file);
             pendingDeleted.remove(file);
+            signaledFiles.remove(file);
             pendingStates.remove(file);
         }
     }
@@ -665,11 +671,13 @@ public class ReactiveFolder {
             pendingCreated.remove(file);
             pendingChanged.remove(file);
             pendingDeleted.remove(file);
+            signaledFiles.remove(file);
             if (current.sameAttributes(emitted)) {
                 pendingStates.remove(file);
                 continue;
             }
             pendingStates.put(file, current);
+            signaledFiles.add(file);
             if (current.missing()) {
                 pendingDeleted.add(file);
                 lastDeletionDetectedAtNanos = now;

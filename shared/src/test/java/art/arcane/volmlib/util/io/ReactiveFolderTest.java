@@ -10,6 +10,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.FileTime;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -367,6 +368,87 @@ public class ReactiveFolderTest {
                             + TimeUnit.MILLISECONDS.toNanos(ReactiveFolder.CONTENT_RECONCILIATION_INTERVAL_MILLIS),
                     deadlineField.getLong(folder)
             );
+        } finally {
+            if (folder != null) {
+                folder.clear();
+            }
+            Files.walk(directory)
+                    .sorted(Comparator.reverseOrder())
+                    .map(Path::toFile)
+                    .forEach(File::delete);
+        }
+    }
+
+    @Test
+    public void signaledSaveDoesNotWaitForAnUnrelatedReconciliationBatch() throws Exception {
+        assertSignaledSaveDuringReconciliation(false);
+    }
+
+    @Test
+    public void failedSignaledSaveRetriesBeforeUnrelatedReconciliationFinishes() throws Exception {
+        assertSignaledSaveDuringReconciliation(true);
+    }
+
+    private void assertSignaledSaveDuringReconciliation(boolean failFirst) throws Exception {
+        Path directory = Files.createTempDirectory("reactive-folder-signaled-batch-test");
+        AtomicLong clock = new AtomicLong();
+        AtomicInteger attempts = new AtomicInteger();
+        Set<File> applied = new HashSet<>();
+        ReactiveFolder folder = null;
+        try {
+            Path silent = directory.resolve("silent.json");
+            Path signaled = directory.resolve("signaled.json");
+            Files.writeString(silent, "0", StandardCharsets.UTF_8);
+            Files.writeString(signaled, "0", StandardCharsets.UTF_8);
+            for (int index = 0; index < 256; index++) {
+                Files.writeString(directory.resolve("unchanged-" + index + ".json"), "0", StandardCharsets.UTF_8);
+            }
+            folder = new ReactiveFolder(directory.toFile(), (created, changed, deleted) -> {
+                if (attempts.incrementAndGet() == 1 && failFirst) {
+                    throw new IllegalStateException("retry signaled save");
+                }
+                applied.addAll(created);
+                applied.addAll(changed);
+                applied.addAll(deleted);
+            }, new KList<>(".json"), new KList<>(), new KList<>(), clock::get);
+            completeReconciliation(folder);
+            Field watcherField = ReactiveFolder.class.getDeclaredField("fw");
+            watcherField.setAccessible(true);
+            ((FolderWatcher) watcherField.get(folder)).clear();
+            FileTime originalTime = Files.getLastModifiedTime(silent);
+            Files.writeString(silent, "1", StandardCharsets.UTF_8);
+            Files.setLastModifiedTime(silent, originalTime);
+            prioritize(folder, silent);
+            clock.set(TimeUnit.MILLISECONDS.toNanos(ReactiveFolder.CONTENT_RECONCILIATION_INTERVAL_MILLIS));
+            assertFalse(folder.check());
+            assertTrue(reconciliationActive(folder));
+
+            FolderWatcher watcher = new FolderWatcher(directory.toFile());
+            watcher.checkModified();
+            watcherField.set(folder, watcher);
+            Files.writeString(signaled, "22", StandardCharsets.UTF_8);
+            clock.set(TimeUnit.MILLISECONDS.toNanos(ReactiveFolder.FULL_SCAN_INTERVAL_MILLIS));
+            assertFalse(folder.check());
+            clock.addAndGet(TimeUnit.MILLISECONDS.toNanos(ReactiveFolder.STABILITY_WINDOW_MILLIS + 1L));
+            if (failFirst) {
+                try {
+                    folder.check();
+                    throw new AssertionError("expected hotload failure");
+                } catch (IllegalStateException expected) {
+                    assertEquals("retry signaled save", expected.getMessage());
+                }
+                assertFalse(folder.check());
+                clock.addAndGet(TimeUnit.MILLISECONDS.toNanos(ReactiveFolder.HOTLOAD_COOLDOWN_MILLIS + 1L));
+            }
+
+            assertTrue(folder.check());
+            assertTrue(reconciliationActive(folder));
+            assertEquals(failFirst ? 2 : 1, attempts.get());
+            assertEquals(Set.of(silent.toFile().getAbsoluteFile(), signaled.toFile().getAbsoluteFile()), applied);
+            completeReconciliation(folder);
+            clock.addAndGet(TimeUnit.MILLISECONDS.toNanos(ReactiveFolder.STABILITY_WINDOW_MILLIS + 1L));
+            assertFalse(folder.check());
+            assertEquals(failFirst ? 2 : 1, attempts.get());
         } finally {
             if (folder != null) {
                 folder.clear();
