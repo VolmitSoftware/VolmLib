@@ -173,6 +173,26 @@ public class PluginPackagingPlugin implements Plugin<Project> {
         });
         verify.configure(task -> task.dependsOn(check));
         producer.configure(task -> task.finalizedBy(check));
+        if (policy.isPacked()) {
+            long packedArtifacts = project.getExtensions().getByType(PluginPackagingExtension.class).getArtifacts()
+                    .stream().filter(PackagingArtifact::isPacked).count();
+            String packedTaskName = packedArtifacts == 1 ? "packedJar" : "packed" + capitalize(policy.getName()) + "Jar";
+            TaskProvider<PackedJar> packed = project.getTasks().register(packedTaskName, PackedJar.class, task -> {
+                task.setGroup("build");
+                task.setDescription("Selects the smaller ordinary or embedded XZ distribution for " + policy.getName() + ".");
+                task.dependsOn(check);
+                task.getInputJar().set(producer.flatMap(AbstractArchiveTask::getArchiveFile));
+                task.getMaximumBytes().set(mode.development() ? Long.MAX_VALUE : policy.getEffectiveMaximumBytes());
+                task.getEntrypoints().set(policy.getPackedEntrypoints());
+                task.getJarAccessors().set(policy.getPackedJarAccessors());
+                task.getOutputJar().set(project.getLayout().file(producer.flatMap(AbstractArchiveTask::getArchiveFile)
+                        .map(file -> new File(file.getAsFile().getParentFile(),
+                                file.getAsFile().getName().replaceFirst("\\.jar$", "-packed.jar")))));
+            });
+            verify.configure(task -> task.dependsOn(packed));
+            project.getTasks().matching(task -> task.getName().equals("assemble"))
+                    .configureEach(task -> task.dependsOn(packed));
+        }
     }
 
     private String shrinkSkipReason(Project project, PackagingArtifact policy, PackagingMode mode) {

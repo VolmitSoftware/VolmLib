@@ -31,6 +31,9 @@ public class PackagingArtifact implements Named {
     private boolean stripDirectories;
     private boolean stripLocalVariables;
     private boolean releaseCompression;
+    private boolean packed;
+    private List<String> packedEntrypoints = new ArrayList<>();
+    private List<String> packedJarAccessors = new ArrayList<>();
     private List<String> prunePrefixes = new ArrayList<>();
     private List<String> keepPrefixes = new ArrayList<>();
     private List<String> requiredEntries = new ArrayList<>();
@@ -121,6 +124,30 @@ public class PackagingArtifact implements Named {
 
     public void setReleaseCompression(boolean releaseCompression) {
         this.releaseCompression = releaseCompression;
+    }
+
+    public boolean isPacked() {
+        return packed;
+    }
+
+    public void setPacked(boolean packed) {
+        this.packed = packed;
+    }
+
+    public List<String> getPackedEntrypoints() {
+        return packedEntrypoints;
+    }
+
+    public void setPackedEntrypoints(List<String> packedEntrypoints) {
+        this.packedEntrypoints = List.copyOf(packedEntrypoints);
+    }
+
+    public List<String> getPackedJarAccessors() {
+        return packedJarAccessors;
+    }
+
+    public void setPackedJarAccessors(List<String> packedJarAccessors) {
+        this.packedJarAccessors = List.copyOf(packedJarAccessors);
     }
 
     public long getMaximumBytes() {
