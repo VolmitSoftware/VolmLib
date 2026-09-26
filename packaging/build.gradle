@@ -25,6 +25,7 @@ gradlePlugin {
 }
 
 dependencies {
+    implementation('org.tukaani:xz:1.10')
     implementation('org.ow2.asm:asm:9.10.1')
     implementation('org.ow2.asm:asm-commons:9.10.1')
     implementation('org.apache.commons:commons-compress:1.28.0')
@@ -55,5 +56,33 @@ tasks.named('processResources') {
         from("../native/minecraft-common/src/${loader}/resources/META-INF/accesstransformer.cfg") {
             into("META-INF/volmlib/native-access/minecraft26_2/${loader}")
         }
+    }
+}
+
+configurations {
+    packedDecoder
+}
+
+dependencies {
+    packedDecoder('org.tukaani:xz:1.10')
+}
+
+def packedRuntimeTemplate = tasks.register('packedRuntimeTemplate', Jar) {
+    dependsOn(tasks.named('compileJava'))
+    archiveFileName.set('xz-template.jar.bin')
+    destinationDirectory.set(layout.buildDirectory.dir('tmp/packed-template'))
+    from(tasks.named('compileJava').flatMap { it.destinationDirectory }) {
+        include('art/arcane/volmit/packaging/runtime/**')
+    }
+    from({ configurations.packedDecoder.collect { zipTree(it) } }) {
+        include('org/tukaani/xz/**/*.class')
+    }
+    preserveFileTimestamps = false
+    reproducibleFileOrder = true
+}
+
+tasks.named('processResources') {
+    from(packedRuntimeTemplate) {
+        into('META-INF/volmit')
     }
 }

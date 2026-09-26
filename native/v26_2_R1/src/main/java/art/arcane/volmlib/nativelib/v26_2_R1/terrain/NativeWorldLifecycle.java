@@ -23,6 +23,7 @@ import org.bukkit.generator.ChunkGenerator;
 import org.bukkit.plugin.Plugin;
 
 import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Field;
 import art.arcane.volmlib.nativelib.terrain.NativeWorldLifecyclePolicy;
 import art.arcane.volmlib.nativelib.terrain.NativeWorldLifecyclePolicies;
 import art.arcane.volmlib.nativelib.terrain.NativeWorldLifecycleFactory;
@@ -50,6 +51,10 @@ public final class NativeWorldLifecycle implements NativeWorldLifecycleFactory.C
     private volatile ResettableClassFileTransformer serverLevelTransformer;
     private volatile ResettableClassFileTransformer pluginClassLoaderTransformer;
     private boolean pluginClassLoaderCloseDeferred;
+    private ResettableClassFileTransformer serverStorageCloseTransformer;
+    private Object trackedServerStorage;
+    private volatile AtomicBoolean serverStorageClosed;
+    private ServerShutdownBoundary serverShutdownBoundary;
 
     public NativeWorldLifecycle(NativeWorldLifecyclePolicy policy, String generatorClassName) {
         this.policy = Objects.requireNonNull(policy, "policy");
@@ -63,10 +68,11 @@ public final class NativeWorldLifecycle implements NativeWorldLifecycleFactory.C
             }
             try {
                 policy.requireClassLoaderCloseDeferral();
+                installServerStorageBoundary();
                 NativeWorldLifecyclePolicies.register(policy);
                 Class<?> loaderCloseType = policy.getClass().getClassLoader().getClass()
                         .getMethod("close").getDeclaringClass();
-                PluginClassLoaderInjectionListener loaderListener = new PluginClassLoaderInjectionListener();
+                LifecycleInjectionListener loaderListener = new LifecycleInjectionListener();
                 pluginClassLoaderTransformer = new AgentBuilder.Default()
                         .disableClassFormatChanges()
                         .with(AgentBuilder.RedefinitionStrategy.RETRANSFORMATION)
@@ -115,6 +121,11 @@ public final class NativeWorldLifecycle implements NativeWorldLifecycleFactory.C
             } catch (Throwable e) {
                 NativeWorldLifecyclePolicies.unregister(policy);
                 policy.reportFailure("Failed to inject Bukkit", e);
+                try {
+                    releaseServerShutdownBoundary();
+                } catch (RuntimeException cleanupFailure) {
+                    policy.reportFailure("Failed to remove the server storage shutdown boundary", cleanupFailure);
+                }
                 ResettableClassFileTransformer partialServerLevel = serverLevelTransformer;
                 ResettableClassFileTransformer partialStorageAccess = levelStorageAccessTransformer;
                 ResettableClassFileTransformer partialPluginClassLoader = pluginClassLoaderTransformer;
@@ -183,11 +194,19 @@ public final class NativeWorldLifecycle implements NativeWorldLifecycleFactory.C
     }
 
     public ServerShutdownBoundary createServerShutdownBoundary() {
-        MinecraftServer server = ((CraftServer) Bukkit.getServer()).getServer();
-        return new ServerShutdownBoundary(
-                () -> server.hasFullyShutdown,
-                server.getRunningThread()
-        );
+        synchronized (injected) {
+            if (serverShutdownBoundary != null) {
+                return serverShutdownBoundary;
+            }
+            MinecraftServer server = ((CraftServer) Bukkit.getServer()).getServer();
+            if (hasFullShutdownFlag()) {
+                serverShutdownBoundary = new ServerShutdownBoundary(
+                        () -> server.hasFullyShutdown, server.getRunningThread());
+                return serverShutdownBoundary;
+            }
+            serverShutdownBoundary = new ServerShutdownBoundary(this::isServerStorageClosed, server.getRunningThread());
+            return serverShutdownBoundary;
+        }
     }
 
     public void deferPluginClassLoaderClose() {
@@ -210,18 +229,90 @@ public final class NativeWorldLifecycle implements NativeWorldLifecycleFactory.C
             pluginClassLoaderCloseDeferred = false;
         }
         try {
-            if (transformer != null
-                    && !transformer.reset(policy.instrumentation(), AgentBuilder.RedefinitionStrategy.RETRANSFORMATION)) {
-                throw new IllegalStateException("Failed to remove Plugin class loader lifecycle injection");
-            }
+            releaseServerShutdownBoundary();
         } finally {
-            if (releaseLoader) {
-                policy.releaseClassLoader(policy.getClass().getClassLoader());
+            try {
+                if (transformer != null
+                        && !transformer.reset(policy.instrumentation(), AgentBuilder.RedefinitionStrategy.RETRANSFORMATION)) {
+                    throw new IllegalStateException("Failed to remove Plugin class loader lifecycle injection");
+                }
+            } finally {
+                if (releaseLoader) {
+                    policy.releaseClassLoader(policy.getClass().getClassLoader());
+                }
             }
         }
     }
 
-    private static final class PluginClassLoaderInjectionListener extends AgentBuilder.Listener.Adapter {
+    private boolean hasFullShutdownFlag() {
+        try {
+            return MinecraftServer.class.getField("hasFullyShutdown").getType() == boolean.class;
+        } catch (NoSuchFieldException absent) {
+            return false;
+        }
+    }
+
+    private boolean isServerStorageClosed() {
+        AtomicBoolean closed = serverStorageClosed;
+        return closed == null || closed.get();
+    }
+
+    private void installServerStorageBoundary() throws ReflectiveOperationException {
+        if (hasFullShutdownFlag() || serverStorageCloseTransformer != null) {
+            return;
+        }
+        MinecraftServer server = ((CraftServer) Bukkit.getServer()).getServer();
+        Field storageField = MinecraftServer.class.getDeclaredField("storageSource");
+        storageField.setAccessible(true);
+        trackedServerStorage = Objects.requireNonNull(storageField.get(server), "Server storage");
+        Class<?> bridge = Class.forName(policy.classLoaderLifecycleBridgeName(), true,
+                ClassLoader.getSystemClassLoader());
+        serverStorageClosed = (AtomicBoolean) bridge.getMethod("trackServerStorage", Object.class)
+                .invoke(null, trackedServerStorage);
+        LifecycleInjectionListener listener = new LifecycleInjectionListener();
+        serverStorageCloseTransformer = new AgentBuilder.Default()
+                .disableClassFormatChanges()
+                .with(AgentBuilder.RedefinitionStrategy.RETRANSFORMATION)
+                .with(AgentBuilder.RedefinitionStrategy.Listener.ErrorEscalating.FAIL_FAST)
+                .with(listener)
+                .type(ElementMatchers.is(LevelStorageSource.LevelStorageAccess.class))
+                .transform((builder, typeDescription, classLoader, module, protectionDomain) ->
+                        builder.visit(Advice.withCustomMapping()
+                                .bind(BridgeClassName.class, policy.classLoaderLifecycleBridgeName())
+                                .to(ServerStorageCloseAdvice.class)
+                                .on(ElementMatchers.named("close")
+                                        .and(ElementMatchers.takesArguments(0))
+                                        .and(ElementMatchers.returns(void.class)))))
+                .installOn(policy.instrumentation());
+        listener.requireInstalled();
+    }
+
+    private void releaseServerShutdownBoundary() {
+        synchronized (injected) {
+            try {
+                if (serverStorageCloseTransformer != null
+                        && !serverStorageCloseTransformer.reset(policy.instrumentation(),
+                        AgentBuilder.RedefinitionStrategy.RETRANSFORMATION)) {
+                    throw new IllegalStateException("Failed to remove the server storage shutdown boundary");
+                }
+            } finally {
+                serverStorageCloseTransformer = null;
+                if (trackedServerStorage != null) {
+                    try {
+                        Class.forName(policy.classLoaderLifecycleBridgeName(), true, ClassLoader.getSystemClassLoader())
+                                .getMethod("releaseServerStorage", Object.class).invoke(null, trackedServerStorage);
+                    } catch (ReflectiveOperationException failure) {
+                        throw new IllegalStateException("Failed to release the server storage shutdown boundary", failure);
+                    } finally {
+                        trackedServerStorage = null;
+                        serverStorageClosed = null;
+                    }
+                }
+            }
+        }
+    }
+
+    private static final class LifecycleInjectionListener extends AgentBuilder.Listener.Adapter {
         private volatile boolean transformed;
         private volatile Throwable failure;
 
@@ -239,8 +330,17 @@ public final class NativeWorldLifecycle implements NativeWorldLifecycleFactory.C
 
         private void requireInstalled() {
             if (!transformed || failure != null) {
-                throw new IllegalStateException("Plugin class loader lifecycle injection failed", failure);
+                throw new IllegalStateException("Native lifecycle injection failed", failure);
             }
+        }
+    }
+
+    static class ServerStorageCloseAdvice {
+        @Advice.OnMethodExit
+        static void exit(@Advice.This Object storage, @BridgeClassName String bridgeClassName)
+                throws ReflectiveOperationException {
+            Class.forName(bridgeClassName, true, ClassLoader.getSystemClassLoader())
+                    .getMethod("serverStorageClosed", Object.class).invoke(null, storage);
         }
     }
 
@@ -266,7 +366,7 @@ public final class NativeWorldLifecycle implements NativeWorldLifecycleFactory.C
 
     @Retention(RetentionPolicy.RUNTIME)
     @Target(ElementType.PARAMETER)
-    private @interface BridgeClassName {
+    @interface BridgeClassName {
     }
 
     private static class LevelStorageAccessAdvice {
