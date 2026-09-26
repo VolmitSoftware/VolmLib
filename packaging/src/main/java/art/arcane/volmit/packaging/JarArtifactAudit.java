@@ -59,8 +59,8 @@ public final class JarArtifactAudit {
         if (artifact.length() > budget) {
             String overage = "Jar exceeds " + budget + " byte budget: " + artifact.length()
                     + (budget == PackagingArtifact.SPIGOT_CAP_BYTES ? " (Spigot cap)" : "");
-            if (mode.development()) {
-                warnings.add(overage);
+            if (mode.development() || policy.isPacked()) {
+                warnings.add(policy.isPacked() ? overage + "; the budget applies to the selected distribution" : overage);
             } else {
                 errors.add(overage);
             }
@@ -112,6 +112,7 @@ public final class JarArtifactAudit {
         result.put("bytes", artifact.length());
         result.put("maximumBytes", policy.getMaximumBytes());
         result.put("effectiveMaximumBytes", budget);
+        result.put("budgetAppliesTo", policy.isPacked() ? "selected distribution" : "artifact");
         result.put("modded", policy.isModded());
         result.put("stripLocalVariables", policy.isStripLocalVariables());
         result.put("releaseCompression", policy.isReleaseCompression());
