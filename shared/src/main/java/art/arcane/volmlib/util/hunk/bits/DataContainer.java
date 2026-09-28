@@ -27,6 +27,7 @@ import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.util.Arrays;
+import java.util.concurrent.atomic.AtomicLongArray;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
@@ -352,6 +353,52 @@ public class DataContainer<T> {
                 int id = logicalId(localData, positions[index]);
                 destination[index] = id <= 0 ? null : palette.get(id);
             }
+        } finally {
+            read.unlock();
+        }
+    }
+
+    /**
+     * Writes the value of every present position into {@code destination} and leaves absent positions
+     * untouched, with one palette resolution per id, one read per packed word and empty words skipped.
+     *
+     * @return the number of positions written
+     */
+    @SuppressWarnings("unchecked")
+    public int copyPresent(T[] destination) {
+        if (destination.length < length) {
+            throw new IllegalArgumentException("Destination holds " + destination.length + " of " + length + " positions");
+        }
+        read.lock();
+        try {
+            DataBits localData = data;
+            Palette<T> localPalette = palette;
+            Object[] values = new Object[localPalette.size() + 1];
+            for (int id = 1; id < values.length; id++) {
+                values[id] = localPalette.get(id);
+            }
+            int bits = localData.getBits();
+            int valuesPerLong = 64 / bits;
+            long mask = (1L << bits) - 1L;
+            int size = localData.getSize();
+            boolean compact = size != length;
+            AtomicLongArray words = localData.getRaw();
+            int written = 0;
+            for (int word = 0; word < words.length(); word++) {
+                long packed = words.get(word);
+                int position = word * valuesPerLong;
+                int end = Math.min(position + valuesPerLong, size);
+                while (packed != 0L && position < end) {
+                    int id = (int) (packed & mask);
+                    if (id > 0 && id < values.length) {
+                        destination[compact ? expandedPosition(position) : position] = (T) values[id];
+                        written++;
+                    }
+                    packed >>>= bits;
+                    position++;
+                }
+            }
+            return written;
         } finally {
             read.unlock();
         }
