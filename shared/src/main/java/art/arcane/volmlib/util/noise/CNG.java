@@ -1217,6 +1217,15 @@ public class CNG {
         return generator != null && generator.isStatic();
     }
 
+    /**
+     * True when every sample is the same value: the base generator ignores its coordinates and no
+     * child mixes in another field. A fracture only moves the coordinates, so it cannot change that.
+     */
+    public boolean isConstant() {
+        return getClass() == CNG.class && generator != null && generator.isConstant()
+                && (children == null || children.isEmpty());
+    }
+
     private boolean isIdentityPostFastPath() {
         ensureFastPathState();
         return identityPostFastPath;
