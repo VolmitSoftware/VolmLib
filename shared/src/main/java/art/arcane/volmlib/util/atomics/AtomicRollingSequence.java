@@ -1,22 +1,14 @@
 package art.arcane.volmlib.util.atomics;
 
 import art.arcane.volmlib.util.collection.KList;
-import art.arcane.volmlib.util.math.M;
 
+/**
+ * Rolling window of the last {@code size} values. Extremes and the median are read from the window on demand, so
+ * a put costs no more than the underlying {@link AtomicAverage}.
+ */
 public class AtomicRollingSequence extends AtomicAverage {
-    private double median;
-    private double max;
-    private double min;
-    private boolean dirtyMedian;
-    private int dirtyExtremes;
-    private boolean precision;
-
     public AtomicRollingSequence(int size) {
         super(size);
-        median = 0;
-        min = 0;
-        max = 0;
-        setPrecision(false);
     }
 
     public double addLast(int amt) {
@@ -29,61 +21,23 @@ public class AtomicRollingSequence extends AtomicAverage {
         return f;
     }
 
-    public boolean isPrecision() {
-        return precision;
-    }
-
-    public void setPrecision(boolean p) {
-        this.precision = p;
-    }
-
     public double getMin() {
-        if (dirtyExtremes > (isPrecision() ? 0 : values.length())) {
-            resetExtremes();
+        double min = Double.MAX_VALUE;
+        for (int i = 0; i < values.length(); i++) {
+            min = Math.min(min, values.get(i));
         }
-
         return min;
     }
 
     public double getMax() {
-        if (dirtyExtremes > (isPrecision() ? 0 : values.length())) {
-            resetExtremes();
+        double max = -Double.MAX_VALUE;
+        for (int i = 0; i < values.length(); i++) {
+            max = Math.max(max, values.get(i));
         }
-
         return max;
     }
 
     public double getMedian() {
-        if (dirtyMedian) {
-            recalculateMedian();
-        }
-
-        return median;
-    }
-
-    private void recalculateMedian() {
-        median = new KList<Double>().forceAdd(values).sort().middleValue();
-        dirtyMedian = false;
-    }
-
-    public void resetExtremes() {
-        max = Integer.MIN_VALUE;
-        min = Integer.MAX_VALUE;
-
-        for (int i = 0; i < values.length(); i++) {
-            double v = values.get(i);
-            max = M.max(max, v);
-            min = M.min(min, v);
-        }
-
-        dirtyExtremes = 0;
-    }
-
-    public void put(double i) {
-        super.put(i);
-        dirtyMedian = true;
-        dirtyExtremes++;
-        max = M.max(max, i);
-        min = M.min(min, i);
+        return new KList<Double>().forceAdd(values).sort().middleValue();
     }
 }
