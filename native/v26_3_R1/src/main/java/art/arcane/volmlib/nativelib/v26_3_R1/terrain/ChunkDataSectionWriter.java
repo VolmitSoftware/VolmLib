@@ -2,8 +2,13 @@ package art.arcane.volmlib.nativelib.v26_3_R1.terrain;
 
 import art.arcane.volmlib.nativelib.terrain.NativeBlockState;
 import art.arcane.volmlib.nativelib.terrain.NativeBlockVolume;
+import ca.spottedleaf.moonrise.common.list.ShortList;
+import ca.spottedleaf.moonrise.patches.collisions.CollisionUtil;
 import io.netty.buffer.Unpooled;
+import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
+import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.longs.LongArrayList;
+import it.unimi.dsi.fastutil.objects.ObjectIterator;
 import it.unimi.dsi.fastutil.objects.Reference2IntOpenHashMap;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
@@ -15,22 +20,28 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.world.level.chunk.PalettedContainer;
+import net.minecraft.world.level.material.FluidState;
 import org.bukkit.block.data.BlockData;
 import org.bukkit.craftbukkit.block.data.CraftBlockData;
 
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.VarHandle;
 import java.util.Arrays;
 
 /**
  * Copies a stored block volume into chunk sections. A section that still holds only plain air is rebuilt in one
  * pass: palette and packed storage are encoded in the network section layout and loaded with
- * {@link PalettedContainer#read}, then the block counts are recomputed. Any other section takes the per-block
- * path. Block entity changes are replayed afterwards in the per-block visiting order (z, y, x).
+ * {@link PalettedContainer#read}; its block counts are then written from the cell ids already in hand, with the
+ * ticking positions in the order {@link LevelChunkSection#recalcBlockCounts} lists them (falling back to that
+ * recount when the section's count fields cannot be reached). Any other section takes the per-block path. Block
+ * entity changes are replayed afterwards in the per-block visiting order (z, y, x).
  */
 final class ChunkDataSectionWriter {
     private static final int SECTION_CELLS = 4096;
     private static final int MAX_LOCAL_PALETTE = 256;
     private static final int UNWRITTEN = -1;
     private static final BlockState AIR = Blocks.AIR.defaultBlockState();
+    private static final SectionCounts SECTION_COUNTS = SectionCounts.resolve();
 
     private final ChunkAccess access;
     private final NativeBlockVolume data;
@@ -41,6 +52,8 @@ final class ChunkDataSectionWriter {
     private final BlockState[] palette = new BlockState[SECTION_CELLS + 1];
     private final Reference2IntOpenHashMap<BlockState> paletteIds = new Reference2IntOpenHashMap<>();
     private final LongArrayList blockEntityCells = new LongArrayList();
+    private final int[] cellCounts = new int[MAX_LOCAL_PALETTE + 1];
+    private final int[] appearance = new int[MAX_LOCAL_PALETTE + 1];
     private int paletteSize;
     private FriendlyByteBuf buffer;
 
@@ -159,11 +172,12 @@ final class ChunkDataSectionWriter {
             buffer = new FriendlyByteBuf(Unpooled.buffer(8 + 5 * (MAX_LOCAL_PALETTE + 1) + SECTION_CELLS));
         }
         buffer.clear();
+        int bits = 0;
         if (paletteSize == 1) {
             buffer.writeByte(0);
             buffer.writeVarInt(Block.BLOCK_STATE_REGISTRY.getId(palette[0]));
         } else {
-            int bits = Math.max(4, 32 - Integer.numberOfLeadingZeros(paletteSize - 1));
+            bits = Math.max(4, 32 - Integer.numberOfLeadingZeros(paletteSize - 1));
             buffer.writeByte(bits);
             buffer.writeVarInt(paletteSize);
             for (int id = 0; id < paletteSize; id++) {
@@ -181,7 +195,91 @@ final class ChunkDataSectionWriter {
             }
         }
         section.getStates().read(buffer);
-        section.recalcBlockCounts();
+        if (SECTION_COUNTS == null) {
+            section.recalcBlockCounts();
+        } else {
+            writeBlockCounts(section, airId, bits);
+        }
+    }
+
+    /**
+     * The counts {@link LevelChunkSection#recalcBlockCounts} derives from the loaded storage, taken from the cell ids
+     * instead. The recount visits palette ids in the iteration order of a map keyed in first-appearance order and
+     * lists each id's positions in index order; only the ticking list depends on that order, so the map is rebuilt
+     * the same way only when more than one ticking id has to be ordered.
+     */
+    private void writeBlockCounts(LevelChunkSection section, int airId, int bits) {
+        Arrays.fill(cellCounts, 0, paletteSize, 0);
+        int distinct = 0;
+        for (int index = 0; index < SECTION_CELLS; index++) {
+            int id = ids[index] == UNWRITTEN ? airId : ids[index];
+            if (cellCounts[id]++ == 0) {
+                appearance[distinct++] = id;
+            }
+        }
+
+        int nonEmpty = 0;
+        int fluids = 0;
+        int ticking = 0;
+        int tickingFluids = 0;
+        int specialColliding = 0;
+        int tickingIds = 0;
+        int tickingId = UNWRITTEN;
+        for (int id = 0; id < paletteSize; id++) {
+            int count = cellCounts[id];
+            BlockState state = palette[id];
+            if (count == 0 || state.isAir()) {
+                continue;
+            }
+            if (CollisionUtil.isSpecialCollidingBlock(state)) {
+                specialColliding += count;
+            }
+            nonEmpty += count;
+            if (state.isRandomlyTicking()) {
+                ticking += count;
+                tickingIds++;
+                tickingId = id;
+            }
+            FluidState fluid = state.getFluidState();
+            if (!fluid.isEmpty()) {
+                fluids += count;
+                if (fluid.isRandomlyTicking()) {
+                    tickingFluids += count;
+                }
+            }
+        }
+        SECTION_COUNTS.write(section, (short) nonEmpty, (short) fluids, (short) ticking, (short) tickingFluids,
+                (short) specialColliding);
+
+        ShortList tickingBlocks = section.moonrise$getTickingBlockList();
+        tickingBlocks.clear();
+        if (tickingIds == 0) {
+            return;
+        }
+        tickingBlocks.setMinCapacity(ticking);
+        if (tickingIds == 1) {
+            addPositions(tickingBlocks, tickingId);
+            return;
+        }
+        Int2ObjectOpenHashMap<BlockState> recountOrder = new Int2ObjectOpenHashMap<>(bits <= 6 ? 1 << bits : 64);
+        for (int index = 0; index < distinct; index++) {
+            recountOrder.put(appearance[index], palette[appearance[index]]);
+        }
+        ObjectIterator<Int2ObjectMap.Entry<BlockState>> entries = recountOrder.int2ObjectEntrySet().fastIterator();
+        while (entries.hasNext()) {
+            Int2ObjectMap.Entry<BlockState> entry = entries.next();
+            if (!entry.getValue().isAir() && entry.getValue().isRandomlyTicking()) {
+                addPositions(tickingBlocks, entry.getIntKey());
+            }
+        }
+    }
+
+    private void addPositions(ShortList list, int id) {
+        for (int index = 0; index < SECTION_CELLS; index++) {
+            if (ids[index] == id) {
+                list.add((short) index);
+            }
+        }
     }
 
     private void recordBlockEntities(int sectionBlockY) {
@@ -256,6 +354,33 @@ final class ChunkDataSectionWriter {
             } else {
                 access.setBlockEntity(entity);
             }
+        }
+    }
+
+    /** Write access to the section's private count fields; null when this server build does not have them. */
+    private record SectionCounts(VarHandle nonEmpty, VarHandle fluids, VarHandle ticking, VarHandle tickingFluids,
+                                 VarHandle specialColliding) {
+        private static SectionCounts resolve() {
+            try {
+                MethodHandles.Lookup lookup = MethodHandles.privateLookupIn(LevelChunkSection.class, MethodHandles.lookup());
+                return new SectionCounts(
+                        lookup.findVarHandle(LevelChunkSection.class, "nonEmptyBlockCount", short.class),
+                        lookup.findVarHandle(LevelChunkSection.class, "fluidCount", short.class),
+                        lookup.findVarHandle(LevelChunkSection.class, "tickingBlockCount", short.class),
+                        lookup.findVarHandle(LevelChunkSection.class, "tickingFluidCount", short.class),
+                        lookup.findVarHandle(LevelChunkSection.class, "specialCollidingBlocks", short.class));
+            } catch (ReflectiveOperationException | RuntimeException | LinkageError e) {
+                return null;
+            }
+        }
+
+        private void write(LevelChunkSection section, short nonEmptyCount, short fluidCount, short tickingCount,
+                           short tickingFluidCount, short specialCollidingCount) {
+            nonEmpty.set(section, nonEmptyCount);
+            fluids.set(section, fluidCount);
+            ticking.set(section, tickingCount);
+            tickingFluids.set(section, tickingFluidCount);
+            specialColliding.set(section, specialCollidingCount);
         }
     }
 }
