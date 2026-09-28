@@ -101,6 +101,41 @@ public class DataContainerMemoryTest {
     }
 
     @Test
+    public void fullCopiesMatchScalarReadsAcrossCompactLinearAndHashPalettes() throws Exception {
+        for (int cardinality : new int[]{0, 1, 3, 15, 16, 17, 40, 300}) {
+            for (int length : new int[]{4096, 4093, 512}) {
+                DataContainer<Integer> container = new DataContainer<>(INTEGERS, length);
+                Integer[] copied = new Integer[length + 3];
+                for (int pass = 0; pass < 3; pass++) {
+                    Arrays.fill(copied, -7);
+                    container.copyAll(copied);
+                    for (int position = 0; position < length; position++) {
+                        assertEquals("cardinality=" + cardinality + " length=" + length + " pass=" + pass
+                                + " position=" + position, container.get(position), copied[position]);
+                    }
+                    assertEquals(Integer.valueOf(-7), copied[length]);
+                    for (int position = 0; position < length && cardinality > 0; position++) {
+                        boolean aligned = (position & 0x333) == 0;
+                        if (pass == 0 ? aligned : position % (pass + 2) == 0) {
+                            container.set(position, 1000 + position % cardinality);
+                        } else if (pass == 2 && position % 7 == 0) {
+                            container.set(position, null);
+                        }
+                    }
+                }
+                DataContainer<Integer> loaded = new DataContainer<>(
+                        new DataInputStream(new ByteArrayInputStream(container.write())), INTEGERS);
+                Integer[] reloaded = new Integer[length];
+                loaded.copyAll(reloaded);
+                for (int position = 0; position < length; position++) {
+                    assertEquals(container.get(position), reloaded[position]);
+                }
+            }
+        }
+        assertThrows(IllegalArgumentException.class, () -> new DataContainer<>(INTEGERS, 4096).copyAll(new Integer[4095]));
+    }
+
+    @Test
     public void invalidPositionCopiesDoNotPartiallyOverwriteDestination() {
         DataContainer<Integer> container = new DataContainer<>(INTEGERS, 4096);
         container.set(0, 71);
