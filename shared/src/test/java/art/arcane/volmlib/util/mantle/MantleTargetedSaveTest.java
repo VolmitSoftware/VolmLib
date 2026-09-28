@@ -77,6 +77,51 @@ public class MantleTargetedSaveTest {
     }
 
     @Test
+    public void residentLookupsFollowLoadsAndUnloadsAcrossSharedSlots() throws Exception {
+        try (TestRuntime runtime = new TestRuntime(temporaryFolder.newFolder("resident-lookups"))) {
+            int[][] regions = {{0, 0}, {32, 0}, {0, -32}, {1, 1}, {-1, 5}};
+            for (int[] region : regions) {
+                runtime.mantle.getChunk(region[0] << 5, region[1] << 5).flag(MantleFlag.REAL, true);
+            }
+            for (int[] region : regions) {
+                TectonicPlate<TestSection> plate = runtime.mantle.getLoadedRegions().get(Mantle.key(region[0], region[1]));
+                assertSame(plate, runtime.mantle.getLoadedRegion(region[0], region[1]));
+                assertTrue(runtime.mantle.isChunkLoaded(region[0] << 5, region[1] << 5));
+                assertTrue(runtime.mantle.hasLoadedFlag(region[0] << 5, region[1] << 5, MantleFlag.REAL));
+            }
+            assertNull(runtime.mantle.getLoadedRegion(64, 0));
+            assertNull(runtime.mantle.getLoadedRegion(2, 1));
+            assertFalse(runtime.mantle.isChunkLoaded(2 << 5, 1 << 5));
+
+            assertEquals(Set.of(), runtime.mantle.saveIdleTectonicPlates(List.of(Mantle.key(0, 0), Mantle.key(1, 1))));
+            assertNull(runtime.mantle.getLoadedRegion(0, 0));
+            assertNull(runtime.mantle.getLoadedRegion(1, 1));
+            assertFalse(runtime.mantle.hasLoadedFlag(1 << 5, 1 << 5, MantleFlag.REAL));
+            assertSame(runtime.mantle.getLoadedRegions().get(Mantle.key(32, 0)), runtime.mantle.getLoadedRegion(32, 0));
+            assertTrue(runtime.mantle.hasLoadedFlag(32 << 5, 0, MantleFlag.REAL));
+
+            MantleChunk<TestSection> reloaded = runtime.mantle.getChunk(1 << 5, 1 << 5);
+            assertSame(runtime.mantle.getLoadedRegions().get(Mantle.key(1, 1)), runtime.mantle.getLoadedRegion(1, 1));
+            assertSame(reloaded, runtime.mantle.getLoadedRegion(1, 1).get(0, 0));
+        }
+    }
+
+    @Test
+    public void accessAfterATrimStillWithdrawsTheRegionFromUnload() throws Exception {
+        try (TestRuntime runtime = new TestRuntime(temporaryFolder.newFolder("resident-unload-mark"))) {
+            runtime.mantle.getChunk(3, 4);
+            runtime.mantle.getChunk(5, 6);
+            Thread.sleep(5L);
+            runtime.mantle.trim(0L);
+            assertEquals(1, runtime.mantle.getUnloadRegionCount());
+
+            runtime.mantle.getChunk(7, 8);
+
+            assertEquals(0, runtime.mantle.getUnloadRegionCount());
+        }
+    }
+
+    @Test
     public void loadedAccessSkipsSealedPlateWithoutWaitingForItsWrite() throws Exception {
         ExecutorService executor = Executors.newSingleThreadExecutor();
         try (TestRuntime runtime = new TestRuntime(temporaryFolder.newFolder("sealed-loaded-access"))) {

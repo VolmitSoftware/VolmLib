@@ -23,6 +23,10 @@ import art.arcane.volmlib.util.cache.CacheKey;
 import java.io.File;
 
 public final class MantleRegionFiles {
+    private static final int KEY_CACHE_SHIFT = 5;
+    private static final int KEY_CACHE_SPAN = 1 << KEY_CACHE_SHIFT;
+    private static final Long[] KEY_CACHE = new Long[KEY_CACHE_SPAN * KEY_CACHE_SPAN];
+
     private MantleRegionFiles() {
     }
 
@@ -49,7 +53,19 @@ public final class MantleRegionFiles {
         return new File(folder, "p." + key + ".ttp.lz4b");
     }
 
+    /**
+     * Boxed region key, reused from a small direct-mapped cache so hot region lookups do not allocate.
+     * Racing threads may each box their own copy; equal keys stay interchangeable.
+     */
     public static Long key(int x, int z) {
-        return CacheKey.key(x, z);
+        long key = CacheKey.key(x, z);
+        int slot = ((x & (KEY_CACHE_SPAN - 1)) << KEY_CACHE_SHIFT) | (z & (KEY_CACHE_SPAN - 1));
+        Long cached = KEY_CACHE[slot];
+        if (cached != null && cached == key) {
+            return cached;
+        }
+        Long boxed = key;
+        KEY_CACHE[slot] = boxed;
+        return boxed;
     }
 }

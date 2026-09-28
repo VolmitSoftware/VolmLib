@@ -29,6 +29,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicReferenceArray;
 import java.util.function.Predicate;
 
 /**
@@ -42,6 +43,8 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
     private final int lockSize;
     private final int worldHeight;
     private static final long USE_STAMP_INTERVAL_MILLIS = 250L;
+    private static final int RESIDENT_SHIFT = 5;
+    private static final int RESIDENT_MASK = (1 << RESIDENT_SHIFT) - 1;
     private final KMap<Long, Long> lastUse;
     private final KMap<Long, P> loadedRegions;
     private final ConcurrentMap<Long, CompletableFuture<P>> loadingRegions;
@@ -50,6 +53,7 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
     private final MultiBurstSupport ioBurst;
     private final RegionIO<P> regionIO;
     private final KSet<Long> toUnload;
+    private final AtomicReferenceArray<Resident<P>> residents;
 
     private volatile double adjustedIdleDuration;
 
@@ -78,6 +82,7 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
         this.loadingRegions = new ConcurrentHashMap<>();
         this.lastUse = new KMap<>();
         this.toUnload = new KSet<>();
+        this.residents = new AtomicReferenceArray<>(1 << (RESIDENT_SHIFT * 2));
         this.closed = new AtomicBoolean(false);
         this.adjustedIdleDuration = 0;
 
@@ -111,6 +116,9 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
     public void clear() {
         loadedRegions.values().forEach(TectonicPlate::clear);
         loadedRegions.clear();
+        for (int slot = 0; slot < residents.length(); slot++) {
+            residents.set(slot, null);
+        }
         loadingRegions.clear();
         lastUse.clear();
         toUnload.clear();
@@ -301,8 +309,7 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
 
     @RegionCoordinates
     public boolean hasTectonicPlate(int x, int z) {
-        Long k = key(x, z);
-        return loadedRegions.containsKey(k) || fileForRegion(dataFolder, k, true).exists();
+        return getLoadedRegion(x, z) != null || fileForRegion(dataFolder, key(x, z), true).exists();
     }
 
     @ChunkCoordinates
@@ -321,7 +328,7 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
 
     @ChunkCoordinates
     public boolean hasLoadedFlag(int x, int z, MantleFlag flag) {
-        P plate = loadedRegions.get(key(x >> 5, z >> 5));
+        P plate = getLoadedRegion(x >> 5, z >> 5);
         if (plate == null || plate.isClosed()) {
             return false;
         }
@@ -333,11 +340,11 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
     public boolean withLoadedChunk(int x, int z, Predicate<C> action) {
         int regionX = x >> 5;
         int regionZ = z >> 5;
-        long regionKey = key(regionX, regionZ);
-        P plate = loadedRegions.get(regionKey);
+        P plate = getLoadedRegion(regionX, regionZ);
         if (plate == null || plate.isClosed()) {
             return false;
         }
+        Long regionKey = key(regionX, regionZ);
         C chunk = plate.get(x & 31, z & 31);
         if (chunk == null || chunk.isClosed()) {
             return false;
@@ -456,7 +463,7 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
                     nowMillis(),
                     adjustedIdleDuration,
                     hyperLock::withLong,
-                    toUnload::add,
+                    this::markForUnload,
                     this::onDebug,
                     this::onError
             );
@@ -486,7 +493,7 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
                     TectonicPlate::inUse,
                     this::use,
                     this::persistRegion,
-                    (id, m) -> loadedRegions.remove(id, m),
+                    this::removeLoadedRegion,
                     lastUse::remove,
                     toUnload::remove,
                     (id, m) -> "Unloaded Tectonic Plate " + CacheKey.keyX(id) + " " + CacheKey.keyZ(id),
@@ -642,11 +649,11 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
     }
 
     public boolean isLoaded(Chunk chunk) {
-        return loadedRegions.containsKey(key(chunk.getX() >> 5, chunk.getZ() >> 5));
+        return getLoadedRegion(chunk.getX() >> 5, chunk.getZ() >> 5) != null;
     }
 
     public boolean isChunkLoaded(int chunkX, int chunkZ) {
-        return loadedRegions.containsKey(key(chunkX >> 5, chunkZ >> 5));
+        return getLoadedRegion(chunkX >> 5, chunkZ >> 5) != null;
     }
 
     public KMap<Long, P> getLoadedRegions() {
@@ -673,9 +680,19 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
         return loadRegionNow(x, z);
     }
 
+    /**
+     * The resident plate for the region, open or closing, without touching its idle timer.
+     */
     @Override
-    protected P getLoadedRegion(int x, int z) {
-        return loadedRegions.get(key(x, z));
+    public P getLoadedRegion(int x, int z) {
+        Resident<P> resident = residents.get(residentSlot(x, z));
+        if (resident == null) {
+            return null;
+        }
+        if (resident.collided()) {
+            return loadedRegions.get(key(x, z));
+        }
+        return resident.x == x && resident.z == z ? resident.region : null;
     }
 
     @Override
@@ -708,7 +725,16 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
 
     @Override
     protected void markRegionUsed(int x, int z, P region) {
-        use(key(x, z));
+        Resident<P> resident = residents.get(residentSlot(x, z));
+        boolean tracked = resident != null && resident.region == region;
+        if (tracked && !resident.unloadPending && nowMillis() - resident.used < USE_STAMP_INTERVAL_MILLIS) {
+            return;
+        }
+        long used = use(key(x, z));
+        if (tracked) {
+            resident.used = used;
+            resident.unloadPending = false;
+        }
     }
 
     @Override
@@ -778,7 +804,7 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
                     }
 
                     P fallback = createRegion(x, z);
-                    loadedRegions.put(k, fallback);
+                    putLoadedRegion(x, z, k, fallback);
                     onDebug("Created new Tectonic Plate (Due to Empty File) " + x + " " + z);
                     use(k);
                     return fallback;
@@ -790,7 +816,7 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
                         onWarn("Loaded Tectonic Plate " + x + "," + z + " but read it as " + region.getX() + "," + region.getZ() + ". Assuming " + x + "," + z);
                     }
 
-                    loadedRegions.put(k, region);
+                    putLoadedRegion(x, z, k, region);
                     onDebug("Loaded Tectonic Plate " + x + " " + z + " " + file.getName());
                     use(k);
                     return region;
@@ -799,7 +825,7 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
                     onError(e);
 
                     P fallback = createRegion(x, z);
-                    loadedRegions.put(k, fallback);
+                    putLoadedRegion(x, z, k, fallback);
                     onDebug("Created new Tectonic Plate (Due to Load Failure) " + x + " " + z);
                     use(k);
                     return fallback;
@@ -807,24 +833,27 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
             }
 
             P region = createRegion(x, z);
-            loadedRegions.put(k, region);
+            putLoadedRegion(x, z, k, region);
             onDebug("Created new Tectonic Plate " + x + " " + z);
             use(k);
             return region;
         });
     }
 
-    protected void use(long key) {
+    protected long use(Long key) {
         long now = nowMillis();
         Long previous = lastUse.get(key);
+        long stamp = previous == null ? now : previous;
         // Every mantle access lands here; the idle timers work in seconds, so a fresh stamp is
         // only written once the previous one is stale enough to matter.
         if (previous == null || now - previous >= USE_STAMP_INTERVAL_MILLIS) {
             lastUse.put(key, now);
+            stamp = now;
         }
         if (!toUnload.isEmpty()) {
             toUnload.remove(key);
         }
+        return stamp;
     }
 
     protected long nowMillis() {
@@ -899,7 +928,7 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
         try {
             hyperLock.withNasty(CacheKey.keyX(id), CacheKey.keyZ(id), () -> {
                 persistRegion(id, plate);
-                loadedRegions.remove(id, plate);
+                removeLoadedRegion(id, plate);
                 lastUse.remove(id);
                 toUnload.remove(id);
             });
@@ -949,7 +978,7 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
             return false;
         }
 
-        if (loadedRegions.remove(id, plate)) {
+        if (removeLoadedRegion(id, plate)) {
             lastUse.remove(id);
             toUnload.remove(id);
         }
@@ -974,6 +1003,80 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
             plate.reopen();
         } catch (Throwable reopenFailure) {
             failure.addSuppressed(reopenFailure);
+        }
+    }
+
+    private void putLoadedRegion(int x, int z, Long key, P region) {
+        loadedRegions.put(key, region);
+        int slot = residentSlot(x, z);
+        Resident<P> next = new Resident<>(x, z, region);
+        while (true) {
+            Resident<P> current = residents.get(slot);
+            if (current != null && current.collided()) {
+                return;
+            }
+            Resident<P> target = current == null || (current.x == x && current.z == z) ? next : Resident.collision();
+            if (residents.compareAndSet(slot, current, target)) {
+                return;
+            }
+        }
+    }
+
+    private boolean removeLoadedRegion(long id, P region) {
+        if (!loadedRegions.remove(id, region)) {
+            return false;
+        }
+        int slot = residentSlot(CacheKey.keyX(id), CacheKey.keyZ(id));
+        Resident<P> current = residents.get(slot);
+        if (current != null && current.region == region) {
+            residents.compareAndSet(slot, current, null);
+        }
+        return true;
+    }
+
+    private void markForUnload(long id) {
+        toUnload.add(id);
+        int x = CacheKey.keyX(id);
+        int z = CacheKey.keyZ(id);
+        Resident<P> resident = residents.get(residentSlot(x, z));
+        if (resident != null && !resident.collided() && resident.x == x && resident.z == z) {
+            resident.unloadPending = true;
+        }
+    }
+
+    private static int residentSlot(int x, int z) {
+        return ((x & RESIDENT_MASK) << RESIDENT_SHIFT) | (z & RESIDENT_MASK);
+    }
+
+    /**
+     * Direct-mapped mirror of the resident plates. Region keys pack x and z, so their Long hashes
+     * collide along diagonals and tree-ify the map bins; plate lookups on hot paths read this table
+     * instead. A slot two resident regions compete for is marked collided and defers to the map. Each entry also
+     * caches its last use stamp and whether a trim queued it for unload, so repeat accesses skip the use maps.
+     */
+    private static final class Resident<P> {
+        private static final Resident<?> COLLISION = new Resident<>(0, 0, null);
+
+        private final int x;
+        private final int z;
+        private final P region;
+        private volatile long used;
+        private volatile boolean unloadPending;
+
+        private Resident(int x, int z, P region) {
+            this.x = x;
+            this.z = z;
+            this.region = region;
+            this.used = Long.MIN_VALUE / 2;
+        }
+
+        @SuppressWarnings("unchecked")
+        private static <P> Resident<P> collision() {
+            return (Resident<P>) COLLISION;
+        }
+
+        private boolean collided() {
+            return this == COLLISION;
         }
     }
 

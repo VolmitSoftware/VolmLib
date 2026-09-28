@@ -215,6 +215,10 @@ public interface MatterSlice<T> extends HunkLike<T>, Writable<T> {
         int w = getWidth();
         int h = getHeight();
         MatterPalette<T> palette = new MatterPalette<>(this);
+        if (this instanceof MappedHunk<?> mapped) {
+            writeMappedCells(MappedSliceCells.of(mapped), palette, dos, w, h);
+            return;
+        }
         forEachValue((x, y, z, b) -> palette.assign(b));
         palette.writePalette(dos);
         dos.writeBoolean(isMapped());
@@ -227,6 +231,25 @@ public interface MatterSlice<T> extends HunkLike<T>, Writable<T> {
             });
         } else {
             forEachValueIO((x, y, z, b) -> palette.writeNode(b, dos));
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private void writeMappedCells(MappedSliceCells cells, MatterPalette<T> palette, DataOutputStream dos, int w, int h) throws IOException {
+        for (int index = 0; index < cells.size(); index++) {
+            palette.assign((T) cells.value(index));
+        }
+        palette.writePalette(dos);
+        boolean mapped = isMapped();
+        dos.writeBoolean(mapped);
+        if (mapped) {
+            Varint.writeUnsignedVarInt(cells.size(), dos);
+        }
+        for (int index = 0; index < cells.size(); index++) {
+            if (mapped) {
+                Varint.writeUnsignedVarInt(CacheKey.to1D(cells.x(index), cells.y(index), cells.z(index), w, h), dos);
+            }
+            palette.writeNode((T) cells.value(index), dos);
         }
     }
 
