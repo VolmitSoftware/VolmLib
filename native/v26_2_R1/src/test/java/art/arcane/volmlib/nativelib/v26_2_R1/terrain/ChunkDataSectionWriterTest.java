@@ -2,6 +2,7 @@ package art.arcane.volmlib.nativelib.v26_2_R1.terrain;
 
 import art.arcane.volmlib.nativelib.terrain.NativeBlockState;
 import art.arcane.volmlib.nativelib.terrain.NativeBlockVolume;
+import ca.spottedleaf.moonrise.common.list.ShortList;
 import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
@@ -21,6 +22,7 @@ import org.bukkit.craftbukkit.block.data.CraftBlockData;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
@@ -31,6 +33,7 @@ import java.util.Set;
 import java.util.function.IntFunction;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -38,6 +41,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.withSettings;
 
 public class ChunkDataSectionWriterTest {
     private static final int SECTIONS = 6;
@@ -97,9 +101,61 @@ public class ChunkDataSectionWriterTest {
         }
     }
 
-    private static void assertEquivalent(long seed, IntFunction<BlockState> palette, int paletteSize, double nullChance, boolean prepopulate) {
+    @Test
+    public void writtenBlockCountsMatchTheRecount() throws ReflectiveOperationException {
+        Field sectionCounts = ChunkDataSectionWriter.class.getDeclaredField("SECTION_COUNTS");
+        sectionCounts.setAccessible(true);
+        assertNotNull(sectionCounts.get(null));
+        List<BlockState> ticking = new ArrayList<>();
+        List<BlockState> still = new ArrayList<>();
+        for (BlockState state : Block.BLOCK_STATE_REGISTRY) {
+            (state.isRandomlyTicking() ? ticking : still).add(state);
+        }
+        Random pick = new Random(5L);
+        for (int span : new int[]{1, 2, 3, 6, 17, 33, 65, 130, 255}) {
+            List<BlockState> pool = new ArrayList<>();
+            pool.add(Blocks.AIR.defaultBlockState());
+            for (int index = 1; index < span; index++) {
+                List<BlockState> source = pick.nextInt(3) == 0 ? still : ticking;
+                pool.add(source.get(pick.nextInt(source.size())));
+            }
+            for (long seed = 1; seed <= 2; seed++) {
+                assertCountsMatchRecount(span * 100L + seed, pool::get, pool.size(), 0.2D);
+                assertCountsMatchRecount(span * 100L + seed + 50L, pool::get, pool.size(), 0.0D);
+            }
+        }
+    }
+
+    private static void assertCountsMatchRecount(long seed, IntFunction<BlockState> palette, int paletteSize, double nullChance)
+            throws ReflectiveOperationException {
+        FakeChunk chunk = new FakeChunk();
+        assertTrue(new ChunkDataSectionWriter(chunk.access, volume(seed, palette, paletteSize, nullChance), ACCESS_MIN_Y)
+                .write(0, HEIGHT));
+        for (int sectionIndex = 0; sectionIndex < SECTIONS; sectionIndex++) {
+            LevelChunkSection section = chunk.sections[sectionIndex];
+            List<Short> written = countSnapshot(section);
+            section.recalcBlockCounts();
+            assertEquals("seed " + seed + " section " + sectionIndex, countSnapshot(section), written);
+        }
+    }
+
+    private static List<Short> countSnapshot(LevelChunkSection section) throws ReflectiveOperationException {
+        List<Short> snapshot = new ArrayList<>();
+        for (String name : new String[]{"nonEmptyBlockCount", "fluidCount", "tickingBlockCount", "tickingFluidCount",
+                "specialCollidingBlocks"}) {
+            Field field = LevelChunkSection.class.getDeclaredField(name);
+            field.setAccessible(true);
+            snapshot.add(field.getShort(section));
+        }
+        ShortList ticking = section.moonrise$getTickingBlockList();
+        for (int index = 0; index < ticking.size(); index++) {
+            snapshot.add(ticking.getRaw(index));
+        }
+        return snapshot;
+    }
+
+    private static NativeBlockVolume volume(long seed, IntFunction<BlockState> palette, int paletteSize, double nullChance) {
         Random random = new Random(seed);
-        int minY = ACCESS_MIN_Y;
         NativeBlockState[] cells = new NativeBlockState[16 * HEIGHT * 16];
         int[] tops = new int[256];
         Map<BlockState, NativeBlockState> handles = new IdentityHashMap<>();
@@ -119,7 +175,7 @@ public class ChunkDataSectionWriterTest {
                 }
             }
         }
-        NativeBlockVolume volume = new NativeBlockVolume() {
+        return new NativeBlockVolume() {
             @Override
             public NativeBlockState getStoredRaw(int x, int y, int z) {
                 return cells[index(x, y, z)];
@@ -130,6 +186,11 @@ public class ChunkDataSectionWriterTest {
                 return tops[(z << 4) | x];
             }
         };
+    }
+
+    private static void assertEquivalent(long seed, IntFunction<BlockState> palette, int paletteSize, double nullChance, boolean prepopulate) {
+        NativeBlockVolume volume = volume(seed, palette, paletteSize, nullChance);
+        int minY = ACCESS_MIN_Y;
 
         FakeChunk legacy = new FakeChunk();
         FakeChunk bulk = new FakeChunk();
@@ -182,9 +243,9 @@ public class ChunkDataSectionWriterTest {
     }
 
     private static NativeBlockState handle(BlockState state) {
-        CraftBlockData data = mock(CraftBlockData.class);
+        CraftBlockData data = mock(CraftBlockData.class, withSettings().stubOnly());
         when(data.getState()).thenReturn(state);
-        NativeBlockState nativeState = mock(NativeBlockState.class);
+        NativeBlockState nativeState = mock(NativeBlockState.class, withSettings().stubOnly());
         when(nativeState.placementHandle()).thenReturn(data);
         return nativeState;
     }
