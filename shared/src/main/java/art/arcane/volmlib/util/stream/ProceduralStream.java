@@ -25,6 +25,7 @@ import art.arcane.volmlib.util.stream.Significance;
 import art.arcane.volmlib.util.function.Function2;
 import art.arcane.volmlib.util.function.Function3;
 import art.arcane.volmlib.util.function.Function4;
+import art.arcane.volmlib.util.function.NoiseProvider;
 import art.arcane.volmlib.util.hunk.Hunk;
 import art.arcane.volmlib.util.math.RNG;
 import art.arcane.volmlib.util.parallel.BurstExecutorSupport;
@@ -54,24 +55,19 @@ import art.arcane.volmlib.util.stream.convert.SelectionStream;
 import art.arcane.volmlib.util.stream.convert.SignificanceStream;
 import art.arcane.volmlib.util.stream.convert.To3DStream;
 import art.arcane.volmlib.util.stream.interpolation.Interpolated;
+import art.arcane.volmlib.util.stream.sources.DoubleFunctionStream;
 import art.arcane.volmlib.util.stream.sources.FunctionStream;
 import art.arcane.volmlib.util.stream.utility.NullSafeStream;
 import art.arcane.volmlib.util.stream.utility.SynchronizedStream;
 
 import java.util.ArrayList;
-import art.arcane.volmlib.util.VolmLog;
 import java.util.List;
 import java.util.function.Function;
 
 @SuppressWarnings("ALL")
 public interface ProceduralStream<T> extends ProceduralLayer, Interpolated<T> {
-    static ProceduralStream<Double> ofDouble(Function2<Double, Double, Double> f) {
-        try {
-            return of(f, Interpolated.DOUBLE);
-        } catch (IncompatibleClassChangeError e) {
-            VolmLog.severe("Stream", "Failed to create stream for " + f, e);
-            return null;
-        }
+    static ProceduralStream<Double> ofDouble(NoiseProvider f) {
+        return new DoubleFunctionStream(f);
     }
 
     static ProceduralStream<Double> ofDouble(Function3<Double, Double, Double, Double> f) {
