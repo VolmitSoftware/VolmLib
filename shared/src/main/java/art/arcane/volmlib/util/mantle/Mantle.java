@@ -463,7 +463,7 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
                     nowMillis(),
                     adjustedIdleDuration,
                     hyperLock::withLong,
-                    toUnload::add,
+                    this::markForUnload,
                     this::onDebug,
                     this::onError
             );
@@ -727,12 +727,13 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
     protected void markRegionUsed(int x, int z, P region) {
         Resident<P> resident = residents.get(residentSlot(x, z));
         boolean tracked = resident != null && resident.region == region;
-        if (tracked && nowMillis() - resident.used < USE_STAMP_INTERVAL_MILLIS && toUnload.isEmpty()) {
+        if (tracked && !resident.unloadPending && nowMillis() - resident.used < USE_STAMP_INTERVAL_MILLIS) {
             return;
         }
         long used = use(key(x, z));
         if (tracked) {
             resident.used = used;
+            resident.unloadPending = false;
         }
     }
 
@@ -1033,6 +1034,16 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
         return true;
     }
 
+    private void markForUnload(long id) {
+        toUnload.add(id);
+        int x = CacheKey.keyX(id);
+        int z = CacheKey.keyZ(id);
+        Resident<P> resident = residents.get(residentSlot(x, z));
+        if (resident != null && !resident.collided() && resident.x == x && resident.z == z) {
+            resident.unloadPending = true;
+        }
+    }
+
     private static int residentSlot(int x, int z) {
         return ((x & RESIDENT_MASK) << RESIDENT_SHIFT) | (z & RESIDENT_MASK);
     }
@@ -1040,7 +1051,8 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
     /**
      * Direct-mapped mirror of the resident plates. Region keys pack x and z, so their Long hashes
      * collide along diagonals and tree-ify the map bins; plate lookups on hot paths read this table
-     * instead. A slot two resident regions compete for is marked collided and defers to the map.
+     * instead. A slot two resident regions compete for is marked collided and defers to the map. Each entry also
+     * caches its last use stamp and whether a trim queued it for unload, so repeat accesses skip the use maps.
      */
     private static final class Resident<P> {
         private static final Resident<?> COLLISION = new Resident<>(0, 0, null);
@@ -1049,6 +1061,7 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
         private final int z;
         private final P region;
         private volatile long used;
+        private volatile boolean unloadPending;
 
         private Resident(int x, int z, P region) {
             this.x = x;

@@ -107,6 +107,21 @@ public class MantleTargetedSaveTest {
     }
 
     @Test
+    public void accessAfterATrimStillWithdrawsTheRegionFromUnload() throws Exception {
+        try (TestRuntime runtime = new TestRuntime(temporaryFolder.newFolder("resident-unload-mark"))) {
+            runtime.mantle.getChunk(3, 4);
+            runtime.mantle.getChunk(5, 6);
+            Thread.sleep(5L);
+            runtime.mantle.trim(0L);
+            assertEquals(1, runtime.mantle.getUnloadRegionCount());
+
+            runtime.mantle.getChunk(7, 8);
+
+            assertEquals(0, runtime.mantle.getUnloadRegionCount());
+        }
+    }
+
+    @Test
     public void loadedAccessSkipsSealedPlateWithoutWaitingForItsWrite() throws Exception {
         ExecutorService executor = Executors.newSingleThreadExecutor();
         try (TestRuntime runtime = new TestRuntime(temporaryFolder.newFolder("sealed-loaded-access"))) {
