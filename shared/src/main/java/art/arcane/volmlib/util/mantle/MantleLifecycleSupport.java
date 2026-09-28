@@ -58,7 +58,7 @@ public final class MantleLifecycleSupport {
                                         RegionLookup<P> regionLookup,
                                         LongLookup lastUseLookup,
                                         LongPredicate unloadContains,
-                                        RegionInUse<P> regionInUse,
+                                        RegionSeal<P> regionSeal,
                                         LongConsumer touch,
                                         RegionPersist<P> persist,
                                         RegionRemove<P> removeRegion,
@@ -91,7 +91,7 @@ public final class MantleLifecycleSupport {
                         return;
                     }
 
-                    if (regionInUse.test(region)) {
+                    if (!regionSeal.trySeal(region)) {
                         if (debug != null && inUseMessage != null) {
                             debug.accept(inUseMessage.message(id, region));
                         }
@@ -177,9 +177,12 @@ public final class MantleLifecycleSupport {
         P get(long id);
     }
 
+    /**
+     * Closes an idle region for its unload, or returns false and leaves a region in use untouched.
+     */
     @FunctionalInterface
-    public interface RegionInUse<P> {
-        boolean test(P region);
+    public interface RegionSeal<P> {
+        boolean trySeal(P region);
     }
 
     @FunctionalInterface

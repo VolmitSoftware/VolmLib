@@ -142,11 +142,36 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
 
     @ChunkCoordinates
     public C getChunk(int x, int z) {
-        return get(x >> 5, z >> 5).getOrCreate(x & 31, z & 31);
+        P plate = pinRegion(x >> 5, z >> 5);
+        try {
+            return plate.getOrCreatePinned(x & 31, z & 31);
+        } finally {
+            plate.unpin();
+        }
+    }
+
+    /**
+     * The chunk with a use already taken for the caller, who releases it. A use taken on a {@link #getChunk}
+     * result fails when the plate was saved in between; this one cannot.
+     */
+    @ChunkCoordinates
+    public C useChunk(int x, int z) {
+        P plate = pinRegion(x >> 5, z >> 5);
+        try {
+            C chunk = plate.getOrCreatePinned(x & 31, z & 31);
+            chunk.use();
+            return chunk;
+        } finally {
+            plate.unpin();
+        }
     }
 
     public C getChunk(Chunk chunk) {
         return getChunk(chunk.getX(), chunk.getZ());
+    }
+
+    public C useChunk(Chunk chunk) {
+        return useChunk(chunk.getX(), chunk.getZ());
     }
 
     public void getChunks(final int minChunkX,
@@ -181,7 +206,7 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
                         final int realX = rX << 5;
                         final int realZ = rZ << 5;
 
-                        visitRegionChunks(get(rX, rZ), rX, rZ, minX, maxX, minZ, maxZ, realX, realZ, consumer);
+                        visitPinnedRegion(pinRegion(rX, rZ), minX, maxX, minZ, maxZ, realX, realZ, consumer);
                     }
                 }
                 return;
@@ -214,6 +239,13 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
                                 throw err;
                             }
                             throw new RuntimeException(pending);
+                        }
+
+                        P resident = getLoadedRegion(rX, rZ);
+                        if (resident != null && resident.pin()) {
+                            markRegionUsed(rX, rZ, resident);
+                            visitPinnedRegion(resident, minX, maxX, minZ, maxZ, realX, realZ, consumer);
+                            continue;
                         }
 
                         while (true) {
@@ -269,42 +301,40 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
 
     private void visitRegionChunks(P region, int rX, int rZ, int minX, int maxX, int minZ, int maxZ,
                                    int realX, int realZ, Consumer3<Integer, Integer, C> consumer) {
-        int attempts = 0;
-        P plate = region;
-        while (true) {
-            C zero = plate.getOrCreate(0, 0);
-            try {
-                zero.use();
-            } catch (IllegalStateException closed) {
-                String message = closed.getMessage();
-                if (attempts++ >= 8 || message == null || !message.contains("Chunk is closed")) {
-                    throw closed;
-                }
+        P plate = region.pin() ? region : pinRegion(rX, rZ);
+        visitPinnedRegion(plate, minX, maxX, minZ, maxZ, realX, realZ, consumer);
+    }
 
-                plate = get(rX, rZ);
-                continue;
-            }
-
-            try {
-                for (int xx = minX; xx <= maxX; xx++) {
-                    for (int zz = minZ; zz <= maxZ; zz++) {
-                        consumer.accept(realX + xx, realZ + zz, plate.getOrCreate(xx, zz));
-                    }
+    private void visitPinnedRegion(P plate, int minX, int maxX, int minZ, int maxZ,
+                                   int realX, int realZ, Consumer3<Integer, Integer, C> consumer) {
+        try {
+            for (int xx = minX; xx <= maxX; xx++) {
+                for (int zz = minZ; zz <= maxZ; zz++) {
+                    consumer.accept(realX + xx, realZ + zz, plate.getOrCreatePinned(xx, zz));
                 }
-            } finally {
-                zero.release();
             }
-            return;
+        } finally {
+            plate.unpin();
         }
     }
 
     @ChunkCoordinates
     public void flag(int x, int z, MantleFlag flag, boolean flagged) {
-        get(x >> 5, z >> 5).getOrCreate(x & 31, z & 31).flag(flag, flagged);
+        P plate = pinRegion(x >> 5, z >> 5);
+        try {
+            plate.getOrCreatePinned(x & 31, z & 31).flag(flag, flagged);
+        } finally {
+            plate.unpin();
+        }
     }
 
     public void deleteChunk(int x, int z) {
-        get(x >> 5, z >> 5).delete(x & 31, z & 31);
+        P plate = pinRegion(x >> 5, z >> 5);
+        try {
+            plate.deletePinned(x & 31, z & 31);
+        } finally {
+            plate.unpin();
+        }
     }
 
     @RegionCoordinates
@@ -314,7 +344,7 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
 
     @ChunkCoordinates
     public <T> void iterateChunk(int x, int z, Class<T> type, Consumer4<Integer, Integer, Integer, T> iterator) {
-        iterateChunkValues(get(x >> 5, z >> 5).getOrCreate(x & 31, z & 31), type, iterator);
+        iterateChunkValues(getChunk(x, z), type, iterator);
     }
 
     @ChunkCoordinates
@@ -323,7 +353,12 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
             return false;
         }
 
-        return get(x >> 5, z >> 5).getOrCreate(x & 31, z & 31).isFlagged(flag);
+        P plate = pinRegion(x >> 5, z >> 5);
+        try {
+            return plate.getOrCreatePinned(x & 31, z & 31).isFlagged(flag);
+        } finally {
+            plate.unpin();
+        }
     }
 
     @ChunkCoordinates
@@ -372,8 +407,14 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
             return;
         }
 
-        C chunk = get((x >> 4) >> 5, (z >> 4) >> 5).getOrCreate((x >> 4) & 31, (z >> 4) & 31);
-        setChunkValue(chunk, x & 15, y, z & 15, t);
+        int chunkX = x >> 4;
+        int chunkZ = z >> 4;
+        P plate = pinRegion(chunkX >> 5, chunkZ >> 5);
+        try {
+            setChunkValue(plate.getOrCreatePinned(chunkX & 31, chunkZ & 31), x & 15, y, z & 15, t);
+        } finally {
+            plate.unpin();
+        }
     }
 
     @BlockCoordinates
@@ -383,8 +424,14 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
             return;
         }
 
-        C chunk = get((x >> 4) >> 5, (z >> 4) >> 5).getOrCreate((x >> 4) & 31, (z >> 4) & 31);
-        removeChunkValue(chunk, x & 15, y, z & 15, type);
+        int chunkX = x >> 4;
+        int chunkZ = z >> 4;
+        P plate = pinRegion(chunkX >> 5, chunkZ >> 5);
+        try {
+            removeChunkValue(plate.getOrCreatePinned(chunkX & 31, chunkZ & 31), x & 15, y, z & 15, type);
+        } finally {
+            plate.unpin();
+        }
     }
 
     @BlockCoordinates
@@ -399,8 +446,14 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
             return null;
         }
 
-        C chunk = get((x >> 4) >> 5, (z >> 4) >> 5).getOrCreate((x >> 4) & 31, (z >> 4) & 31);
-        return getChunkValue(chunk, x & 15, y, z & 15, type);
+        int chunkX = x >> 4;
+        int chunkZ = z >> 4;
+        P plate = pinRegion(chunkX >> 5, chunkZ >> 5);
+        try {
+            return getChunkValue(plate.getOrCreatePinned(chunkX & 31, chunkZ & 31), x & 15, y, z & 15, type);
+        } finally {
+            plate.unpin();
+        }
     }
 
     public boolean isClosed() {
@@ -490,9 +543,9 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
                     loadedRegions::get,
                     lastUse::get,
                     toUnload::contains,
-                    TectonicPlate::inUse,
+                    TectonicPlate::trySeal,
                     this::use,
-                    this::persistRegion,
+                    this::persistTargetedRegion,
                     this::removeLoadedRegion,
                     lastUse::remove,
                     toUnload::remove,
@@ -515,6 +568,27 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
     private P get(int x, int z) {
         ensureOpen();
         return accessRegion(x, z);
+    }
+
+    /**
+     * The open plate of the region with a pin taken for the caller, who unpins it. A resident plate is pinned
+     * without the region lock; one that is missing or closed by a save in progress is loaded, or waited for,
+     * under the lock.
+     */
+    @RegionCoordinates
+    private P pinRegion(int x, int z) {
+        ensureOpen();
+        P region = getLoadedRegion(x, z);
+        if (region != null && region.pin()) {
+            markRegionUsed(x, z, region);
+            return region;
+        }
+        while (true) {
+            region = get(x, z);
+            if (region.pin()) {
+                return region;
+            }
+        }
     }
 
     private CompletableFuture<P> getFuture(int x, int z) {
@@ -615,7 +689,7 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
                         || !loadedRegions.containsKey(candidate.id())) {
                     continue;
                 }
-                if (saveTectonicPlateLocked(candidate.id(), System.nanoTime(), true)) {
+                if (saveTectonicPlateLocked(candidate.id(), true)) {
                     return true;
                 }
             } finally {
@@ -633,7 +707,12 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
             return;
         }
 
-        deleteChunkSlice(getChunk(x, z), type);
+        P plate = pinRegion(x >> 5, z >> 5);
+        try {
+            deleteChunkSlice(plate.getOrCreatePinned(x & 31, z & 31), type);
+        } finally {
+            plate.unpin();
+        }
     }
 
     public int getLoadedRegionCount() {
@@ -946,27 +1025,23 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
             return false;
         }
         try {
-            return saveTectonicPlateLocked(id, System.nanoTime(), false);
+            return saveTectonicPlateLocked(id, false);
         } finally {
             hyperLock.unlock(regionX, regionZ);
         }
     }
 
-    private boolean saveTectonicPlateLocked(long id, long deadlineNanos, boolean retainDemanded) {
+    private boolean saveTectonicPlateLocked(long id, boolean retainDemanded) {
         P plate = loadedRegions.get(id);
         if (plate == null) {
             return true;
         }
 
+        if (!plate.trySeal()) {
+            return false;
+        }
         try {
-            if (!plate.sealUntil(deadlineNanos)) {
-                return false;
-            }
             persistTargetedRegion(id, plate);
-        } catch (InterruptedException error) {
-            Thread.currentThread().interrupt();
-            throw new IllegalStateException("Interrupted while saving Tectonic Plate "
-                    + CacheKey.keyX(id) + " " + CacheKey.keyZ(id), error);
         } catch (Exception error) {
             throw new IllegalStateException("Failed to save Tectonic Plate "
                     + CacheKey.keyX(id) + " " + CacheKey.keyZ(id), error);
