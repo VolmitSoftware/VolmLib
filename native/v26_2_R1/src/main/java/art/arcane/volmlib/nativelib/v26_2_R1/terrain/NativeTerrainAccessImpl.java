@@ -18,7 +18,6 @@ import net.minecraft.world.level.levelgen.XoroshiroRandomSource;
 import org.bukkit.World;
 import art.arcane.volmlib.nativelib.minecraft26_2.terrain.NativeStructureGenerationException;
 import art.arcane.volmlib.nativelib.terrain.BukkitTerrainBuffer;
-import art.arcane.volmlib.nativelib.terrain.NativeBlockState;
 import art.arcane.volmlib.nativelib.terrain.NativeBlockVolume;
 import art.arcane.volmlib.nativelib.terrain.NativeTerrainAccess;
 import java.util.logging.Level;
@@ -32,9 +31,7 @@ import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.LevelChunkSection;
 import org.bukkit.Chunk;
-import org.bukkit.block.data.BlockData;
 import org.bukkit.craftbukkit.CraftWorld;
-import org.bukkit.craftbukkit.block.data.CraftBlockData;
 import org.bukkit.craftbukkit.generator.CraftChunkData;
 import org.bukkit.generator.ChunkGenerator.ChunkData;
 
@@ -103,60 +100,13 @@ public class NativeTerrainAccessImpl extends NativeBiomeAccessImpl implements Na
             int accessMaxY = accessMinY + access.getHeight();
             int yStart = Math.max(0, accessMinY - minY);
             int yEnd = Math.min(height, accessMaxY - minY);
-            int baseX = access.getPos().getMinBlockX();
-            int baseZ = access.getPos().getMinBlockZ();
-            NativeBlockState resolvedPlatformState = null;
-            BlockState state = null;
-            boolean blockEntity = false;
-            boolean air = false;
-            for (int z = 0; z < 16; z++) {
-                for (int y = yStart; y < yEnd; y++) {
-                    int blockY = y + minY;
-                    int sectionIndex = (blockY - accessMinY) >> 4;
-                    LevelChunkSection section = access.getSection(sectionIndex);
-                    int sectionY = blockY & 15;
-                    for (int x = 0; x < 16; x++) {
-                        NativeBlockState platformState = data.getStoredRaw(x, y, z);
-                        if (platformState == null) {
-                            continue;
-                        }
-
-                        if (platformState != resolvedPlatformState) {
-                            BlockData blockData = (BlockData) platformState.placementHandle();
-                            if (!(blockData instanceof CraftBlockData craftBlockData)) {
-                                return false;
-                            }
-                            state = craftBlockData.getState();
-                            blockEntity = state.hasBlockEntity();
-                            air = state.isAir();
-                            resolvedPlatformState = platformState;
-                        }
-
-                        if (air && section.getBlockState(x, sectionY, z) == state) {
-                            continue;
-                        }
-                        BlockState oldState = section.setBlockState(x, sectionY, z, state, false);
-                        if (blockEntity) {
-                            BlockPos pos = new BlockPos(baseX + x, blockY, baseZ + z);
-                            BlockEntity entity = ((EntityBlock) state.getBlock()).newBlockEntity(pos, state);
-                            if (entity == null) {
-                                access.removeBlockEntity(pos);
-                            } else {
-                                access.setBlockEntity(entity);
-                            }
-                        } else if (oldState != null && oldState.hasBlockEntity()) {
-                            access.removeBlockEntity(new BlockPos(baseX + x, blockY, baseZ + z));
-                        }
-                    }
-                }
-            }
-
-            return true;
+            return new ChunkDataSectionWriter(access, data, minY).write(yStart, yEnd);
         } catch (Throwable e) {
             LOG.log(Level.SEVERE, "Native terrain write failed", e);
             return false;
         }
     }
+
     @Override
     public int[] placeStructure(World world, int chunkX, int chunkZ, String structureKey, long seed, int maxSpan) {
         try {
