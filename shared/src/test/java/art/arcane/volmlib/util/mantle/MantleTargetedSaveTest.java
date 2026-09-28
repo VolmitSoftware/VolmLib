@@ -16,6 +16,7 @@ import org.junit.rules.TemporaryFolder;
 import java.io.DataOutputStream;
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -299,6 +300,70 @@ public class MantleTargetedSaveTest {
             assertEquals(2, mantle.getLoadedRegionCount());
             assertTrue(mantle.isChunkLoaded(0, 0));
             assertTrue(mantle.isChunkLoaded(32, 0));
+        }
+    }
+
+    @Test(timeout = 5000L)
+    public void pressureReclaimRetainsDemandedPlateWithoutReloadingOrClaimingMemoryFreed() throws Exception {
+        assertPressureReclaimRetainsDemandedPlate(false);
+    }
+
+    @Test(timeout = 5000L)
+    public void pressureReclaimRetainsDemandedPlateAndEvictsAnotherIdlePlate() throws Exception {
+        assertPressureReclaimRetainsDemandedPlate(true);
+    }
+
+    private void assertPressureReclaimRetainsDemandedPlate(boolean anotherIdlePlate) throws Exception {
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try (TestRuntime runtime = new TestRuntime(temporaryFolder.newFolder("demanded-pressure-reclaim"))) {
+            TestMantle mantle = (TestMantle) runtime.mantle;
+            mantle.timeForTest = 1_000L;
+            MantleChunk<TestSection> chunk = mantle.getChunk(0, 0);
+            mantle.set(2, 3, 4, "river-content");
+            chunk.flag(MantleFlag.REAL, true);
+            long id = Mantle.key(0, 0);
+            TectonicPlate<TestSection> plate = mantle.getLoadedRegions().get(id);
+            Files.write(Mantle.fileForRegion(mantle.getDataFolder(), 0, 0).toPath(), new byte[]{1});
+            if (anotherIdlePlate) {
+                mantle.timeForTest = 1_500L;
+                mantle.getChunk(32, 0);
+            }
+            mantle.timeForTest = 2_000L;
+            runtime.regionIo.blockWritesFor(id);
+            Future<Boolean> saving = executor.submit(mantle::saveOldestIdleTectonicPlate);
+            try {
+                assertTrue(runtime.regionIo.writeEntered.await(1L, TimeUnit.SECONDS));
+                Future<MantleChunk<TestSection>> waiting = executor.submit(() -> mantle.getChunk(0, 0));
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(1L);
+                while (!runtime.hyperLock.hasQueuedThreads(0, 0) && System.nanoTime() < deadline) {
+                    Thread.sleep(1L);
+                }
+                assertTrue(runtime.hyperLock.hasQueuedThreads(0, 0));
+                assertFalse(waiting.isDone());
+                runtime.regionIo.releaseBlockedWrite();
+                assertEquals(anotherIdlePlate, saving.get(1L, TimeUnit.SECONDS));
+                assertSame(chunk, waiting.get(1L, TimeUnit.SECONDS));
+                assertSame(plate, mantle.getLoadedRegions().get(id));
+                assertFalse(plate.isClosed());
+                assertFalse(chunk.isClosed());
+                assertTrue(chunk.isFlagged(MantleFlag.REAL));
+                assertEquals("river-content", chunk.get(2, 3, 4, String.class));
+                assertSame(chunk, chunk.use());
+                chunk.release();
+                assertEquals(1, mantle.getLoadedRegionCount());
+                assertEquals(0, runtime.regionIo.readAttempts.get());
+                assertEquals(1, runtime.regionIo.attempts(id));
+                assertEquals(anotherIdlePlate ? 1 : 0, runtime.regionIo.attempts(Mantle.key(1, 0)));
+                assertFalse(mantle.saveOldestIdleTectonicPlate());
+                mantle.saveAll();
+                assertEquals(0, mantle.getLoadedRegionCount());
+                assertEquals(2, runtime.regionIo.attempts(id));
+            } finally {
+                runtime.regionIo.releaseBlockedWrite();
+            }
+        } finally {
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(1L, TimeUnit.SECONDS));
         }
     }
 
@@ -873,6 +938,7 @@ public class MantleTargetedSaveTest {
 
     private static final class RecordingRegionIo implements Mantle.RegionIO<TectonicPlate<TestSection>> {
         private final Map<Long, AtomicInteger> writeAttempts = new ConcurrentHashMap<>();
+        private final AtomicInteger readAttempts = new AtomicInteger();
         private final Set<Long> successfulWrites = ConcurrentHashMap.newKeySet();
         private volatile Long failingRegion;
         private volatile Long blockedRegion;
@@ -883,6 +949,7 @@ public class MantleTargetedSaveTest {
 
         @Override
         public TectonicPlate<TestSection> read(String name) {
+            readAttempts.incrementAndGet();
             throw new IllegalStateException("Unexpected targeted-save test read for " + name);
         }
 
