@@ -8,6 +8,7 @@ import art.arcane.volmlib.util.function.Consumer4IO;
 import art.arcane.volmlib.util.hunk.HunkLike;
 import art.arcane.volmlib.util.hunk.bits.DataContainer;
 import art.arcane.volmlib.util.hunk.bits.Writable;
+import art.arcane.volmlib.util.hunk.storage.MappedHunk;
 import art.arcane.volmlib.util.hunk.storage.PaletteOrHunk;
 import org.bukkit.Location;
 import org.bukkit.World;
@@ -274,6 +275,13 @@ public interface MatterSlice<T> extends HunkLike<T>, Writable<T> {
             ((PaletteOrHunk<T>) palette).iterateSync(consumer);
             return;
         }
+        if (this instanceof MappedHunk<?> mapped) {
+            MappedSliceCells cells = MappedSliceCells.of(mapped);
+            for (int index = 0; index < cells.size(); index++) {
+                consumer.accept(cells.x(index), cells.y(index), cells.z(index), (T) cells.value(index));
+            }
+            return;
+        }
 
         for (int x = 0; x < getWidth(); x++) {
             for (int y = 0; y < getHeight(); y++) {
@@ -290,6 +298,13 @@ public interface MatterSlice<T> extends HunkLike<T>, Writable<T> {
     private void forEachValueIO(Consumer4IO<Integer, Integer, Integer, T> consumer) throws IOException {
         if (this instanceof PaletteOrHunk<?> palette) {
             ((PaletteOrHunk<T>) palette).iterateSyncIO(consumer);
+            return;
+        }
+        if (this instanceof MappedHunk<?> mapped) {
+            MappedSliceCells cells = MappedSliceCells.of(mapped);
+            for (int index = 0; index < cells.size(); index++) {
+                consumer.accept(cells.x(index), cells.y(index), cells.z(index), (T) cells.value(index));
+            }
             return;
         }
 
