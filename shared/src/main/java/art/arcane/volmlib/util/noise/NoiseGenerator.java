@@ -43,6 +43,10 @@ public interface NoiseGenerator {
         return false;
     }
 
+    default boolean isConstant() {
+        return false;
+    }
+
     default boolean isNoScale() {
         return false;
     }

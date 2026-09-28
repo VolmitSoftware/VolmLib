@@ -119,6 +119,11 @@ public class OffsetNoiseGenerator implements NoiseGenerator, OctaveNoise {
         return base.isStatic();
     }
 
+    @Override
+    public boolean isConstant() {
+        return base.isConstant();
+    }
+
     @NotNull
     public NoiseGenerator getBase() {
         return base;
