@@ -44,11 +44,15 @@ public final class NativeStructureReferenceRepair {
              originChunkX <= target.x() + REFERENCE_DISTANCE_CHUNKS; originChunkX++) {
             for (int originChunkZ = target.z() - REFERENCE_DISTANCE_CHUNKS;
                  originChunkZ <= target.z() + REFERENCE_DISTANCE_CHUNKS; originChunkZ++) {
+                ChunkAccess originChunk = level.getChunk(
+                        originChunkX, originChunkZ, ChunkStatus.STRUCTURE_STARTS);
+                Map<Structure, StructureStart> originStarts = originChunk.getAllStarts();
+                if (originStarts.isEmpty()) {
+                    continue;
+                }
                 try (NativeGenerationScope ignored =
                              policy.openOriginScope(originChunkX, originChunkZ)) {
-                    ChunkAccess originChunk = level.getChunk(
-                            originChunkX, originChunkZ, ChunkStatus.STRUCTURE_STARTS);
-                    for (Map.Entry<Structure, StructureStart> entry : originChunk.getAllStarts().entrySet()) {
+                    for (Map.Entry<Structure, StructureStart> entry : originStarts.entrySet()) {
                         ScannedStart<O> start = scanStart(
                                 policy, serverLevel, structureManager, targetChunk, registry,
                                 originChunk, entry.getKey(), entry.getValue());
