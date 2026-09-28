@@ -71,6 +71,8 @@ public interface Window {
 
     Window setElement(int position, int row, Element e);
 
+    Window updateElement(int position, int row, Element element);
+
     Element getElement(int position, int row);
 
     Player getViewer();

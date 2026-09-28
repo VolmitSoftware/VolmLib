@@ -486,6 +486,38 @@ public class UIWindow implements Window, Listener {
     }
 
     @Override
+    public UIWindow updateElement(int position, int row, Element element) {
+        if (!FoliaScheduler.isOwnedByCurrentRegion(viewer)) {
+            queueSync(() -> updateElement(position, row, element));
+            return this;
+        }
+        if (!visible || inventory == null || ACTIVE_WINDOWS.get(viewerId) != this
+                || inventoryViewTopInventory(viewer.getOpenInventory()) != inventory) {
+            return this;
+        }
+
+        int realPosition = getRealPosition(position, row);
+        highestRow = Math.max(highestRow, row);
+        if (element == null) {
+            elements.remove(realPosition);
+        } else {
+            elements.put(realPosition, element);
+        }
+        int viewportSlot = realPosition - getViewportPosition() * getResolution().getWidth();
+        if (viewportSlot < 0 || viewportSlot >= inventory.getSize()) {
+            return this;
+        }
+        LanguageAudience.run(viewerId, () -> {
+            ItemStack replacement = computeItemStack(viewportSlot);
+            ItemStack current = inventory.getItem(viewportSlot);
+            if (current == null ? replacement != null : !current.equals(replacement)) {
+                inventory.setItem(viewportSlot, replacement);
+            }
+        });
+        return this;
+    }
+
+    @Override
     public Element getElement(int position, int row) {
         return elements.get(getRealPosition((int) clip(position, -getResolution().getMaxWidthOffset(), getResolution().getMaxWidthOffset()).doubleValue(), row));
     }
