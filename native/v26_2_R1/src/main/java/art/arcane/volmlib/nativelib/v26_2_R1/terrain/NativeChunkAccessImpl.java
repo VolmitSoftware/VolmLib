@@ -5,13 +5,16 @@ import art.arcane.volmlib.util.scheduling.FoliaScheduler;
 import ca.spottedleaf.moonrise.patches.chunk_system.io.MoonriseRegionFileIO;
 import ca.spottedleaf.moonrise.patches.chunk_system.scheduling.ChunkHolderManager;
 import ca.spottedleaf.moonrise.patches.chunk_system.scheduling.NewChunkHolder;
+import ca.spottedleaf.moonrise.patches.chunk_system.ticket.ChunkSystemTicketType;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import net.minecraft.core.BlockPos;
+import net.minecraft.server.level.ChunkLevel;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ThreadedLevelLightEngine;
+import net.minecraft.server.level.TicketType;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.LevelChunkSection;
@@ -60,6 +63,29 @@ public class NativeChunkAccessImpl implements NativeChunkAccess {
             LOG.log(Level.SEVERE, "Native chunk operation failed", e);
             return false;
         }
+    }
+
+    @Override
+    public int fullChunkDependencyRadius() {
+        return ChunkLevel.RADIUS_AROUND_FULL_CHUNK;
+    }
+
+    @Override
+    public boolean retainChunk(World world, int x, int z) {
+        return ticketManager(world).addTicketAtLevel(RetainTicket.TYPE, x, z, ChunkHolderManager.MAX_TICKET_LEVEL, null);
+    }
+
+    @Override
+    public boolean releaseChunk(World world, int x, int z) {
+        return ticketManager(world).removeTicketAtLevel(RetainTicket.TYPE, x, z, ChunkHolderManager.MAX_TICKET_LEVEL, null);
+    }
+
+    private static ChunkHolderManager ticketManager(World world) {
+        return ((CraftWorld) world).getHandle().moonrise$getChunkTaskScheduler().chunkHolderManager;
+    }
+
+    private static final class RetainTicket {
+        private static final TicketType TYPE = ChunkSystemTicketType.create("volmlib:retain", null, TicketType.NO_TIMEOUT, TicketType.FLAG_LOADING);
     }
 
     @Override
