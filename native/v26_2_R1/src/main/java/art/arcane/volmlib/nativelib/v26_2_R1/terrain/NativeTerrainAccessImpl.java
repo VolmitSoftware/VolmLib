@@ -105,6 +105,10 @@ public class NativeTerrainAccessImpl extends NativeBiomeAccessImpl implements Na
             int yEnd = Math.min(height, accessMaxY - minY);
             int baseX = access.getPos().getMinBlockX();
             int baseZ = access.getPos().getMinBlockZ();
+            NativeBlockState resolvedPlatformState = null;
+            BlockState state = null;
+            boolean blockEntity = false;
+            boolean air = false;
             for (int z = 0; z < 16; z++) {
                 for (int y = yStart; y < yEnd; y++) {
                     int blockY = y + minY;
@@ -117,14 +121,22 @@ public class NativeTerrainAccessImpl extends NativeBiomeAccessImpl implements Na
                             continue;
                         }
 
-                        BlockData blockData = (BlockData) platformState.placementHandle();
-                        if (!(blockData instanceof CraftBlockData craftBlockData)) {
-                            return false;
+                        if (platformState != resolvedPlatformState) {
+                            BlockData blockData = (BlockData) platformState.placementHandle();
+                            if (!(blockData instanceof CraftBlockData craftBlockData)) {
+                                return false;
+                            }
+                            state = craftBlockData.getState();
+                            blockEntity = state.hasBlockEntity();
+                            air = state.isAir();
+                            resolvedPlatformState = platformState;
                         }
 
-                        BlockState state = craftBlockData.getState();
+                        if (air && section.getBlockState(x, sectionY, z) == state) {
+                            continue;
+                        }
                         BlockState oldState = section.setBlockState(x, sectionY, z, state, false);
-                        if (state.hasBlockEntity()) {
+                        if (blockEntity) {
                             BlockPos pos = new BlockPos(baseX + x, blockY, baseZ + z);
                             BlockEntity entity = ((EntityBlock) state.getBlock()).newBlockEntity(pos, state);
                             if (entity == null) {
