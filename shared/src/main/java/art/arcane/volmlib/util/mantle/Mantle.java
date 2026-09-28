@@ -814,7 +814,7 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
         });
     }
 
-    protected void use(long key) {
+    protected void use(Long key) {
         long now = nowMillis();
         Long previous = lastUse.get(key);
         // Every mantle access lands here; the idle timers work in seconds, so a fresh stamp is
