@@ -10,6 +10,20 @@ public interface NativeChunkAccess {
 
     boolean saveAndUnloadChunk(World world, int chunkX, int chunkZ);
 
+    /**
+     * Chebyshev radius of the chunks a FULL chunk request loads around itself, or -1 when
+     * {@link #retainChunk} is unsupported.
+     */
+    int fullChunkDependencyRadius();
+
+    /**
+     * Keeps the chunk resident at its current status without requesting more generation than a
+     * neighbouring FULL request already does. Idempotent per position.
+     */
+    boolean retainChunk(World world, int chunkX, int chunkZ);
+
+    boolean releaseChunk(World world, int chunkX, int chunkZ);
+
     boolean pollChunkTask(World world);
 
     void flushChunkIO(World world);
