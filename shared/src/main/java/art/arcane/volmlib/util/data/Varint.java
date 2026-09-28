@@ -20,6 +20,19 @@ public final class Varint {
         out.writeByte((int) value & 0x7F);
     }
 
+    /**
+     * Encodes {@code value} into {@code buffer} at {@code offset} (up to 10 bytes) and returns the offset after it;
+     * the bytes are the ones {@link #writeUnsignedVarLong(long, DataOutput)} emits.
+     */
+    public static int writeUnsignedVarLong(long value, byte[] buffer, int offset) {
+        while ((value & 0xFFFFFFFFFFFFFF80L) != 0L) {
+            buffer[offset++] = (byte) (((int) value & 0x7F) | 0x80);
+            value >>>= 7;
+        }
+        buffer[offset++] = (byte) ((int) value & 0x7F);
+        return offset;
+    }
+
     public static void writeSignedVarInt(int value, DataOutput out) throws IOException {
         writeUnsignedVarInt((value << 1) ^ (value >> 31), out);
     }

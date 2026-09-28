@@ -51,6 +51,9 @@ public class DataBits {
             70409299, 70409299, 0, 69273666, 69273666, 0, 68174084, 68174084, 0, Integer.MIN_VALUE,
             0, 5};
 
+    static final int MAX_VARLONG_BYTES = 10;
+    private static final ThreadLocal<byte[]> SCRATCH = ThreadLocal.withInitial(() -> new byte[4096]);
+
     private final AtomicLongArray data;
     @Getter
     private final int bits;
@@ -190,8 +193,49 @@ public class DataBits {
     }
 
     public void write(DataOutputStream dos) throws IOException {
-        for (int i = 0; i < data.length(); i++) {
-            Varint.writeUnsignedVarLong(data.get(i), dos);
+        int words = data.length();
+        byte[] buffer = scratch(words * MAX_VARLONG_BYTES);
+        int length = 0;
+        for (int i = 0; i < words; i++) {
+            length = Varint.writeUnsignedVarLong(data.get(i), buffer, length);
         }
+        dos.write(buffer, 0, length);
+    }
+
+    /**
+     * True when every stored value is zero; checks whole words, masking the unused high bits of each.
+     */
+    public boolean isZero() {
+        int remaining = size;
+        for (int i = 0; i < data.length(); i++) {
+            int count = Math.min(valuesPerLong, remaining);
+            long used = count * bits >= 64 ? -1L : (1L << (count * bits)) - 1L;
+            if ((data.get(i) & used) != 0L) {
+                return false;
+            }
+            remaining -= count;
+        }
+        return true;
+    }
+
+    int valuesPerLong() {
+        return valuesPerLong;
+    }
+
+    int wordCount() {
+        return data.length();
+    }
+
+    long word(int index) {
+        return data.get(index);
+    }
+
+    static byte[] scratch(int length) {
+        byte[] buffer = SCRATCH.get();
+        if (buffer.length < length) {
+            buffer = new byte[Math.max(length, buffer.length << 1)];
+            SCRATCH.set(buffer);
+        }
+        return buffer;
     }
 }
