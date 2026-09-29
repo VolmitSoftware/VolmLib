@@ -64,14 +64,13 @@
     {
       "name": "Gloss",
       "filename": "Gloss-*.jar",
-      "max_bytes": 4500000,
+      "max_bytes": 7600000,
       "forbidden_prefixes": [
         "org/bukkit/",
         "io/papermc/",
         "net/minecraft/",
         "com/github/retrooper/",
         "io/github/retrooper/",
-        "art/arcane/gloss/libs/packetevents/",
         "net/kyori/",
         "it/unimi/dsi/fastutil/",
         "art/arcane/volmit/packaging/",
@@ -80,6 +79,8 @@
       "required_entries": [
         "plugin.yml",
         "art/arcane/gloss/Gloss.class",
+        "art/arcane/gloss/libs/packetevents/api/PacketEvents.class",
+        "art/arcane/gloss/libs/packetevents/impl/factory/spigot/SpigotPacketEventsBuilder.class",
         "slimjar.dat",
         "slimjar-resolutions.dat",
         "art/arcane/gloss/libs/slimjar/app/builder/SpigotApplicationBuilder.class",
@@ -95,7 +96,10 @@
         "-keepclassmembers class art.arcane.gloss.panel.** { <fields>; }",
         "-keepclassmembers class art.arcane.gloss.importer.** { <fields>; }"
       ],
-      "shrink_dontwarn": []
+      "shrink_dontwarn": [
+        "art.arcane.gloss.libs.packetevents.impl.util.BukkitLogManager",
+        "com.viaversion.viaversion.**"
+      ]
     },
     {
       "name": "HiddenOre",
