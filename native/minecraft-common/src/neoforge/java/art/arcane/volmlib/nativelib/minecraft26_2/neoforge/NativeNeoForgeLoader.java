@@ -34,6 +34,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.level.ServerLevelAccessor;
+import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.block.state.BlockState;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.EventHooks;
@@ -156,5 +157,11 @@ public final class NativeNeoForgeLoader implements NativeModdedLoader {
     @Override
     public boolean checkSpawnPosition(Mob mob, ServerLevelAccessor level, EntitySpawnReason reason) {
         return EventHooks.checkSpawnPosition(mob, level, reason);
+    }
+
+    // NeoForge keeps modifier output in ModifiableBiomeInfo, and its Biome.DIRECT_CODEC encodes the original info.
+    @Override
+    public Biome unmodifiedBiome(Biome biome) {
+        return biome;
     }
 }

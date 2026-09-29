@@ -6,6 +6,7 @@ import org.bukkit.Bukkit;
 import org.bukkit.craftbukkit.CraftServer;
 
 import java.util.function.Supplier;
+import java.util.function.UnaryOperator;
 
 public final class NativeGenerationRegistryImpl extends NativeRegistryDefinitions {
     public NativeGenerationRegistryImpl() {
@@ -13,6 +14,6 @@ public final class NativeGenerationRegistryImpl extends NativeRegistryDefinition
     }
 
     public NativeGenerationRegistryImpl(Supplier<RegistryAccess> registryAccess) {
-        super(registryAccess);
+        super(registryAccess, UnaryOperator.identity());
     }
 }
