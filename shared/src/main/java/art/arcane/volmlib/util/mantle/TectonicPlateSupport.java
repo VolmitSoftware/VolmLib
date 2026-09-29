@@ -307,7 +307,7 @@ public abstract class TectonicPlateSupport<C> {
 
     private void requireOpen() {
         if (closed.get()) {
-            throw new IllegalStateException("Tectonic Plate is closed!");
+            throw new MantleClosedException("Tectonic Plate is closed!");
         }
     }
 }

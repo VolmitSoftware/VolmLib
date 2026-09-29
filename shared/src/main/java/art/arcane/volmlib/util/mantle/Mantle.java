@@ -15,6 +15,9 @@ import art.arcane.volmlib.util.parallel.MultiBurstSupport;
 import org.bukkit.Chunk;
 
 import java.io.File;
+import java.io.InterruptedIOException;
+import java.nio.channels.ClosedChannelException;
+import java.nio.file.FileSystemException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashSet;
@@ -23,6 +26,7 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -43,6 +47,7 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
     private final int lockSize;
     private final int worldHeight;
     private static final long USE_STAMP_INTERVAL_MILLIS = 250L;
+    private static final int MAXIMUM_CAUSE_DEPTH = 32;
     private static final int RESIDENT_SHIFT = 5;
     private static final int RESIDENT_MASK = (1 << RESIDENT_SHIFT) - 1;
     private final KMap<Long, Long> lastUse;
@@ -900,6 +905,9 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
                     use(k);
                     return region;
                 } catch (Throwable e) {
+                    if (isTransientReadFailure(e)) {
+                        rethrowReadFailure(file, e);
+                    }
                     onWarn("Failed to read Tectonic Plate " + file.getAbsolutePath() + ", creating a new one.");
                     onError(e);
 
@@ -917,6 +925,43 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
             use(k);
             return region;
         });
+    }
+
+    /**
+     * A read that failed because the reader was interrupted, the mantle or its channel closed, the file system
+     * refused the file or the JVM ran out of resources says nothing about the plate's content. A fresh plate
+     * would serve empty chunks now and overwrite the persisted plate at the next flush.
+     */
+    private static boolean isTransientReadFailure(Throwable failure) {
+        if (Thread.currentThread().isInterrupted()) {
+            return true;
+        }
+        Throwable current = failure;
+        for (int depth = 0; current != null && depth < MAXIMUM_CAUSE_DEPTH; depth++, current = current.getCause()) {
+            if (current instanceof Error
+                    || current instanceof MantleClosedException
+                    || current instanceof InterruptedException
+                    || current instanceof InterruptedIOException
+                    || current instanceof ClosedChannelException
+                    || current instanceof FileSystemException
+                    || current instanceof RejectedExecutionException) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static void rethrowReadFailure(File file, Throwable failure) {
+        if (failure instanceof RuntimeException runtimeFailure) {
+            throw runtimeFailure;
+        }
+        if (failure instanceof Error error) {
+            throw error;
+        }
+        if (failure instanceof InterruptedException) {
+            Thread.currentThread().interrupt();
+        }
+        throw new IllegalStateException("Failed to read Tectonic Plate " + file.getAbsolutePath(), failure);
     }
 
     protected long use(Long key) {
@@ -1157,7 +1202,7 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
 
     private void ensureOpen() {
         if (closed.get()) {
-            throw new IllegalStateException("The Mantle is closed");
+            throw new MantleClosedException("The Mantle is closed");
         }
     }
 

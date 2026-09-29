@@ -19,6 +19,7 @@ public record NativeModdedCallbacks(
         Consumer<NativeModdedServer> start,
         Consumer<NativeModdedServer> started,
         Runnable stop,
+        Runnable stopped,
         Consumer<NativeWorld> loaded,
         Consumer<NativeWorld> unloaded,
         Consumer<NativeProtocolPlayer> joined,

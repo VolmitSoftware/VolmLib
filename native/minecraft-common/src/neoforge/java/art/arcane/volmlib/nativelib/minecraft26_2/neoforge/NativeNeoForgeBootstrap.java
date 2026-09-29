@@ -26,6 +26,7 @@ import net.neoforged.neoforge.event.level.block.BreakBlockEvent;
 import net.neoforged.neoforge.event.server.ServerAboutToStartEvent;
 import net.neoforged.neoforge.event.server.ServerStartedEvent;
 import net.neoforged.neoforge.event.server.ServerStartingEvent;
+import net.neoforged.neoforge.event.server.ServerStoppedEvent;
 import net.neoforged.neoforge.event.server.ServerStoppingEvent;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
 import net.neoforged.neoforge.registries.DeferredRegister;
@@ -56,6 +57,7 @@ public final class NativeNeoForgeBootstrap {
         NeoForge.EVENT_BUS.addListener((ServerStartingEvent event) -> callbacks.start().accept(NativeModdedServer.fromHandle(event.getServer())));
         NeoForge.EVENT_BUS.addListener((ServerStartedEvent event) -> callbacks.started().accept(NativeModdedServer.fromHandle(event.getServer())));
         NeoForge.EVENT_BUS.addListener((ServerStoppingEvent event) -> callbacks.stop().run());
+        NeoForge.EVENT_BUS.addListener((ServerStoppedEvent event) -> callbacks.stopped().run());
         NeoForge.EVENT_BUS.addListener((LevelEvent.Load event) -> {
             if (event.getLevel() instanceof ServerLevel level) {
                 callbacks.loaded().accept(new ModdedPlatformWorld(level));

@@ -21,7 +21,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 public final class NativeWorldTeleport {
     private static final int TELEPORT_WARM_RADIUS = 0;
-    private static final long TELEPORT_TIMEOUT_SECONDS = 10L;
     private static final TicketType TELEPORT_WARM_TICKET = new TicketType(TicketType.NO_TIMEOUT,
             TicketType.FLAG_LOADING | TicketType.FLAG_KEEP_DIMENSION_ACTIVE);
 
@@ -57,13 +56,15 @@ public final class NativeWorldTeleport {
             result.completeExceptionally(new IllegalArgumentException("Teleport coordinates must be finite."));
             return result;
         }
+        long remainingNanos = deadlineNanos == 0L ? 0L : deadlineNanos - System.nanoTime();
+        long timeoutSeconds = Math.max(0L, Math.ceilDiv(remainingNanos, TimeUnit.SECONDS.toNanos(1L)));
         if (deadlineNanos != 0L) {
-            long remainingNanos = deadlineNanos - System.nanoTime();
             if (remainingNanos <= 0L) {
-                result.completeExceptionally(teleportTimeout(level, x, z));
+                result.completeExceptionally(teleportTimeout(level, x, z, timeoutSeconds));
                 return result;
             }
-            result.orTimeout(remainingNanos, TimeUnit.NANOSECONDS);
+            CompletableFuture.delayedExecutor(remainingNanos, TimeUnit.NANOSECONDS)
+                    .execute(() -> result.completeExceptionally(teleportTimeout(level, x, z, timeoutSeconds)));
         }
         UUID playerId = player.getUUID();
         runOnServer(server, () -> beginTeleport(
@@ -74,7 +75,8 @@ public final class NativeWorldTeleport {
                 x,
                 y,
                 z,
-                deadlineNanos));
+                deadlineNanos,
+                timeoutSeconds));
         return result;
     }
 
@@ -86,13 +88,14 @@ public final class NativeWorldTeleport {
             double x,
             double y,
             double z,
-            long deadlineNanos
+            long deadlineNanos,
+            long timeoutSeconds
     ) {
         if (result.isDone()) {
             return;
         }
         if (deadlineNanos != 0L && System.nanoTime() >= deadlineNanos) {
-            result.completeExceptionally(teleportTimeout(level, x, z));
+            result.completeExceptionally(teleportTimeout(level, x, z, timeoutSeconds));
             return;
         }
         ServerLevel active = server.getLevel(level.dimension());
@@ -104,10 +107,11 @@ public final class NativeWorldTeleport {
         int blockZ = ModdedTeleportBounds.blockCoordinate(z);
         ChunkPos chunkPos = new ChunkPos(blockX >> 4, blockZ >> 4);
         if (level.getChunkSource().hasChunk(chunkPos.x(), chunkPos.z())) {
-            completeTeleport(result, playerId, server, level, x, y, z, blockX, blockZ, deadlineNanos);
+            completeTeleport(result, playerId, server, level, x, y, z, blockX, blockZ, deadlineNanos, timeoutSeconds);
             return;
         }
-        warmAndTeleport(result, playerId, server, level, x, y, z, blockX, blockZ, chunkPos, deadlineNanos);
+        warmAndTeleport(result, playerId, server, level, x, y, z, blockX, blockZ, chunkPos, deadlineNanos,
+                timeoutSeconds);
     }
 
     private static void warmAndTeleport(
@@ -121,7 +125,8 @@ public final class NativeWorldTeleport {
             int blockX,
             int blockZ,
             ChunkPos chunkPos,
-            long deadlineNanos
+            long deadlineNanos,
+            long timeoutSeconds
     ) {
         AtomicBoolean ticketReleased = new AtomicBoolean();
         CompletableFuture<?> chunkLoad;
@@ -152,7 +157,7 @@ public final class NativeWorldTeleport {
                 result.completeExceptionally(failure);
                 return;
             }
-            completeTeleport(result, playerId, server, level, x, y, z, blockX, blockZ, deadlineNanos);
+            completeTeleport(result, playerId, server, level, x, y, z, blockX, blockZ, deadlineNanos, timeoutSeconds);
         }));
     }
 
@@ -179,13 +184,14 @@ public final class NativeWorldTeleport {
             double z,
             int blockX,
             int blockZ,
-            long deadlineNanos
+            long deadlineNanos,
+            long timeoutSeconds
     ) {
         if (result.isDone()) {
             return;
         }
         if (deadlineNanos != 0L && System.nanoTime() >= deadlineNanos) {
-            result.completeExceptionally(teleportTimeout(level, x, z));
+            result.completeExceptionally(teleportTimeout(level, x, z, timeoutSeconds));
             return;
         }
         ServerLevel active = server.getLevel(level.dimension());
@@ -243,11 +249,11 @@ public final class NativeWorldTeleport {
                 && !level.getBlockState(support).getCollisionShape(level, support).isEmpty();
     }
 
-    private static TimeoutException teleportTimeout(ServerLevel level, double x, double z) {
+    private static TimeoutException teleportTimeout(ServerLevel level, double x, double z, long timeoutSeconds) {
         return new TimeoutException("Teleport into " + level.dimension().identifier()
                 + " at " + ModdedTeleportBounds.blockCoordinate(x) + ","
                 + ModdedTeleportBounds.blockCoordinate(z)
-                + " exceeded " + TELEPORT_TIMEOUT_SECONDS + " seconds.");
+                + " did not finish within " + timeoutSeconds + " seconds.");
     }
 
     private static void runOnServer(MinecraftServer server, Runnable task) {

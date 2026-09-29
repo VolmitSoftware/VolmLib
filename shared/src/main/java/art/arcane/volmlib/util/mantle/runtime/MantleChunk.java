@@ -2,6 +2,7 @@ package art.arcane.volmlib.util.mantle.runtime;
 
 import art.arcane.volmlib.util.function.Consumer4;
 import art.arcane.volmlib.util.io.CountingDataInputStream;
+import art.arcane.volmlib.util.mantle.MantleClosedException;
 
 import java.io.DataOutputStream;
 import java.io.IOException;
@@ -86,7 +87,7 @@ public class MantleChunk<M> extends art.arcane.volmlib.util.mantle.MantleChunk<M
 
     public <T> T get(int x, int y, int z, Class<T> type) {
         if (isClosed()) {
-            throw new IllegalStateException("Chunk is closed!");
+            throw new MantleClosedException("Chunk is closed!");
         }
         M section = get(y >> 4);
         return section == null ? null : adapter().get(section, x & 15, y & 15, z & 15, type);

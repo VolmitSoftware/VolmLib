@@ -20,6 +20,7 @@ import net.minecraftforge.event.level.LevelEvent;
 import net.minecraftforge.event.server.ServerAboutToStartEvent;
 import net.minecraftforge.event.server.ServerStartedEvent;
 import net.minecraftforge.event.server.ServerStartingEvent;
+import net.minecraftforge.event.server.ServerStoppedEvent;
 import net.minecraftforge.event.server.ServerStoppingEvent;
 import net.minecraftforge.common.loot.IGlobalLootModifier;
 import net.minecraftforge.common.util.BlockSnapshot;
@@ -51,6 +52,7 @@ public final class NativeForgeBootstrap {
         ServerStartingEvent.BUS.addListener((ServerStartingEvent event) -> callbacks.start().accept(NativeModdedServer.fromHandle(event.getServer())));
         ServerStartedEvent.BUS.addListener((ServerStartedEvent event) -> callbacks.started().accept(NativeModdedServer.fromHandle(event.getServer())));
         ServerStoppingEvent.BUS.addListener((ServerStoppingEvent event) -> callbacks.stop().run());
+        ServerStoppedEvent.BUS.addListener((ServerStoppedEvent event) -> callbacks.stopped().run());
         LevelEvent.Load.BUS.addListener((LevelEvent.Load event) -> {
             if (event.getLevel() instanceof ServerLevel level) {
                 callbacks.loaded().accept(new ModdedPlatformWorld(level));

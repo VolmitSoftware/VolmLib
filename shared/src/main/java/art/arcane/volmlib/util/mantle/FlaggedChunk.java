@@ -51,14 +51,14 @@ public abstract class FlaggedChunk {
 
     public void flag(MantleFlag flag, boolean value) {
         if (isClosed()) {
-            throw new IllegalStateException("Chunk is closed!");
+            throw new MantleClosedException("Chunk is closed!");
         }
         flags.set(flag.ordinal(), value);
     }
 
     public void raiseFlagSuspend(MantleFlag flag, Runnable task) {
         if (isClosed()) {
-            throw new IllegalStateException("Chunk is closed!");
+            throw new MantleClosedException("Chunk is closed!");
         }
         if (isFlagged(flag)) {
             return;
@@ -83,7 +83,7 @@ public abstract class FlaggedChunk {
 
     public void raiseFlagUnchecked(MantleFlag flag, Runnable task) {
         if (isClosed()) {
-            throw new IllegalStateException("Chunk is closed!");
+            throw new MantleClosedException("Chunk is closed!");
         }
         int index = flag.ordinal();
         if (flags.compareAndSet(index, false, true)) {

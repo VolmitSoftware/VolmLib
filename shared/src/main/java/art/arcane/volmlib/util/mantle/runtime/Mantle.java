@@ -1,6 +1,7 @@
 package art.arcane.volmlib.util.mantle.runtime;
 
 import art.arcane.volmlib.util.function.Consumer4;
+import art.arcane.volmlib.util.mantle.MantleClosedException;
 import art.arcane.volmlib.util.parallel.HyperLockSupport;
 import art.arcane.volmlib.util.parallel.MultiBurstSupport;
 
@@ -48,7 +49,7 @@ public class Mantle<M> extends art.arcane.volmlib.util.mantle.Mantle<TectonicPla
     @Override
     protected <T> void removeChunkValue(MantleChunk<M> chunk, int x, int y, int z, Class<T> type) {
         if (chunk.isClosed()) {
-            throw new IllegalStateException("Chunk is closed!");
+            throw new MantleClosedException("Chunk is closed!");
         }
         M section = chunk.get(y >> 4);
         if (section != null) {
@@ -59,7 +60,7 @@ public class Mantle<M> extends art.arcane.volmlib.util.mantle.Mantle<TectonicPla
     @Override
     protected <T> T getChunkValue(MantleChunk<M> chunk, int x, int y, int z, Class<T> type) {
         if (chunk.isClosed()) {
-            throw new IllegalStateException("Chunk is closed!");
+            throw new MantleClosedException("Chunk is closed!");
         }
         M section = chunk.get(y >> 4);
         return section == null ? null : adapter().get(section, x & 15, y & 15, z & 15, type);
