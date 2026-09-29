@@ -153,7 +153,7 @@ public final class NativeStructureOwnershipRecovery {
                         generator,
                         biomeSource,
                         state.randomState(),
-                        level.getStructureManager(),
+                        NativeWorldgenVersion.templateManager(level),
                         state.getLevelSeed(),
                         level.dimension(),
                         level,

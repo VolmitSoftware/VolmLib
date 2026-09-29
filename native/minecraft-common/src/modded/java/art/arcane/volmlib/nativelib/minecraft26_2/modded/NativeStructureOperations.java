@@ -43,8 +43,8 @@ import net.minecraft.world.level.chunk.ChunkGenerator;
 import net.minecraft.world.level.levelgen.RandomState;
 import net.minecraft.world.level.levelgen.WorldgenRandom;
 import net.minecraft.world.level.levelgen.XoroshiroRandomSource;
+import net.minecraft.world.level.levelgen.densityfunction.SamplerContext;
 import net.minecraft.world.level.levelgen.feature.AbstractHugeMushroomFeature;
-import net.minecraft.world.level.levelgen.feature.ConfiguredFeature;
 import net.minecraft.world.level.levelgen.feature.FallenTreeFeature;
 import net.minecraft.world.level.levelgen.feature.Feature;
 import net.minecraft.world.level.levelgen.feature.TreeFeature;
@@ -108,7 +108,7 @@ public final class NativeStructureOperations {
                 throw new IllegalArgumentException("Registered structure is not a jigsaw: " + structureKey);
             }
             return NativeJigsawMetadata.sourceMetadata(
-                    instance.registryAccess(), instance.getStructureManager(), jigsaw);
+                    instance.registryAccess(), instance.getStructureTemplateManager(), jigsaw);
         } catch (RuntimeException error) {
             throw new IllegalStateException("Failed to resolve live jigsaw metadata for registered structure '"
                     + structureKey + "' from the modded structure registry", error);
@@ -120,7 +120,7 @@ public final class NativeStructureOperations {
                 + templatePoolKey + "'");
         try {
             return NativeJigsawMetadata.templatePoolHorizontalSpan(
-                    instance.registryAccess(), instance.getStructureManager(), templatePoolKey);
+                    instance.registryAccess(), instance.getStructureTemplateManager(), templatePoolKey);
         } catch (RuntimeException error) {
             throw new IllegalStateException("Failed to resolve the live horizontal span for registered "
                     + "template pool '" + templatePoolKey + "' from the modded template-pool registry", error);
@@ -141,7 +141,7 @@ public final class NativeStructureOperations {
                 throw new IllegalArgumentException("Registered structure is not a jigsaw: " + structureKey);
             }
             return NativeJigsawMetadata.jigsawStartPoolHorizontalSpan(
-                    instance.registryAccess(), instance.getStructureManager(), jigsaw, templatePoolKey);
+                    instance.registryAccess(), instance.getStructureTemplateManager(), jigsaw, templatePoolKey);
         } catch (RuntimeException error) {
             throw new IllegalStateException("Failed to resolve the effective start-pool span for registered "
                     + "jigsaw structure '" + structureKey + "' and pool '" + templatePoolKey
@@ -195,13 +195,13 @@ public final class NativeStructureOperations {
             if (instance == null) {
                 return keys;
             }
-            Registry<ConfiguredFeature<?, ?>> registry = instance.registryAccess().lookupOrThrow(Registries.CONFIGURED_FEATURE);
+            Registry<Feature> registry = instance.registryAccess().lookupOrThrow(Registries.FEATURE);
             for (Identifier identifier : registry.keySet()) {
-                ConfiguredFeature<?, ?> configuredFeature = registry.getValue(identifier);
-                if (configuredFeature == null) {
+                Feature feature = registry.getValue(identifier);
+                if (feature == null) {
                     continue;
                 }
-                String group = classifyFeature(configuredFeature.feature());
+                String group = classifyFeature(feature);
                 if (group != null) {
                     keys.add(group + "|" + identifier);
                 }
@@ -251,13 +251,13 @@ public final class NativeStructureOperations {
                 return false;
             }
             ChunkGenerator generator = level.getChunkSource().getGenerator();
-            Registry<ConfiguredFeature<?, ?>> registry = level.registryAccess().lookupOrThrow(Registries.CONFIGURED_FEATURE);
-            ConfiguredFeature<?, ?> configuredFeature = registry.getValue(identifier);
-            if (configuredFeature == null) {
+            Registry<Feature> registry = level.registryAccess().lookupOrThrow(Registries.FEATURE);
+            Feature feature = registry.getValue(identifier);
+            if (feature == null) {
                 return false;
             }
             WorldgenRandom random = new WorldgenRandom(new XoroshiroRandomSource(seed));
-            return configuredFeature.place(level, generator, random, new BlockPos(x, y, z));
+            return feature.place(level, generator, random, new BlockPos(x, y, z));
         } catch (Throwable error) {
             options.errors().accept(error);
             return false;
@@ -283,7 +283,7 @@ public final class NativeStructureOperations {
             }
             Holder<Structure> holder = registry.wrapAsHolder(structure);
             RandomState randomState = level.getChunkSource().randomState();
-            StructureTemplateManager templateManager = level.getStructureManager();
+            StructureTemplateManager templateManager = level.getStructureTemplateManager();
             StructureManager structureManager = level.structureManager();
             BiomeSource biomeSource = generator.getBiomeSource();
             ChunkPos chunkPos = new ChunkPos(chunkX, chunkZ);
@@ -293,6 +293,7 @@ public final class NativeStructureOperations {
                     level.registryAccess(),
                     generator,
                     biomeSource,
+                    randomState.createClimateSampler(SamplerContext.EMPTY_UNCACHED),
                     randomState,
                     templateManager,
                     seed,
@@ -325,7 +326,7 @@ public final class NativeStructureOperations {
         return true;
     }
 
-    static String classifyFeature(Feature<?> feature) {
+    static String classifyFeature(Feature feature) {
         if (feature instanceof TreeFeature) {
             return "trees";
         }

@@ -34,7 +34,7 @@ public final class NativeGenerationWriteGuard {
 
     public static boolean allowsPendingStage(NativeChunkWritePolicy policy, ChunkAccess chunk, ChunkStatus stage) {
         return stage.isOrAfter(ChunkStatus.FEATURES)
-                && chunk.getPersistedStatus().isOrAfter(ChunkStatus.NOISE)
+                && chunk.getPersistedStatus().isOrAfter(NativeWorldgenVersion.TERRAIN_STATUS)
                 && !chunk.getPersistedStatus().isOrAfter(stage)
                 && !policy.allowsNativeChunkWrite(chunk.getPos().x(), chunk.getPos().z());
     }

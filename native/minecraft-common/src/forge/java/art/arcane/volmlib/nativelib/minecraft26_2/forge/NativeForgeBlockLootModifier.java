@@ -53,9 +53,9 @@ public final class NativeForgeBlockLootModifier extends LootModifier {
     @NotNull
     @Override
     protected ObjectArrayList<ItemStack> doApply(LootTable table, ObjectArrayList<ItemStack> generatedLoot, LootContext context) {
-        Entity breaker = context.getOptionalParameter(LootContextParams.THIS_ENTITY);
-        BlockState state = context.getOptionalParameter(LootContextParams.BLOCK_STATE);
-        Vec3 origin = context.getOptionalParameter(LootContextParams.ORIGIN);
+        Entity breaker = context.getOptional(LootContextParams.THIS_ENTITY);
+        BlockState state = context.getOptional(LootContextParams.BLOCK_STATE);
+        Vec3 origin = context.getOptional(LootContextParams.ORIGIN);
         if (!(breaker instanceof Player) || state == null || origin == null) {
             return generatedLoot;
         }

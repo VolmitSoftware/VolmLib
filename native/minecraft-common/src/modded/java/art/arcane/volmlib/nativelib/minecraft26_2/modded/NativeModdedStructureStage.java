@@ -109,7 +109,7 @@ public final class NativeModdedStructureStage<C, P extends StructureStartPlan, O
         policy.installVolumeSource(engine, new NativeStructureVolumeSource<>(
                 new NativeStructureVolumeSource.Context(
                 level.registryAccess(),
-                level.getServer().getStructureManager(),
+                level.getServer().getStructureTemplateManager(),
                 level.dimension(),
                 LevelHeightAccessor.create(level.getMinY(), level.getHeight()),
                 generatorReference::get,
@@ -332,7 +332,7 @@ public final class NativeModdedStructureStage<C, P extends StructureStartPlan, O
                 try {
                     StructurePlacementDecision sourceDecision = policy.structurePolicy(current).resolve(
                             structureId, NativeStructureVegetationClearer.isUndergroundStep(structure.step()));
-                    List<StructureStart> starts = structureManager.startsForStructure(sectionPos, structure);
+                    List<StructureStart> starts = structureManager.startsForStructure(sectionPos.x(), sectionPos.z(), structure);
                     List<NativePlacement> resolvedPlacements = new ArrayList<>(starts.size());
                     for (StructureStart start : starts) {
                         BoundingBox footprint = start.getBoundingBox();

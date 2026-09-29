@@ -46,7 +46,8 @@ public final class NativeStructureFactory {
                         + plan.structureKey() + "' has no usable generation biome"));
         ChunkGenerator forcedGenerator = new ForcedStructureChunkGenerator(
                 context.generator(), sourceBiome);
-        StructureStart generated = configured.generate(
+        StructureStart generated = NativeWorldgenVersion.generate(
+                configured,
                 sourceHolder,
                 context.levelKey(),
                 context.registryAccess(),

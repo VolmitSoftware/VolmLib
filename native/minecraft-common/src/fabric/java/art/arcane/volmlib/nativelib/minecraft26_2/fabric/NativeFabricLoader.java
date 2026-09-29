@@ -38,6 +38,9 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.permissions.PermissionLevel;
+import net.minecraft.world.entity.EntitySpawnReason;
+import net.minecraft.world.entity.Mob;
+import net.minecraft.world.level.ServerLevelAccessor;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 
@@ -139,5 +142,10 @@ public final class NativeFabricLoader implements NativeModdedLoader {
         BlockEntity blockEntity = state.hasBlockEntity() ? level.getBlockEntity(position) : null;
         return options.breakProbe().test(() -> PlayerBlockBreakEvents.BEFORE.invoker()
                 .beforeBlockBreak(level, player, position, state, blockEntity));
+    }
+
+    @Override
+    public boolean checkSpawnPosition(Mob mob, ServerLevelAccessor level, EntitySpawnReason reason) {
+        return mob.checkSpawnRules(level, reason) && mob.checkSpawnObstruction(level);
     }
 }

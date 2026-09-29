@@ -181,8 +181,8 @@ public final class NativeStructureVanillaLocator {
             }
             ChunkAccess chunk = level.getChunk(
                     candidatePosition.x(), candidatePosition.z(), ChunkStatus.STRUCTURE_STARTS);
-            StructureStart start = structureManager.getStartForStructure(
-                    SectionPos.bottomOf(chunk), structure, chunk);
+            StructureStart start = NativeWorldgenVersion.startForStructure(
+                    structureManager, structure, chunk);
             if (start == null || !start.isValid()
                     || findUnexplored && !start.canBeReferenced()) {
                 continue;

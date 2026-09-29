@@ -31,8 +31,12 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.EntitySpawnReason;
+import net.minecraft.world.entity.Mob;
+import net.minecraft.world.level.ServerLevelAccessor;
 import net.minecraft.world.level.block.state.BlockState;
 import net.neoforged.neoforge.common.NeoForge;
+import net.neoforged.neoforge.event.EventHooks;
 import net.neoforged.neoforge.event.level.LevelEvent;
 import net.neoforged.neoforge.event.level.block.BreakBlockEvent;
 import net.neoforged.fml.ModList;
@@ -147,5 +151,10 @@ public final class NativeNeoForgeLoader implements NativeModdedLoader {
             NeoForge.EVENT_BUS.post(event);
             return !event.isCanceled();
         });
+    }
+
+    @Override
+    public boolean checkSpawnPosition(Mob mob, ServerLevelAccessor level, EntitySpawnReason reason) {
+        return EventHooks.checkSpawnPosition(mob, level, reason);
     }
 }

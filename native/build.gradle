@@ -28,6 +28,7 @@ subprojects {
 
     if (project.name == 'v26_2_R1') {
         sourceSets.main.java.srcDir(rootProject.file('native/minecraft-common/src/main/java'))
+        sourceSets.main.java.srcDir(rootProject.file('native/minecraft-common/src/26.2/java'))
         sourceSets.main.java.exclude('**/minecraft26_2/modded/**')
     }
 

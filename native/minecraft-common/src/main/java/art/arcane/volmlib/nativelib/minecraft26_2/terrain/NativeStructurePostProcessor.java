@@ -49,11 +49,11 @@ public final class NativeStructurePostProcessor {
             if (NativeStructureTerrainIntegrator.clearsLegacyTemplateAir(
                     target.start(), target.terrain())) {
                 NativeStructureTerrainIntegrator.clearLegacyTemplateAir(
-                        world, area, target.start(), () -> world.getLevel().getStructureManager());
+                        world, area, target.start(), () -> NativeWorldgenVersion.templateManager(world.getLevel()));
             }
         }
         NativeStructureSurfaceSupportBuilder.bridgeRigidPieceSupport(
-                world, area, targets, () -> world.getLevel().getStructureManager());
+                world, area, targets, () -> NativeWorldgenVersion.templateManager(world.getLevel()));
     }
 
 }

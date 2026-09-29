@@ -116,7 +116,8 @@ public final class NativeStructureVolumeSource<C, P extends StructureStartPlan> 
                     if (!decision.generate()) {
                         continue;
                     }
-                    StructureStart generated = structure.generate(
+                    StructureStart generated = NativeWorldgenVersion.generate(
+                            structure,
                             holder,
                             context.levelKey(),
                             context.registryAccess(),

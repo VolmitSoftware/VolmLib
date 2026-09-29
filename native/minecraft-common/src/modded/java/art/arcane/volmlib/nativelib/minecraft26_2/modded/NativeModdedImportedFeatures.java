@@ -38,6 +38,7 @@ import net.minecraft.world.level.levelgen.RandomSupport;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.levelgen.WorldgenRandom;
 import net.minecraft.world.level.levelgen.XoroshiroRandomSource;
+import net.minecraft.world.level.levelgen.placement.FeaturePlacer;
 import net.minecraft.world.level.levelgen.placement.PlacedFeature;
 
 import java.util.ArrayList;
@@ -177,12 +178,14 @@ public final class NativeModdedImportedFeatures {
                 level, centerPos, surfaceFirstFreeY, floorFirstFreeY, placement.stacked(),
                 position -> placement.protectedPosition().test(position.getX(), position.getY(), position.getZ()));
 
+        FeaturePlacer placer = new FeaturePlacer(placementLevel, owner);
+
         try {
             for (int stepIndex = 0; stepIndex < steps.size(); stepIndex++) {
                 if (!table.control().shouldGenerateStepOrdinal(stepIndex)) {
                     continue;
                 }
-                placeStep(placementLevel, table, steps.get(stepIndex), featureRegistry, chunkBiomes, owner,
+                placeStep(placementLevel, table, steps.get(stepIndex), featureRegistry, chunkBiomes, placer,
                         random, decorationSeed, origin, stepIndex);
             }
         } catch (Throwable error) {
@@ -204,7 +207,7 @@ public final class NativeModdedImportedFeatures {
 
     private void placeStep(WorldGenLevel level, FeatureTable table, FeatureSorter.StepFeatureData stepData,
                            Registry<PlacedFeature> featureRegistry, Set<Holder<Biome>> chunkBiomes,
-                           ChunkGenerator owner, WorldgenRandom random, long decorationSeed,
+                           FeaturePlacer placer, WorldgenRandom random, long decorationSeed,
                            BlockPos origin, int stepIndex) {
         IntSet stepFeatures = new IntArraySet();
         for (Holder<Biome> biome : chunkBiomes) {
@@ -233,7 +236,7 @@ public final class NativeModdedImportedFeatures {
             }
             random.setFeatureSeed(decorationSeed, globalIndex, stepIndex);
             level.setCurrentlyGenerating(() -> describeFeature(featureRegistry, feature));
-            feature.placeWithBiomeCheck(level, owner, random, origin);
+            placer.placeWithBiomeCheck(feature, random, origin);
         }
     }
 

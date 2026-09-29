@@ -4,6 +4,7 @@ import net.minecraft.core.BlockPos;
 import art.arcane.volmlib.nativelib.terrain.NativeBlockState;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;
+import net.minecraft.tags.BlockTags;
 import net.minecraft.world.level.EmptyBlockGetter;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
@@ -162,7 +163,7 @@ public final class NativeBlockProperties {
         if (state == null) {
             return false;
         }
-        return NativeBlockMaterial.isSolid(state.getBlock());
+        return state.getBlock().defaultBlockState().is(BlockTags.BLOCKS_MOTION);
     }
 
     public static boolean isOccluding(BlockState state) {
@@ -256,13 +257,13 @@ public final class NativeBlockProperties {
         }
 
         if (onto == Blocks.DIRT_PATH) {
-            if (!NativeBlockMaterial.isSolid(mat)) {
+            if (!isSolid(mat.defaultBlockState())) {
                 return false;
             }
         }
 
         if (PLACE_ONTO_LEAVES.contains(onto)) {
-            return NativeBlockMaterial.isSolid(mat);
+            return isSolid(mat.defaultBlockState());
         }
 
         return true;
