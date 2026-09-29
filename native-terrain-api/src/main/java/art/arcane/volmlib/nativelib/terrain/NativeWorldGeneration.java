@@ -19,7 +19,6 @@ public interface NativeWorldGeneration {
     void abandonBootstrap(World world);
     NativeWorldLifecycleFactory.Controller lifecycle(NativeWorldLifecyclePolicy policy);
     boolean missingDimensionTypes(List<NamespacedKey> keys);
-    String generationRendererIdentity();
 
     record Dimension(String key, int minimumY, int height, int logicalHeight, int worldMinimumY, int worldHeight) { }
     record ScopeRequest(World world, StructureScope scope, Set<String> declaredSources,
