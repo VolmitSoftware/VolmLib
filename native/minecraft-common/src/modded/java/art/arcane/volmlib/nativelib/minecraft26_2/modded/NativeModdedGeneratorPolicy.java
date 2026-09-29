@@ -27,6 +27,7 @@ public interface NativeModdedGeneratorPolicy<C, P extends StructureStartPlan, O 
     NativeModdedStructureStage.Policy<C, P, O> structures();
     NativeSpawnBiomePolicy<C> spawns();
     NativeModdedServer server();
+    NativeModdedLoader loader();
     C current();
     C current(NativeWorld world);
     C current(String worldKey);

@@ -637,7 +637,7 @@ public final class NativeModdedChunkGenerator<C, P extends StructureStartPlan, O
             WorldgenRandom random = new WorldgenRandom(new LegacyRandomSource(RandomSupport.generateUniqueSeed()));
             random.setDecorationSeed(region.getSeed(), center.getMinBlockX(), center.getMinBlockZ());
             NativeInitialMobSpawner.spawn(
-                    region, vanillaBiome == null ? visibleBiome : vanillaBiome, center, random);
+                    region, vanillaBiome == null ? visibleBiome : vanillaBiome, center, random, policy.loader());
         }
     }
 

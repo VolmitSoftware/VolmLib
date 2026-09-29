@@ -26,7 +26,8 @@ import java.util.Optional;
 /**
  * Vanilla's chunk-generation creature pass with the spawn table taken from an explicit biome. Minecraft 26.3 reads
  * the table from the environment attributes at a block position, which cannot express a vanilla spawn biome
- * substituted for a custom Iris biome.
+ * substituted for a custom Iris biome. The final position check goes through the loader, which fires its
+ * spawn-position event on Forge and NeoForge.
  */
 final class NativeInitialMobSpawner {
     private static final System.Logger LOGGER = System.getLogger(NativeInitialMobSpawner.class.getName());
@@ -34,7 +35,8 @@ final class NativeInitialMobSpawner {
     private NativeInitialMobSpawner() {
     }
 
-    static void spawn(WorldGenRegion level, Holder<Biome> biome, ChunkPos chunkPos, RandomSource random) {
+    static void spawn(WorldGenRegion level, Holder<Biome> biome, ChunkPos chunkPos, RandomSource random,
+                      NativeModdedLoader loader) {
         if (!level.getLevel().getGameRules().get(GameRules.SPAWN_MOBS)) {
             return;
         }
@@ -92,8 +94,8 @@ final class NativeInitialMobSpawner {
                         }
 
                         entity.snapTo(fx, pos.getY(), fz, random.nextFloat() * 360.0F, 0.0F);
-                        if (entity instanceof Mob mob && mob.checkSpawnRules(level, EntitySpawnReason.CHUNK_GENERATION)
-                                && mob.checkSpawnObstruction(level)) {
+                        if (entity instanceof Mob mob
+                                && loader.checkSpawnPosition(mob, level, EntitySpawnReason.CHUNK_GENERATION)) {
                             groupSpawnData = mob.finalizeSpawn(level, level.getCurrentDifficultyAt(mob.blockPosition()),
                                     EntitySpawnReason.CHUNK_GENERATION, groupSpawnData);
                             level.addFreshEntityWithPassengers(mob);
