@@ -1,0 +1,42 @@
+plugins {
+    id 'java-library'
+    id 'maven-publish'
+}
+
+base {
+    archivesName = 'volmlib-localization'
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(25)
+    }
+    withSourcesJar()
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.release.set(17)
+    options.compilerArgs.add('-parameters')
+    options.encoding = 'UTF-8'
+}
+
+dependencies {
+    api('net.kyori:adventure-api:4.26.1')
+    implementation('net.kyori:adventure-text-minimessage:4.26.1')
+    implementation('net.kyori:adventure-text-serializer-legacy:4.26.1')
+    implementation('net.kyori:adventure-text-serializer-plain:4.26.1')
+    api('com.google.code.gson:gson:2.10.1')
+    implementation('com.moandjiezana.toml:toml4j:0.7.2') {
+        transitive = false
+    }
+    testImplementation('junit:junit:4.13.2')
+}
+
+publishing {
+    publications {
+        mavenJava(MavenPublication) {
+            artifactId = 'volmlib-localization'
+            from(components.java)
+        }
+    }
+}

@@ -1,0 +1,35 @@
+plugins {
+    id 'java-library'
+    id 'maven-publish'
+}
+
+base {
+    archivesName = 'volmlib-web'
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(25)
+    }
+    withSourcesJar()
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.release.set(17)
+    options.compilerArgs.add('-parameters')
+    options.encoding = 'UTF-8'
+}
+
+dependencies {
+    implementation('com.google.code.gson:gson:2.10.1')
+    testImplementation('junit:junit:4.13.2')
+}
+
+publishing {
+    publications {
+        mavenJava(MavenPublication) {
+            artifactId = 'volmlib-web'
+            from(components.java)
+        }
+    }
+}

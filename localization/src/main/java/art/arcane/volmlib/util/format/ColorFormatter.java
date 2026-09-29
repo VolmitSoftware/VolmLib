@@ -1,11 +1,9 @@
 package art.arcane.volmlib.util.format;
 
-import org.bukkit.ChatColor;
-
 import java.util.regex.Pattern;
 
 public final class ColorFormatter {
-    private static final Pattern STRIP_COLOR_PATTERN = Pattern.compile("(?i)" + ChatColor.COLOR_CHAR + "[0-9A-FK-ORX]");
+    private static final Pattern STRIP_COLOR_PATTERN = Pattern.compile("(?i)" + '\u00a7' + "[0-9A-FK-ORX]");
 
     private ColorFormatter() {
     }
@@ -39,7 +37,7 @@ public final class ColorFormatter {
             if (current == altColorChar && i + 1 < length) {
                 char next = chars[i + 1];
                 if (isLegacyColorCode(next)) {
-                    translated.append(ChatColor.COLOR_CHAR).append(Character.toLowerCase(next));
+                    translated.append('\u00a7').append(Character.toLowerCase(next));
                     i++;
                     continue;
                 }
@@ -116,7 +114,35 @@ public final class ColorFormatter {
             return "";
         }
 
-        return ChatColor.getLastColors(input);
+        StringBuilder colors = new StringBuilder();
+        for (int index = input.length() - 2; index >= 0; index--) {
+            if (input.charAt(index) != '\u00a7') {
+                continue;
+            }
+            if (index >= 12 && input.charAt(index - 11) == 'x'
+                    && input.charAt(index - 12) == '\u00a7' && expandedHexAt(input, index - 12)) {
+                colors.insert(0, input.substring(index - 12, index + 2));
+                break;
+            }
+            char code = input.charAt(index + 1);
+            if ("0123456789abcdefklmnor".indexOf(code) < 0) {
+                continue;
+            }
+            colors.insert(0, "\u00a7" + code);
+            if ("0123456789abcdefr".indexOf(code) >= 0) {
+                break;
+            }
+        }
+        return colors.toString();
+    }
+
+    private static boolean expandedHexAt(String input, int offset) {
+        for (int index = offset + 2; index < offset + 14; index += 2) {
+            if (input.charAt(index) != '\u00a7' || !isHexChar(input.charAt(index + 1))) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static boolean isLegacyColorCode(char value) {
@@ -138,9 +164,9 @@ public final class ColorFormatter {
     }
 
     private static void appendHexColor(StringBuilder target, String hex) {
-        target.append(ChatColor.COLOR_CHAR).append('x');
+        target.append('\u00a7').append('x');
         for (int i = 0; i < hex.length(); i++) {
-            target.append(ChatColor.COLOR_CHAR).append(Character.toLowerCase(hex.charAt(i)));
+            target.append('\u00a7').append(Character.toLowerCase(hex.charAt(i)));
         }
     }
 
