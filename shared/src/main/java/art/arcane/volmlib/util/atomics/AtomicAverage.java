@@ -1,64 +1,43 @@
 package art.arcane.volmlib.util.atomics;
 
 import com.google.common.util.concurrent.AtomicDoubleArray;
-import art.arcane.volmlib.util.data.DoubleArrayUtils;
+
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.DoubleAdder;
 
 /**
- * Fast rolling average using an atomic ring buffer.
+ * Lock-free rolling average over the last {@code size} values. The first value fills the whole window. Each put
+ * swaps one slot and adds the difference to a striped sum, so the sum always matches the window's contents and
+ * concurrent writers never serialize on a lock.
  */
 public class AtomicAverage {
     protected final AtomicDoubleArray values;
-    protected transient int cursor;
-    private transient double average;
-    private transient double lastSum;
-    private transient boolean dirty;
-    private transient boolean brandNew;
+    private final AtomicInteger cursor = new AtomicInteger();
+    private final AtomicBoolean brandNew = new AtomicBoolean(true);
+    private final DoubleAdder sum = new DoubleAdder();
 
     public AtomicAverage(int size) {
         values = new AtomicDoubleArray(size);
-        DoubleArrayUtils.fill(values, 0);
-        brandNew = true;
-        average = 0;
-        cursor = 0;
-        lastSum = 0;
-        dirty = false;
     }
 
-    public synchronized void put(double i) {
-        dirty = true;
-
-        if (brandNew) {
-            DoubleArrayUtils.fill(values, i);
-            lastSum = size() * i;
-            brandNew = false;
+    public void put(double i) {
+        if (brandNew.get() && brandNew.compareAndSet(true, false)) {
+            for (int slot = 0; slot < size(); slot++) {
+                sum.add(i - values.getAndSet(slot, i));
+            }
             return;
         }
 
-        double current = values.get(cursor);
-        lastSum = (lastSum - current) + i;
-        values.set(cursor, i);
-        cursor = cursor + 1 < size() ? cursor + 1 : 0;
+        int slot = Math.floorMod(cursor.getAndIncrement(), size());
+        sum.add(i - values.getAndSet(slot, i));
     }
 
-    public synchronized double getAverage() {
-        if (dirty) {
-            calculateAverage();
-            return getAverage();
-        }
-
-        return average;
-    }
-
-    private void calculateAverage() {
-        average = lastSum / (double) size();
-        dirty = false;
+    public double getAverage() {
+        return sum.sum() / (double) size();
     }
 
     public int size() {
         return values.length();
-    }
-
-    public boolean isDirty() {
-        return dirty;
     }
 }

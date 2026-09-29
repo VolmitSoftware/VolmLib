@@ -30,8 +30,9 @@ public abstract class MantleAccessSupport<P> {
     protected P accessRegion(int x, int z) {
         boolean unload = unloadSemaphore.tryAcquire();
         try {
-            // While this thread holds an unload permit no eviction or flush can run (they need
-            // every permit), so the loaded plate can be read without the region lock.
+            // While this thread holds an unload permit no unload or flush can run (they need every
+            // permit), so the loaded plate is read without the region lock. A targeted save can still
+            // seal it right after; Mantle callers pin the plate and retry when that happened.
             P loaded = unload ? acquireLoadedRegionGuarded(x, z) : acquireLoadedRegion(x, z);
             if (loaded != null) {
                 return loaded;

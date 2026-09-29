@@ -20,7 +20,6 @@ package art.arcane.volmlib.util.mantle.io;
 
 import art.arcane.volmlib.util.io.CountingDataInputStream;
 
-import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
@@ -47,7 +46,7 @@ public final class IOWorkerRuntimeSupport {
     public <T> T read(String name, PlateReader<T> reader) throws IOException {
         return ioWorkerSupport.withChannel(name, channel -> {
             try (InputStream decoded = codecSupport.decode(channel.read());
-                 CountingDataInputStream in = CountingDataInputStream.wrap(new BufferedInputStream(decoded))) {
+                 CountingDataInputStream in = CountingDataInputStream.readAhead(decoded)) {
                 return reader.read(name, in);
             }
         });

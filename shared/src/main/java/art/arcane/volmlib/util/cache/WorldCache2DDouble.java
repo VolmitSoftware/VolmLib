@@ -1,16 +1,20 @@
 package art.arcane.volmlib.util.cache;
 
+import art.arcane.volmlib.util.function.IntIntToDoubleFunction;
 import com.googlecode.concurrentlinkedhashmap.ConcurrentLinkedHashMap;
 
-import java.util.function.ToDoubleBiFunction;
-
 public class WorldCache2DDouble {
-    private final ConcurrentLinkedHashMap<Long, ChunkCache2DDouble> chunks;
-    private final ToDoubleBiFunction<Integer, Integer> resolver;
-    private final ThreadLocal<RecentChunk> recent = new ThreadLocal<>();
+    private static final int RECENT_KEY_SLOTS = 64;
+    private static final int MAXIMUM_REFRESH_INTERVAL = 64;
 
-    public WorldCache2DDouble(ToDoubleBiFunction<Integer, Integer> resolver, int size) {
+    private final ConcurrentLinkedHashMap<Long, ChunkCache2DDouble> chunks;
+    private final int refreshInterval;
+    private final IntIntToDoubleFunction resolver;
+    private final ThreadLocal<RecentChunk> recent = ThreadLocal.withInitial(RecentChunk::new);
+
+    public WorldCache2DDouble(IntIntToDoubleFunction resolver, int size) {
         this.resolver = resolver;
+        this.refreshInterval = Math.max(1, Math.min(MAXIMUM_REFRESH_INTERVAL, size / 4));
         this.chunks = new ConcurrentLinkedHashMap.Builder<Long, ChunkCache2DDouble>()
                 .initialCapacity(size)
                 .maximumWeightedCapacity(size)
@@ -65,18 +69,36 @@ public class WorldCache2DDouble {
 
     private ChunkCache2DDouble chunkFor(long key) {
         RecentChunk recent = this.recent.get();
-        if (recent != null && recent.key == key) {
+        if (recent.chunk != null && recent.key == key) {
             return recent.chunk;
         }
         long mixedKey = CacheKey.mix(key);
-        ChunkCache2DDouble chunk = chunks.get(mixedKey);
+        ChunkCache2DDouble chunk = recent.refresh(mixedKey, refreshInterval)
+                ? chunks.get(mixedKey) : chunks.getQuietly(mixedKey);
         if (chunk == null) {
             chunk = chunks.computeIfAbsent(mixedKey, ignored -> new ChunkCache2DDouble());
         }
-        this.recent.set(new RecentChunk(key, chunk));
+        recent.key = key;
+        recent.chunk = chunk;
         return chunk;
     }
 
-    private record RecentChunk(long key, ChunkCache2DDouble chunk) {
+    private static final class RecentChunk {
+        private final long[] keys = new long[RECENT_KEY_SLOTS];
+        private final long[] refreshedAt = new long[RECENT_KEY_SLOTS];
+        private long key;
+        private ChunkCache2DDouble chunk;
+        private long accesses;
+
+        private boolean refresh(long key, int interval) {
+            long current = ++accesses;
+            int slot = (int) key & (RECENT_KEY_SLOTS - 1);
+            if (refreshedAt[slot] != 0L && keys[slot] == key && current - refreshedAt[slot] < interval) {
+                return false;
+            }
+            keys[slot] = key;
+            refreshedAt[slot] = current;
+            return true;
+        }
     }
 }

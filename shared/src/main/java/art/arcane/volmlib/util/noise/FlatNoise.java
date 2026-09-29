@@ -37,4 +37,9 @@ public class FlatNoise implements NoiseGenerator {
     public double noise(double x, double y, double z) {
         return 1D;
     }
+
+    @Override
+    public boolean isConstant() {
+        return true;
+    }
 }

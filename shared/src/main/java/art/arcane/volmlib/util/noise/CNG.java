@@ -988,15 +988,75 @@ public class CNG {
 
     private static final int COORD_CACHE_SIZE = 1 << 16;
     private static final int COORD_CACHE_MASK = COORD_CACHE_SIZE - 1;
+    private static final int SIGNED_MEMO_CAPACITY = 128;
+    private static final ThreadLocal<SignedCaches> SIGNED_CACHES = ThreadLocal.withInitial(SignedCaches::new);
 
-    private static final class CoordCache {
-        private final Object[] owner = new Object[COORD_CACHE_SIZE];
-        private final long[] kx = new long[COORD_CACHE_SIZE];
-        private final long[] kz = new long[COORD_CACHE_SIZE];
-        private final double[] value = new double[COORD_CACHE_SIZE];
+    /**
+     * Per-thread signed-noise caches. The coordinate tables keep root results across calls (key words and the
+     * raw value bits interleaved, so a probe touches two cache lines instead of five). Fracture levels below a
+     * root repeat only the rotated coordinates of that one sample, so they use a small memo that lives for one
+     * root call and stays in L1.
+     */
+    private static final class SignedCaches {
+        private final Object[] owners2D = new Object[COORD_CACHE_SIZE];
+        private final long[] entries2D = new long[COORD_CACHE_SIZE * 4];
+        private final Object[] owners3D = new Object[COORD_CACHE_SIZE];
+        private final long[] entries3D = new long[COORD_CACHE_SIZE * 4];
+        private final SignedMemo memo2D = new SignedMemo();
+        private final SignedMemo memo3D = new SignedMemo();
+        private boolean active;
+
+        private void clearMemos() {
+            memo2D.clear();
+            memo3D.clear();
+            active = false;
+        }
     }
 
-    private static final ThreadLocal<CoordCache> COORD_CACHE_2D = ThreadLocal.withInitial(CoordCache::new);
+    private static final class SignedMemo {
+        private final Object[] owners = new Object[SIGNED_MEMO_CAPACITY * 2];
+        private final long[] keys = new long[SIGNED_MEMO_CAPACITY * 6];
+        private final double[] values = new double[SIGNED_MEMO_CAPACITY * 2];
+        private final int[] touched = new int[SIGNED_MEMO_CAPACITY];
+        private int size;
+
+        private int slot(Object owner, int salt, long x, long y, long z) {
+            long hash = x * 0x9E3779B97F4A7C15L ^ y * 0xD6E8FEB86659FD93L ^ z * 0xC2B2AE3D27D4EB4FL
+                    ^ salt * 0x165667B19E3779F9L;
+            hash ^= hash >>> 33;
+            hash *= 0xFF51AFD7ED558CCDL;
+            hash ^= hash >>> 33;
+            int slot = (int) hash & (owners.length - 1);
+            while (owners[slot] != null
+                    && (owners[slot] != owner || keys[slot * 3] != x || keys[slot * 3 + 1] != y || keys[slot * 3 + 2] != z)) {
+                slot = (slot + 1) & (owners.length - 1);
+            }
+            return slot;
+        }
+
+        private void store(Object owner, int salt, long x, long y, long z, double value) {
+            if (size >= SIGNED_MEMO_CAPACITY) {
+                return;
+            }
+            int slot = slot(owner, salt, x, y, z);
+            if (owners[slot] != null) {
+                return;
+            }
+            touched[size++] = slot;
+            owners[slot] = owner;
+            keys[slot * 3] = x;
+            keys[slot * 3 + 1] = y;
+            keys[slot * 3 + 2] = z;
+            values[slot] = value;
+        }
+
+        private void clear() {
+            for (int index = 0; index < size; index++) {
+                owners[touched[index]] = null;
+            }
+            size = 0;
+        }
+    }
 
     private static int coordSlot(long a, long b, int salt) {
         long h = (a * 0x9E3779B97F4A7C15L) ^ (b * 0xC2B2AE3D27D4EB4FL) ^ (salt * 0x165667B19E3779F9L);
@@ -1009,27 +1069,56 @@ public class CNG {
     public double noiseFastSigned2D(double x, double z) {
         long kx = Double.doubleToRawLongBits(x);
         long kz = Double.doubleToRawLongBits(z);
-        CoordCache cc = COORD_CACHE_2D.get();
+        SignedCaches caches = SIGNED_CACHES.get();
         Object identity = coordCacheIdentity();
         int slot = coordSlot(kx, kz, coordCacheSalt());
-        if (cc.owner[slot] == identity && cc.kx[slot] == kx && cc.kz[slot] == kz) {
-            return cc.value[slot];
+        int entry = slot << 2;
+        long[] entries = caches.entries2D;
+        if (caches.owners2D[slot] == identity && entries[entry] == kx && entries[entry + 1] == kz) {
+            return Double.longBitsToDouble(entries[entry + 2]);
         }
-        double computed = computeNoiseFastSigned2D(x, z);
-        cc.owner[slot] = identity;
-        cc.kx[slot] = kx;
-        cc.kz[slot] = kz;
-        cc.value[slot] = computed;
+        boolean root = !caches.active;
+        caches.active = true;
+        double computed;
+        try {
+            computed = computeNoiseFastSigned2D(x, z, caches);
+        } finally {
+            if (root) {
+                caches.clearMemos();
+            }
+        }
+        caches.owners2D[slot] = identity;
+        entries[entry] = kx;
+        entries[entry + 1] = kz;
+        entries[entry + 2] = Double.doubleToRawLongBits(computed);
         return computed;
     }
 
-    private double computeNoiseFastSigned2D(double x, double z) {
+    private double fractureSigned2D(double x, double z, SignedCaches caches) {
+        if (getClass() != CNG.class) {
+            return noiseFastSigned2D(x, z);
+        }
+        long kx = Double.doubleToRawLongBits(x);
+        long kz = Double.doubleToRawLongBits(z);
+        SignedMemo memo = caches.memo2D;
+        Object identity = coordCacheIdentity();
+        int salt = coordCacheSalt();
+        int slot = memo.slot(identity, salt, kx, 0L, kz);
+        if (memo.owners[slot] != null) {
+            return memo.values[slot];
+        }
+        double computed = computeNoiseFastSigned2D(x, z, caches);
+        memo.store(identity, salt, kx, 0L, kz, computed);
+        return computed;
+    }
+
+    private double computeNoiseFastSigned2D(double x, double z, SignedCaches caches) {
         if (isCachedCoordinate(x, z)) {
             return (getCachedNoise(x, z) * 2D) - 1D;
         }
 
         if (hasIdentitySignedFastPath()) {
-            return getSignedNoise(x, z);
+            return getSignedNoise(x, z, caches);
         }
 
         return (noiseFast2D(x, z) * 2D) - 1D;
@@ -1047,33 +1136,58 @@ public class CNG {
         return applyPost(getNoise(x, y, z), x, y, z);
     }
 
-    private static final class CoordCache3D {
-        private final Object[] owner = new Object[COORD_CACHE_SIZE];
-        private final long[] kx = new long[COORD_CACHE_SIZE];
-        private final long[] ky = new long[COORD_CACHE_SIZE];
-        private final long[] kz = new long[COORD_CACHE_SIZE];
-        private final double[] value = new double[COORD_CACHE_SIZE];
-    }
-
-    private static final ThreadLocal<CoordCache3D> COORD_CACHE_3D = ThreadLocal.withInitial(CoordCache3D::new);
-
     public double noiseFastSigned3D(double x, double y, double z) {
         long kx = Double.doubleToRawLongBits(x);
         long ky = Double.doubleToRawLongBits(y);
         long kz = Double.doubleToRawLongBits(z);
-        CoordCache3D cc = COORD_CACHE_3D.get();
+        SignedCaches caches = SIGNED_CACHES.get();
         Object identity = coordCacheIdentity();
         int slot = coordSlot(kx ^ Long.rotateLeft(ky, 21), kz, coordCacheSalt());
-        if (cc.owner[slot] == identity && cc.kx[slot] == kx && cc.ky[slot] == ky && cc.kz[slot] == kz) {
-            return cc.value[slot];
+        int entry = slot << 2;
+        long[] entries = caches.entries3D;
+        if (caches.owners3D[slot] == identity && entries[entry] == kx && entries[entry + 1] == ky
+                && entries[entry + 2] == kz) {
+            return Double.longBitsToDouble(entries[entry + 3]);
         }
-        double computed = hasIdentitySignedFastPath() ? getSignedNoise(x, y, z) : (noiseFast3D(x, y, z) * 2D) - 1D;
-        cc.owner[slot] = identity;
-        cc.kx[slot] = kx;
-        cc.ky[slot] = ky;
-        cc.kz[slot] = kz;
-        cc.value[slot] = computed;
+        boolean root = !caches.active;
+        caches.active = true;
+        double computed;
+        try {
+            computed = computeNoiseFastSigned3D(x, y, z, caches);
+        } finally {
+            if (root) {
+                caches.clearMemos();
+            }
+        }
+        caches.owners3D[slot] = identity;
+        entries[entry] = kx;
+        entries[entry + 1] = ky;
+        entries[entry + 2] = kz;
+        entries[entry + 3] = Double.doubleToRawLongBits(computed);
         return computed;
+    }
+
+    private double fractureSigned3D(double x, double y, double z, SignedCaches caches) {
+        if (getClass() != CNG.class) {
+            return noiseFastSigned3D(x, y, z);
+        }
+        long kx = Double.doubleToRawLongBits(x);
+        long ky = Double.doubleToRawLongBits(y);
+        long kz = Double.doubleToRawLongBits(z);
+        SignedMemo memo = caches.memo3D;
+        Object identity = coordCacheIdentity();
+        int salt = coordCacheSalt();
+        int slot = memo.slot(identity, salt, kx, ky, kz);
+        if (memo.owners[slot] != null) {
+            return memo.values[slot];
+        }
+        double computed = computeNoiseFastSigned3D(x, y, z, caches);
+        memo.store(identity, salt, kx, ky, kz, computed);
+        return computed;
+    }
+
+    private double computeNoiseFastSigned3D(double x, double y, double z, SignedCaches caches) {
+        return hasIdentitySignedFastPath() ? getSignedNoise(x, y, z, caches) : (noiseFast3D(x, y, z) * 2D) - 1D;
     }
 
     public CNG pow(double power) {
@@ -1101,6 +1215,15 @@ public class CNG {
 
     public boolean isStatic() {
         return generator != null && generator.isStatic();
+    }
+
+    /**
+     * True when every sample is the same value: the base generator ignores its coordinates and no
+     * child mixes in another field. A fracture only moves the coordinates, so it cannot change that.
+     */
+    public boolean isConstant() {
+        return getClass() == CNG.class && generator != null && generator.isConstant()
+                && (children == null || children.isEmpty());
     }
 
     private boolean isIdentityPostFastPath() {
@@ -1189,7 +1312,7 @@ public class CNG {
         return ((signedNoise + 1D) * opacity) - 1D;
     }
 
-    private double getSignedNoise(double x, double z) {
+    private double getSignedNoise(double x, double z, SignedCaches caches) {
         double scl = effectiveScale;
         NoiseGenerator localGenerator = generator;
         CNG localFracture = fracture;
@@ -1198,12 +1321,12 @@ public class CNG {
             return signedWithOpacity(localGenerator.noiseSigned(x * scl, z * scl));
         }
 
-        double fx = x + (localFracture.noiseFastSigned2D(x, z) * signedFractureScale);
-        double fz = z + (localFracture.noiseFastSigned2D(z, x) * signedFractureScale);
+        double fx = x + (localFracture.fractureSigned2D(x, z, caches) * signedFractureScale);
+        double fz = z + (localFracture.fractureSigned2D(z, x, caches) * signedFractureScale);
         return signedWithOpacity(localGenerator.noiseSigned(fx * scl, fz * scl));
     }
 
-    private double getSignedNoise(double x, double y, double z) {
+    private double getSignedNoise(double x, double y, double z, SignedCaches caches) {
         double scl = effectiveScale;
         NoiseGenerator localGenerator = generator;
         CNG localFracture = fracture;
@@ -1212,9 +1335,9 @@ public class CNG {
             return signedWithOpacity(localGenerator.noiseSigned(x * scl, y * scl, z * scl));
         }
 
-        double fx = x + (localFracture.noiseFastSigned3D(x, y, z) * signedFractureScale);
-        double fy = y + (localFracture.noiseFastSigned2D(y, x) * signedFractureScale);
-        double fz = z + (localFracture.noiseFastSigned3D(z, x, y) * signedFractureScale);
+        double fx = x + (localFracture.fractureSigned3D(x, y, z, caches) * signedFractureScale);
+        double fy = y + (localFracture.fractureSigned2D(y, x, caches) * signedFractureScale);
+        double fz = z + (localFracture.fractureSigned3D(z, x, y, caches) * signedFractureScale);
         return signedWithOpacity(localGenerator.noiseSigned(fx * scl, fy * scl, fz * scl));
     }
 

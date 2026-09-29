@@ -226,6 +226,13 @@ public interface Matter {
 
     default void writeDos(DataOutputStream dos) throws IOException {
         trimSlices();
+        writeTrimmedDos(dos);
+    }
+
+    /**
+     * {@link #writeDos} for matter whose empty slices were already dropped by {@link #trimSlices()}.
+     */
+    default void writeTrimmedDos(DataOutputStream dos) throws IOException {
         dos.writeInt(getWidth());
         dos.writeInt(getHeight());
         dos.writeInt(getDepth());

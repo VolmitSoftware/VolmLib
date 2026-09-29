@@ -11,6 +11,9 @@ public interface MantleDataAdapter<M> {
 
     M readSection(CountingDataInputStream din) throws IOException;
 
+    /**
+     * Called only for a section that {@link #trimSection} just trimmed and found non-empty.
+     */
     void writeSection(M section, DataOutputStream dos) throws IOException;
 
     void trimSection(M section);
