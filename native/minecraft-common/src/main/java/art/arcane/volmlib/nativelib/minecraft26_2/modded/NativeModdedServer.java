@@ -42,6 +42,23 @@ public final class NativeModdedServer {
         return new NativeRegistryDefinitions(() -> Objects.requireNonNull(server.get(), "Minecraft server").server.registryAccess());
     }
 
+    public static NativeRegistryAccess registryAccess(Supplier<NativeModdedServer> server, Consumer<String> warnings) {
+        return new NativeRegistryAccess(new NativeRegistryAccess.Configuration(() -> {
+            NativeModdedServer host = server.get();
+            return host == null ? null : host.registryAccess();
+        }, () -> {
+            NativeModdedServer host = server.get();
+            return host == null ? null : host.server.reloadableRegistries().lookup();
+        }, warnings));
+    }
+
+    public static NativeTileReader tileReader(Supplier<NativeModdedServer> server) {
+        return new NativeTileReader(() -> {
+            NativeModdedServer host = server.get();
+            return host == null ? null : host.registryAccess();
+        });
+    }
+
     public RegistryAccess registryAccess() {
         return server.registryAccess();
     }
