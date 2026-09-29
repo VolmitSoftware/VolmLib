@@ -109,6 +109,11 @@ public class HyperLockSupport {
         }
     }
 
+    public boolean hasQueuedThreads(int x, int z) {
+        OwnedLock lock = locks.get(CacheKey.mix(CacheKey.key(x, z)));
+        return lock != null && lock.hasQueuedThreads();
+    }
+
     public boolean tryLock(int x, int z) {
         return getLock(x, z).tryLock();
     }

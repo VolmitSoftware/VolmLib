@@ -48,13 +48,11 @@ import java.util.function.Consumer;
 
 public final class NativeRegistryAccess {
 
-    private final Supplier<HolderLookup.Provider> registries;
-    private final Supplier<HolderLookup.Provider> reloadableRegistries;
+    private final Supplier<NativeModdedServer> server;
     private final Consumer<String> warnings;
 
     public NativeRegistryAccess(Configuration configuration) {
-        registries = configuration.registries();
-        reloadableRegistries = configuration.reloadableRegistries();
+        server = configuration.server();
         warnings = configuration.warnings();
     }
 
@@ -117,7 +115,7 @@ public final class NativeRegistryAccess {
 
     public List<String> structureKeys() {
         List<String> keys = new ArrayList<>();
-        HolderLookup.Provider access = registries.get();
+        HolderLookup.Provider access = registries();
         if (access == null) {
             warnings.accept("structure");
             return keys;
@@ -164,12 +162,13 @@ public final class NativeRegistryAccess {
 
     public List<String> lootTableKeys() {
         List<String> keys = new ArrayList<>();
-        HolderLookup.Provider access = reloadableRegistries.get();
-        if (access == null) {
+        NativeModdedServer host = server.get();
+        if (host == null) {
             warnings.accept("loot table");
             return keys;
         }
-        HolderLookup.RegistryLookup<LootTable> registry = access.lookupOrThrow(Registries.LOOT_TABLE);
+        HolderLookup.RegistryLookup<LootTable> registry = host.server().reloadableRegistries().lookup()
+                .lookupOrThrow(Registries.LOOT_TABLE);
         registry.listElementIds().forEach(key -> keys.add(key.identifier().toString()));
         return keys;
     }
@@ -200,8 +199,13 @@ public final class NativeRegistryAccess {
         return signature.toString();
     }
 
+    private HolderLookup.Provider registries() {
+        NativeModdedServer host = server.get();
+        return host == null ? null : host.registryAccess();
+    }
+
     private <T> HolderLookup.RegistryLookup<T> registry(ResourceKey<? extends Registry<? extends T>> key) {
-        HolderLookup.Provider access = registries.get();
+        HolderLookup.Provider access = registries();
         return access == null ? null : access.lookupOrThrow(key);
     }
 
@@ -222,8 +226,7 @@ public final class NativeRegistryAccess {
         return new NativeBlockProperty(property.getName(), "string", property.getName(defaultValue), List.copyOf(allowedValues), null);
     }
 
-    public record Configuration(Supplier<HolderLookup.Provider> registries,
-                                Supplier<HolderLookup.Provider> reloadableRegistries,
+    public record Configuration(Supplier<NativeModdedServer> server,
                                 Consumer<String> warnings) {
     }
 }

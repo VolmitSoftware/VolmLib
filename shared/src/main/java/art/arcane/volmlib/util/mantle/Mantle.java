@@ -608,7 +608,7 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
                         || !loadedRegions.containsKey(candidate.id())) {
                     continue;
                 }
-                if (saveTectonicPlateLocked(candidate.id(), System.nanoTime())) {
+                if (saveTectonicPlateLocked(candidate.id(), System.nanoTime(), true)) {
                     return true;
                 }
             } finally {
@@ -917,13 +917,13 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
             return false;
         }
         try {
-            return saveTectonicPlateLocked(id, System.nanoTime());
+            return saveTectonicPlateLocked(id, System.nanoTime(), false);
         } finally {
             hyperLock.unlock(regionX, regionZ);
         }
     }
 
-    private boolean saveTectonicPlateLocked(long id, long deadlineNanos) {
+    private boolean saveTectonicPlateLocked(long id, long deadlineNanos, boolean retainDemanded) {
         P plate = loadedRegions.get(id);
         if (plate == null) {
             return true;
@@ -941,6 +941,12 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
         } catch (Exception error) {
             throw new IllegalStateException("Failed to save Tectonic Plate "
                     + CacheKey.keyX(id) + " " + CacheKey.keyZ(id), error);
+        }
+
+        if (retainDemanded && hyperLock.hasQueuedThreads(CacheKey.keyX(id), CacheKey.keyZ(id))) {
+            plate.reopen();
+            use(id);
+            return false;
         }
 
         if (loadedRegions.remove(id, plate)) {

@@ -17,6 +17,7 @@ import org.objectweb.asm.Opcodes;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.net.URL;
 import java.net.URLClassLoader;
 import java.util.ArrayList;
@@ -265,6 +266,40 @@ class PluginPackagingPluginTest {
         BuildResult result = runner("jar").buildAndFail();
         assertTrue(result.getOutput().contains("byte budget"), result.getOutput());
         assertTrue(result.getOutput().contains("7600000"), result.getOutput());
+    }
+
+    @Test
+    void intermediateArchiveDefersItsBudgetToTheFinalDistribution() throws IOException {
+        fixture(1, "intermediate = true", false);
+        BuildResult result = runner("jar", "verifyPluginJars").build();
+        assertEquals(TaskOutcome.SUCCESS, result.task(":verifyDistributionPackaging").getOutcome());
+        JsonObject report = report();
+        assertEquals("release", report.get("mode").getAsString());
+        assertEquals("final distribution", report.get("budgetAppliesTo").getAsString());
+        assertTrue(report.getAsJsonObject("shrink").get("applied").getAsBoolean());
+        assertTrue(strings(report, "errors").isEmpty(), report.toString());
+        assertEquals(1, strings(report, "warnings").size(), report.toString());
+        assertTrue(strings(report, "warnings").get(0).contains("byte budget"), report.toString());
+        Files.writeString(directory.resolve("build.gradle"),
+                "\npluginPackaging.artifacts.distribution.intermediate = false\n",
+                StandardOpenOption.APPEND);
+        BuildResult finalArtifact = runner("jar").buildAndFail();
+        assertTrue(finalArtifact.getOutput().contains("byte budget"), finalArtifact.getOutput());
+        assertEquals("artifact", report().get("budgetAppliesTo").getAsString());
+    }
+
+    @Test
+    void intermediateArchiveStillRequiresItsEntries() throws IOException {
+        fixture(1, "intermediate = true; requiredEntries = ['plugin.yml', 'missing.yml']", false);
+        BuildResult result = runner("jar").buildAndFail();
+        assertTrue(result.getOutput().contains("Missing required entry: missing.yml"), result.getOutput());
+    }
+
+    @Test
+    void intermediateArchiveStillRejectsForbiddenEntries() throws IOException {
+        fixture(1, "intermediate = true; forbiddenPrefixes = ['owned/']", false);
+        BuildResult result = runner("jar").buildAndFail();
+        assertTrue(result.getOutput().contains("Forbidden bundled entry: owned/Main.class"), result.getOutput());
     }
 
     @Test

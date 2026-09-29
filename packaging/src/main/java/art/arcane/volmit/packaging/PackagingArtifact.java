@@ -32,6 +32,7 @@ public class PackagingArtifact implements Named {
     private boolean stripLocalVariables;
     private boolean releaseCompression;
     private boolean packed;
+    private boolean intermediate;
     private List<String> packedEntrypoints = new ArrayList<>();
     private List<String> packedJarAccessors = new ArrayList<>();
     private List<String> prunePrefixes = new ArrayList<>();
@@ -132,6 +133,14 @@ public class PackagingArtifact implements Named {
 
     public void setPacked(boolean packed) {
         this.packed = packed;
+    }
+
+    public boolean isIntermediate() {
+        return intermediate;
+    }
+
+    public void setIntermediate(boolean intermediate) {
+        this.intermediate = intermediate;
     }
 
     public List<String> getPackedEntrypoints() {

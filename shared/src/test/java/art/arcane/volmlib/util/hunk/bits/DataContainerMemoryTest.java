@@ -41,6 +41,44 @@ public class DataContainerMemoryTest {
     };
 
     @Test
+    public void repeatedSerializationKeepsExactBytesAcrossPaletteScanBoundaries() throws Exception {
+        for (int cardinality : new int[]{1, 2, 3, 7, 15, 16, 31, 63, 64, 65, 255}) {
+            DataContainer<Integer> container = new DataContainer<>(INTEGERS, 512);
+            Integer[] values = new Integer[512];
+            List<Integer> insertionOrder = new ArrayList<>();
+            for (int value = 0; value < cardinality; value++) {
+                insertionOrder.add(value + 1000);
+            }
+            for (int position = 0; position < values.length; position++) {
+                values[position] = 1000 + position % cardinality;
+                container.set(position, values[position]);
+            }
+            byte[] expected = originalWireBytes(values, insertionOrder);
+            assertArrayEquals(expected, container.write());
+            assertArrayEquals(expected, container.write());
+            for (int position = 0; position < values.length; position++) {
+                if ((values[position] & 1) == 0) {
+                    values[position] = null;
+                    container.set(position, null);
+                }
+            }
+            expected = originalWireBytes(values, insertionOrder);
+            assertArrayEquals(expected, container.write());
+            assertArrayEquals(expected, container.write());
+            insertionOrder.removeIf(value -> (value & 1) == 0);
+            insertionOrder.add(1000);
+            values[511] = 1000;
+            container.set(511, 1000);
+            expected = originalWireBytes(values, insertionOrder);
+            assertArrayEquals(expected, container.write());
+            DataContainer<Integer> loaded = new DataContainer<>(
+                    new DataInputStream(new ByteArrayInputStream(expected)), INTEGERS);
+            assertValues(values, loaded);
+            assertArrayEquals(expected, loaded.write());
+        }
+    }
+
+    @Test
     public void selectedPositionCopiesMatchScalarReadsBeforeAndAfterExpansion() {
         DataContainer<Integer> container = new DataContainer<>(INTEGERS, 4096);
         int[] positions = {0, 1, 4, 16, 64, 256, 1024, 4095, 0};

@@ -433,11 +433,37 @@ public class DataContainer<T> {
      */
     private void trim() {
         DataBits localData = data;
-        int[] remap = new int[Math.max(palette.size() + 1, 16)];
-        int distinct = 0;
-        int maxId = 0;
+        int paletteSize = palette.size();
+        long present = 0L;
+        int scanned = 0;
+        if (paletteSize <= 63) {
+            long allPresent = (1L << paletteSize) - 1L;
+            if (allPresent == 0L) {
+                return;
+            }
+            for (; scanned < localData.getSize(); scanned++) {
+                int id = localData.getUnchecked(scanned);
+                if (id > 63) {
+                    break;
+                }
+                if (id > 0) {
+                    present |= 1L << (id - 1);
+                    if (present == allPresent) {
+                        return;
+                    }
+                }
+            }
+        }
+        int maxId = Long.SIZE - Long.numberOfLeadingZeros(present);
+        int[] remap = new int[Math.max(Math.max(paletteSize, maxId) + 1, 16)];
+        int distinct = Long.bitCount(present);
+        for (int id = 1; id <= maxId; id++) {
+            if ((present & (1L << (id - 1))) != 0L) {
+                remap[id] = PRESENT;
+            }
+        }
 
-        for (int i = 0; i < localData.getSize(); i++) {
+        for (int i = scanned; i < localData.getSize(); i++) {
             int x = localData.getUnchecked(i);
             if (x <= 0) continue;
             if (x >= remap.length) {
@@ -449,10 +475,13 @@ public class DataContainer<T> {
                 if (x > maxId) {
                     maxId = x;
                 }
+                if (distinct == paletteSize) {
+                    return;
+                }
             }
         }
 
-        if (distinct == palette.size())
+        if (distinct == paletteSize)
             return;
 
         int bits = localData.getSize() != length ? memoryBits(distinct + 1) : bits(distinct + 1);
