@@ -200,14 +200,13 @@
     {
       "name": "Wormholes",
       "filename": "Wormholes-*.jar",
-      "max_bytes": 4200000,
+      "max_bytes": 6800000,
       "forbidden_prefixes": [
         "org/bukkit/",
         "io/papermc/",
         "net/minecraft/",
         "com/github/retrooper/",
         "io/github/retrooper/",
-        "art/arcane/wormholes/libs/packetevents/",
         "net/kyori/",
         "it/unimi/dsi/fastutil/",
         "art/arcane/volmit/packaging/",
@@ -216,6 +215,8 @@
       "required_entries": [
         "plugin.yml",
         "art/arcane/wormholes/Wormholes.class",
+        "art/arcane/wormholes/libs/packetevents/api/PacketEvents.class",
+        "art/arcane/wormholes/libs/packetevents/impl/factory/spigot/SpigotPacketEventsBuilder.class",
         "slimjar.dat",
         "slimjar-resolutions.dat",
         "art/arcane/wormholes/libs/slimjar/app/builder/SpigotApplicationBuilder.class",
@@ -229,7 +230,10 @@
         "-keepclassmembers class art.arcane.wormholes.portal.** { <fields>; }",
         "-keepclassmembers class art.arcane.wormholes.door.** { <fields>; }"
       ],
-      "shrink_dontwarn": []
+      "shrink_dontwarn": [
+        "art.arcane.wormholes.libs.packetevents.impl.util.BukkitLogManager",
+        "com.viaversion.viaversion.**"
+      ]
     },
     {
       "name": "Iris Bukkit",
