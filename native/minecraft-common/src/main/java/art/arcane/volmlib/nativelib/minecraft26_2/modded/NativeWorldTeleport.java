@@ -63,7 +63,8 @@ public final class NativeWorldTeleport {
                 result.completeExceptionally(teleportTimeout(level, x, z));
                 return result;
             }
-            result.orTimeout(remainingNanos, TimeUnit.NANOSECONDS);
+            CompletableFuture.delayedExecutor(remainingNanos, TimeUnit.NANOSECONDS)
+                    .execute(() -> result.completeExceptionally(teleportTimeout(level, x, z)));
         }
         UUID playerId = player.getUUID();
         runOnServer(server, () -> beginTeleport(
