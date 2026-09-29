@@ -34,7 +34,10 @@ public class Holder {
 
     public SynchronizedChannel acquire() {
         semaphore.acquireUninterruptibly();
-        if (closed) {
+        // An interrupted read closes the FileChannel under the holder (ClosedByInterruptException); report it
+        // closed so the cache reopens the file instead of failing every later read of this plate.
+        if (closed || !channel.isOpen()) {
+            closed = true;
             semaphore.release();
             return null;
         }
