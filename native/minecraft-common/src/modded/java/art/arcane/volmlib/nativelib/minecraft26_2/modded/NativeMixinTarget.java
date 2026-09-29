@@ -16,6 +16,10 @@ public enum NativeMixinTarget {
         this.className = className;
     }
 
+    public String className() {
+        return className;
+    }
+
     public boolean hasInjectedHandler(String handlerMethod) throws ClassNotFoundException {
         Class<?> target = Class.forName(className, false, NativeMixinTarget.class.getClassLoader());
         for (Method method : target.getDeclaredMethods()) {

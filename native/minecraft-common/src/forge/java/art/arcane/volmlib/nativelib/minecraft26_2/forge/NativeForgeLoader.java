@@ -34,8 +34,10 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.level.ServerLevelAccessor;
+import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraftforge.common.util.Result;
+import net.minecraftforge.common.world.ModifiableBiomeInfo;
 import net.minecraftforge.event.ForgeEventFactory;
 import net.minecraftforge.event.level.BlockEvent;
 import net.minecraftforge.event.level.LevelEvent;
@@ -162,5 +164,21 @@ public final class NativeForgeLoader implements NativeModdedLoader {
     @Override
     public boolean checkSpawnPosition(Mob mob, ServerLevelAccessor level, EntitySpawnReason reason) {
         return ForgeEventFactory.checkSpawnPosition(mob, level, reason);
+    }
+
+    // Forge biome modifiers overwrite the biome's own fields, which the unpatched Biome.DIRECT_CODEC reads.
+    @Override
+    public Biome unmodifiedBiome(Biome biome) {
+        ModifiableBiomeInfo.BiomeInfo original = biome.modifiableBiomeInfo().getOriginalBiomeInfo();
+        Biome.ClimateSettings climate = original.climateSettings();
+        return new Biome.BiomeBuilder()
+                .hasPrecipitation(climate.hasPrecipitation())
+                .temperature(climate.temperature())
+                .temperatureAdjustment(climate.temperatureModifier())
+                .downfall(climate.downfall())
+                .putAttributes(original.attributes())
+                .specialEffects(original.effects())
+                .generationSettings(original.generationSettings())
+                .build();
     }
 }

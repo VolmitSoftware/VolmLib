@@ -28,11 +28,14 @@ import art.arcane.volmlib.nativelib.modded.NativeLoaderOptions;
 
 import net.fabricmc.api.EnvType;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLevelEvents;
+import net.fabricmc.fabric.api.event.registry.DynamicRegistrySetupCallback;
+import net.fabricmc.fabric.api.event.registry.DynamicRegistryView;
 import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
 import net.fabricmc.fabric.api.permission.v1.PermissionContextOwner;
 import net.fabricmc.loader.api.FabricLoader;
 import net.fabricmc.loader.api.ModContainer;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
@@ -41,16 +44,23 @@ import net.minecraft.server.permissions.PermissionLevel;
 import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.level.ServerLevelAccessor;
+import net.minecraft.world.level.biome.Biome;
+import net.minecraft.world.level.biome.BiomeGenerationSettings;
+import net.minecraft.world.level.biome.BiomeSpecialEffects;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 
+import java.util.Collections;
+import java.util.Map;
 import java.util.Objects;
+import java.util.WeakHashMap;
 import java.io.File;
 import java.nio.file.Path;
 
 public final class NativeFabricLoader implements NativeModdedLoader {
     private final NativeLoaderOptions options;
     private final Identifier blockBreakPermission;
+    private final Map<Biome, Biome> originalBiomes = Collections.synchronizedMap(new WeakHashMap<>());
 
     public NativeFabricLoader(NativeLoaderOptions options) {
         this.options = Objects.requireNonNull(options, "options");
@@ -147,5 +157,32 @@ public final class NativeFabricLoader implements NativeModdedLoader {
     @Override
     public boolean checkSpawnPosition(Mob mob, ServerLevelAccessor level, EntitySpawnReason reason) {
         return mob.checkSpawnRules(level, reason) && mob.checkSpawnObstruction(level);
+    }
+
+    /**
+     * Fabric biome modifications rewrite the registered biome in place and keep no original, so every biome is
+     * copied as the server's registry loads it, before any modification runs.
+     */
+    public void captureOriginalBiomes() {
+        DynamicRegistrySetupCallback.EVENT.register((DynamicRegistryView registries) -> registries.registerEntryAdded(
+                Registries.BIOME,
+                (int rawId, Identifier id, Biome biome) -> recordOriginalBiome(biome)));
+    }
+
+    void recordOriginalBiome(Biome biome) {
+        BiomeSpecialEffects effects = biome.getSpecialEffects();
+        BiomeGenerationSettings generation = biome.getGenerationSettings();
+        originalBiomes.put(biome, new Biome(
+                biome.climateSettings,
+                biome.getAttributes(),
+                new BiomeSpecialEffects(effects.waterColor(), effects.foliageColorOverride(),
+                        effects.dryFoliageColorOverride(), effects.grassColorOverride(), effects.grassColorModifier()),
+                new BiomeGenerationSettings(generation.carvers, generation.features())));
+    }
+
+    @Override
+    public Biome unmodifiedBiome(Biome biome) {
+        Biome original = originalBiomes.get(biome);
+        return original == null ? biome : original;
     }
 }

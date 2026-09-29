@@ -355,9 +355,4 @@ public final class NativeWorldGenerationImpl implements NativeWorldGeneration {
         }
         return false;
     }
-
-    @Override
-    public String generationRendererIdentity() {
-        return "bukkit-v26_3_R1-generated-registry-json-v1";
-    }
 }

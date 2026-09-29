@@ -93,6 +93,10 @@ public final class NativeProtocolPlayer {
         player.sendSystemMessage(Component.literal(message));
     }
 
+    public void disconnect(String reason) {
+        player.connection.disconnect(Component.literal(reason));
+    }
+
     public NativeProtocolWorld world() {
         ServerLevel level = player.level();
         if (currentLevel != level) {

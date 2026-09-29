@@ -45,6 +45,7 @@ public final class NativeFabricBootstrap {
         ServerLifecycleEvents.SERVER_STARTING.register((MinecraftServer server) -> callbacks.start().accept(NativeModdedServer.fromHandle(server)));
         ServerLifecycleEvents.SERVER_STARTED.register((MinecraftServer server) -> callbacks.started().accept(NativeModdedServer.fromHandle(server)));
         ServerLifecycleEvents.SERVER_STOPPING.register((MinecraftServer server) -> callbacks.stop().run());
+        ServerLifecycleEvents.SERVER_STOPPED.register((MinecraftServer server) -> callbacks.stopped().run());
         ServerLevelEvents.LOAD.register((MinecraftServer server, ServerLevel level) -> callbacks.loaded().accept(new ModdedPlatformWorld(level)));
         ServerLevelEvents.UNLOAD.register((MinecraftServer server, ServerLevel level) -> callbacks.unloaded().accept(new ModdedPlatformWorld(level)));
         CommandRegistrationCallback.EVENT.register((CommandDispatcher<CommandSourceStack> dispatcher, CommandBuildContext buildContext, Commands.CommandSelection selection) -> callbacks.commands().accept(new NativeCommandRegistration(dispatcher)));

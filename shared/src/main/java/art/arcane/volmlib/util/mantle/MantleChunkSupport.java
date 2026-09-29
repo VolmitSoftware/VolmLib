@@ -113,13 +113,13 @@ public abstract class MantleChunkSupport<M> extends FlaggedChunk {
 
     public MantleChunkSupport<M> use() {
         if (closed.get()) {
-            throw new IllegalStateException("Chunk is closed!");
+            throw new MantleClosedException("Chunk is closed!");
         }
 
         ref.acquireUninterruptibly();
         if (closed.get()) {
             ref.release();
-            throw new IllegalStateException("Chunk is closed!");
+            throw new MantleClosedException("Chunk is closed!");
         }
 
         return this;
@@ -265,7 +265,7 @@ public abstract class MantleChunkSupport<M> extends FlaggedChunk {
 
     private void requireOpen() {
         if (closed.get()) {
-            throw new IllegalStateException("Chunk is closed!");
+            throw new MantleClosedException("Chunk is closed!");
         }
     }
 }
