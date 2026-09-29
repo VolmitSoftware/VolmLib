@@ -4,6 +4,7 @@ import art.arcane.volmlib.nativelib.terrain.NativeGenerationRegistry;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonParser;
 import com.mojang.serialization.Codec;
+import com.mojang.serialization.Encoder;
 import com.mojang.serialization.JsonOps;
 import net.minecraft.core.Registry;
 import net.minecraft.core.RegistryAccess;
@@ -16,6 +17,7 @@ import net.minecraft.world.level.dimension.DimensionType;
 
 import java.util.Objects;
 import java.util.function.Supplier;
+import java.util.function.UnaryOperator;
 
 public class NativeRegistryDefinitions implements NativeGenerationRegistry {
     private static final String BIOME_REGISTRY = "minecraft:worldgen/biome";
@@ -25,8 +27,11 @@ public class NativeRegistryDefinitions implements NativeGenerationRegistry {
     private static final String ENTITY_TYPE_REGISTRY = "minecraft:entity_type";
 
     private final Supplier<RegistryAccess> registryAccess;
-    public NativeRegistryDefinitions(Supplier<RegistryAccess> registryAccess) {
+    private final UnaryOperator<Biome> unmodifiedBiome;
+
+    public NativeRegistryDefinitions(Supplier<RegistryAccess> registryAccess, UnaryOperator<Biome> unmodifiedBiome) {
         this.registryAccess = Objects.requireNonNull(registryAccess, "registryAccess");
+        this.unmodifiedBiome = Objects.requireNonNull(unmodifiedBiome, "unmodifiedBiome");
     }
 
     @Override
@@ -66,7 +71,7 @@ public class NativeRegistryDefinitions implements NativeGenerationRegistry {
             case BIOME_REGISTRY -> exactRegistered(
                     access,
                     Registries.BIOME,
-                    Biome.DIRECT_CODEC,
+                    Biome.DIRECT_CODEC.comap(unmodifiedBiome),
                     resourceKey
             );
             case DIMENSION_TYPE_REGISTRY -> exactRegistered(
@@ -108,7 +113,7 @@ public class NativeRegistryDefinitions implements NativeGenerationRegistry {
     private static <T> Definition exactRegistered(
             RegistryAccess access,
             ResourceKey<? extends Registry<T>> registryKey,
-            Codec<T> codec,
+            Encoder<T> encoder,
             String resourceKey
     ) {
         Registry<T> registry = access.lookupOrThrow(registryKey);
@@ -119,7 +124,7 @@ public class NativeRegistryDefinitions implements NativeGenerationRegistry {
                     + registryKey.identifier() + " / " + resourceKey + ".");
         }
         RegistryOps<JsonElement> ops = RegistryOps.create(JsonOps.INSTANCE, access);
-        JsonElement encoded = codec.encodeStart(ops, value).getOrThrow(IllegalStateException::new);
+        JsonElement encoded = encoder.encodeStart(ops, value).getOrThrow(IllegalStateException::new);
         return Definition.exactJson(encoded.toString());
     }
 

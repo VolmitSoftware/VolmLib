@@ -38,8 +38,9 @@ public final class NativeModdedServer {
         return new NativeModdedServer(((ServerLevel) world.nativeHandle()).getServer());
     }
 
-    public static NativeRegistryDefinitions registryDefinitions(Supplier<NativeModdedServer> server) {
-        return new NativeRegistryDefinitions(() -> Objects.requireNonNull(server.get(), "Minecraft server").server.registryAccess());
+    public static NativeRegistryDefinitions registryDefinitions(Supplier<NativeModdedServer> server, NativeModdedLoader loader) {
+        return new NativeRegistryDefinitions(() -> Objects.requireNonNull(server.get(), "Minecraft server").server.registryAccess(),
+                loader::unmodifiedBiome);
     }
 
     public static NativeRegistryAccess registryAccess(Supplier<NativeModdedServer> server, Consumer<String> warnings) {

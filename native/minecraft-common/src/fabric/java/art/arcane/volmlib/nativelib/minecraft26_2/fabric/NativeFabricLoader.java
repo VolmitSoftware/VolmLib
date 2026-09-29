@@ -41,6 +41,7 @@ import net.minecraft.server.permissions.PermissionLevel;
 import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.level.ServerLevelAccessor;
+import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 
@@ -147,5 +148,10 @@ public final class NativeFabricLoader implements NativeModdedLoader {
     @Override
     public boolean checkSpawnPosition(Mob mob, ServerLevelAccessor level, EntitySpawnReason reason) {
         return mob.checkSpawnRules(level, reason) && mob.checkSpawnObstruction(level);
+    }
+
+    @Override
+    public Biome unmodifiedBiome(Biome biome) {
+        return biome;
     }
 }

@@ -27,6 +27,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.level.ServerLevelAccessor;
+import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.block.state.BlockState;
 
 import java.io.File;
@@ -58,4 +59,6 @@ public interface NativeModdedLoader {
     boolean canBreakBlock(ServerLevel level, ServerPlayer player, BlockPos position, BlockState state);
 
     boolean checkSpawnPosition(Mob mob, ServerLevelAccessor level, EntitySpawnReason reason);
+
+    Biome unmodifiedBiome(Biome biome);
 }
