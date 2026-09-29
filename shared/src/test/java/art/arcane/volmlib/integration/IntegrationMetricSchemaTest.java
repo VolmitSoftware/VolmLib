@@ -50,12 +50,15 @@ public class IntegrationMetricSchemaTest {
     public void exposesCompleteIrisEngineAndWorldSchemaWithoutVestigialMetrics() {
         Set<String> irisKeys = IntegrationMetricSchema.irisKeys();
 
-        assertEquals(69, irisKeys.size());
+        assertEquals(70, irisKeys.size());
         assertTrue(irisKeys.contains(IntegrationMetricSchema.IRIS_WORLD_COUNT));
         assertTrue(irisKeys.contains(IntegrationMetricSchema.IRIS_ENGINE_PENDING_REGISTRATIONS));
         assertTrue(irisKeys.contains(IntegrationMetricSchema.IRIS_GENERATION_TOTAL_MS));
         assertTrue(irisKeys.contains(IntegrationMetricSchema.IRIS_CACHE_STREAM_3D_USAGE));
         assertTrue(irisKeys.contains(IntegrationMetricSchema.IRIS_PREGEN_THROUGHPUT));
+        assertTrue(irisKeys.contains(IntegrationMetricSchema.IRIS_PREGEN_REMAINING));
+        assertTrue(IntegrationMetricSchema.irisWorldKeys().contains(IntegrationMetricSchema.IRIS_PREGEN_QUEUE));
+        assertTrue(IntegrationMetricSchema.irisWorldKeys().contains(IntegrationMetricSchema.IRIS_PREGEN_REMAINING));
         assertTrue(IntegrationMetricSchema.irisWorldKeys().contains(IntegrationMetricSchema.IRIS_LOADED_CHUNKS));
         assertFalse(IntegrationMetricSchema.irisWorldKeys().contains(IntegrationMetricSchema.IRIS_CACHE_COUNT));
         assertFalse(irisKeys.contains("iris.chunk-stream-ms"));
@@ -67,7 +70,7 @@ public class IntegrationMetricSchemaTest {
         Set<String> glossKeys = IntegrationMetricSchema.glossKeys();
         Set<String> allKeys = IntegrationMetricSchema.allKeys();
 
-        assertEquals(19, glossKeys.size());
+        assertEquals(18, glossKeys.size());
         for (String key : glossKeys) {
             assertTrue(key.startsWith("gloss."));
             assertTrue(allKeys.contains(key));
@@ -76,6 +79,7 @@ public class IntegrationMetricSchemaTest {
         for (String key : allKeys) {
             assertFalse(key.startsWith("holoui."));
         }
+        assertFalse(allKeys.contains("gloss.builder-server-running"));
 
         IntegrationMetricDescriptor sessionHolders = IntegrationMetricSchema.descriptor(IntegrationMetricSchema.GLOSS_SESSION_HOLDERS);
         assertEquals(IntegrationMetricType.INTEGER, sessionHolders.type());
@@ -93,6 +97,30 @@ public class IntegrationMetricSchemaTest {
         IntegrationMetricDescriptor holograms = IntegrationMetricSchema.descriptor(IntegrationMetricSchema.GLOSS_HOLOGRAMS_ACTIVE);
         assertEquals(IntegrationMetricType.INTEGER, holograms.type());
         assertEquals("holograms", holograms.unit());
+    }
+
+    @Test
+    public void wormholesSchemaPublishesProjectionPlateCost() {
+        Set<String> keys = IntegrationMetricSchema.wormholesKeys();
+
+        assertTrue(keys.contains(IntegrationMetricSchema.WORMHOLES_PLATE_BUILDS_PER_SECOND));
+        assertTrue(keys.contains(IntegrationMetricSchema.WORMHOLES_PLATE_BYTES));
+        assertTrue(keys.contains(IntegrationMetricSchema.WORMHOLES_BLOCK_ENTITIES_PER_SECOND));
+        assertTrue(IntegrationMetricSchema.allKeys().containsAll(keys));
+        assertEquals(IntegrationMetricType.DOUBLE,
+                IntegrationMetricSchema.descriptor(IntegrationMetricSchema.WORMHOLES_PLATE_BUILDS_PER_SECOND).type());
+        assertEquals("bytes", IntegrationMetricSchema.descriptor(IntegrationMetricSchema.WORMHOLES_PLATE_BYTES).unit());
+        assertEquals("projection",
+                IntegrationMetricSchema.descriptor(IntegrationMetricSchema.WORMHOLES_BLOCK_ENTITIES_PER_SECOND).tags().get("domain"));
+    }
+
+    @Test
+    public void adaptFxPacketsAcceptsAFractionalPerTickAverage() {
+        IntegrationMetricDescriptor descriptor = IntegrationMetricSchema.descriptor(IntegrationMetricSchema.ADAPT_FX_PACKETS_USED);
+
+        assertEquals(IntegrationMetricType.DOUBLE, descriptor.type());
+        assertEquals("packets-per-tick", descriptor.unit());
+        assertEquals(12.5D, IntegrationMetricSample.available(descriptor, 12.5D, 1L).numericValue(), 0D);
     }
 
     @Test

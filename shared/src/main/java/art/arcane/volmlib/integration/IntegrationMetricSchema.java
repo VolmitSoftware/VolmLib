@@ -57,6 +57,7 @@ public final class IntegrationMetricSchema {
     public static final String IRIS_PREGEN_GENERATED = "iris.pregen-generated";
     public static final String IRIS_PREGEN_TOTAL = "iris.pregen-total";
     public static final String IRIS_PREGEN_QUEUE = "iris.pregen-queue";
+    public static final String IRIS_PREGEN_REMAINING = "iris.pregen-remaining";
     public static final String IRIS_PREGEN_THROUGHPUT = "iris.pregen-throughput";
     public static final String IRIS_PREGEN_ETA_MS = "iris.pregen-eta-ms";
     public static final String IRIS_PREGEN_ELAPSED_MS = "iris.pregen-elapsed-ms";
@@ -124,6 +125,9 @@ public final class IntegrationMetricSchema {
     public static final String WORMHOLES_RESYNC_REQUESTS_TOTAL = "wormholes.resync-requests-total";
     public static final String WORMHOLES_TRANSFERS_IN_FLIGHT = "wormholes.transfers-in-flight";
     public static final String WORMHOLES_TRANSFERS_FAILED_TOTAL = "wormholes.transfers-failed-total";
+    public static final String WORMHOLES_PLATE_BUILDS_PER_SECOND = "wormholes.plate-builds-per-second";
+    public static final String WORMHOLES_PLATE_BYTES = "wormholes.plate-bytes";
+    public static final String WORMHOLES_BLOCK_ENTITIES_PER_SECOND = "wormholes.block-entities-per-second";
 
     public static final String GLOSS_SESSION_HOLDERS = "gloss.session-holders";
     public static final String GLOSS_MENUS_OPEN = "gloss.menus-open";
@@ -135,7 +139,6 @@ public final class IntegrationMetricSchema {
     public static final String GLOSS_SPAWNS_PER_SECOND = "gloss.spawns-per-second";
     public static final String GLOSS_TICK_MS = "gloss.tick-ms";
     public static final String GLOSS_PREVIEW_REFRESH_PER_SECOND = "gloss.preview-refresh-per-second";
-    public static final String GLOSS_BUILDER_SERVER_RUNNING = "gloss.builder-server-running";
     public static final String GLOSS_HOLOGRAMS_ACTIVE = "gloss.holograms-active";
     public static final String GLOSS_PANELS_ACTIVE = "gloss.panels-active";
     public static final String GLOSS_BOARDS_ACTIVE = "gloss.boards-active";
@@ -300,7 +303,10 @@ public final class IntegrationMetricSchema {
                 WORMHOLES_REPLICATED_BLOCKS_PER_SECOND,
                 WORMHOLES_RESYNC_REQUESTS_TOTAL,
                 WORMHOLES_TRANSFERS_IN_FLIGHT,
-                WORMHOLES_TRANSFERS_FAILED_TOTAL
+                WORMHOLES_TRANSFERS_FAILED_TOTAL,
+                WORMHOLES_PLATE_BUILDS_PER_SECOND,
+                WORMHOLES_PLATE_BYTES,
+                WORMHOLES_BLOCK_ENTITIES_PER_SECOND
         );
     }
 
@@ -316,7 +322,6 @@ public final class IntegrationMetricSchema {
                 GLOSS_SPAWNS_PER_SECOND,
                 GLOSS_TICK_MS,
                 GLOSS_PREVIEW_REFRESH_PER_SECOND,
-                GLOSS_BUILDER_SERVER_RUNNING,
                 GLOSS_HOLOGRAMS_ACTIVE,
                 GLOSS_PANELS_ACTIVE,
                 GLOSS_BOARDS_ACTIVE,
@@ -473,7 +478,7 @@ public final class IntegrationMetricSchema {
         putMetric(descriptors, ADAPT_LEARNED_ADAPTATIONS_ONLINE, IntegrationMetricType.INTEGER, "adaptations", "adapt", "runtime");
         putMetric(descriptors, ADAPT_SPATIAL_XP_TICKETS, IntegrationMetricType.INTEGER, "tickets", "adapt", "xp");
         putMetric(descriptors, ADAPT_FX_TIMELINES_ACTIVE, IntegrationMetricType.INTEGER, "timelines", "adapt", "fx");
-        putMetric(descriptors, ADAPT_FX_PACKETS_USED, IntegrationMetricType.INTEGER, "packets-per-tick", "adapt", "fx");
+        putMetric(descriptors, ADAPT_FX_PACKETS_USED, IntegrationMetricType.DOUBLE, "packets-per-tick", "adapt", "fx");
         putMetric(descriptors, ADAPT_FX_SHED_BAND, IntegrationMetricType.INTEGER, "band", "adapt", "fx");
         putMetric(descriptors, ADAPT_MINIONS_ACTIVE, IntegrationMetricType.INTEGER, "minions", "adapt", "runtime");
         putMetric(descriptors, ADAPT_PERSISTENCE_QUEUE_DEPTH, IntegrationMetricType.INTEGER, "players", "adapt", "persistence");
@@ -496,6 +501,9 @@ public final class IntegrationMetricSchema {
         putMetric(descriptors, WORMHOLES_RESYNC_REQUESTS_TOTAL, IntegrationMetricType.LONG, "requests", "wormholes", "network");
         putMetric(descriptors, WORMHOLES_TRANSFERS_IN_FLIGHT, IntegrationMetricType.INTEGER, "transfers", "wormholes", "travel");
         putMetric(descriptors, WORMHOLES_TRANSFERS_FAILED_TOTAL, IntegrationMetricType.LONG, "transfers", "wormholes", "travel");
+        putMetric(descriptors, WORMHOLES_PLATE_BUILDS_PER_SECOND, IntegrationMetricType.DOUBLE, "builds-per-second", "wormholes", "projection");
+        putMetric(descriptors, WORMHOLES_PLATE_BYTES, IntegrationMetricType.LONG, "bytes", "wormholes", "projection");
+        putMetric(descriptors, WORMHOLES_BLOCK_ENTITIES_PER_SECOND, IntegrationMetricType.DOUBLE, "block-entities-per-second", "wormholes", "projection");
 
         putMetric(descriptors, GLOSS_SESSION_HOLDERS, IntegrationMetricType.INTEGER, "players", "gloss", "sessions");
         putMetric(descriptors, GLOSS_MENUS_OPEN, IntegrationMetricType.INTEGER, "menus", "gloss", "sessions");
@@ -507,7 +515,6 @@ public final class IntegrationMetricSchema {
         putMetric(descriptors, GLOSS_SPAWNS_PER_SECOND, IntegrationMetricType.DOUBLE, "entities-per-second", "gloss", "rendering");
         putMetric(descriptors, GLOSS_TICK_MS, IntegrationMetricType.DOUBLE, "ms-per-second", "gloss", "sessions");
         putMetric(descriptors, GLOSS_PREVIEW_REFRESH_PER_SECOND, IntegrationMetricType.DOUBLE, "ops-per-second", "gloss", "sessions");
-        putMetric(descriptors, GLOSS_BUILDER_SERVER_RUNNING, IntegrationMetricType.INTEGER, "boolean", "gloss", "config");
         putMetric(descriptors, GLOSS_HOLOGRAMS_ACTIVE, IntegrationMetricType.INTEGER, "holograms", "gloss", "rendering");
         putMetric(descriptors, GLOSS_PANELS_ACTIVE, IntegrationMetricType.INTEGER, "panels", "gloss", "rendering");
         putMetric(descriptors, GLOSS_BOARDS_ACTIVE, IntegrationMetricType.INTEGER, "boards", "gloss", "boards");
@@ -612,6 +619,7 @@ public final class IntegrationMetricSchema {
         putIris(descriptors, IRIS_PREGEN_GENERATED, IntegrationMetricType.LONG, "chunks", "pregen", "current");
         putIris(descriptors, IRIS_PREGEN_TOTAL, IntegrationMetricType.LONG, "chunks", "pregen", "current");
         putIris(descriptors, IRIS_PREGEN_QUEUE, IntegrationMetricType.LONG, "chunks", "pregen", "current");
+        putIris(descriptors, IRIS_PREGEN_REMAINING, IntegrationMetricType.LONG, "chunks", "pregen", "current");
         putIris(descriptors, IRIS_PREGEN_THROUGHPUT, IntegrationMetricType.DOUBLE, "chunks-per-second", "pregen", "current");
         putIris(descriptors, IRIS_PREGEN_ETA_MS, IntegrationMetricType.LONG, "ms", "pregen", "current");
         putIris(descriptors, IRIS_PREGEN_ELAPSED_MS, IntegrationMetricType.LONG, "ms", "pregen", "current");
@@ -709,6 +717,7 @@ public final class IntegrationMetricSchema {
                 IRIS_PREGEN_GENERATED,
                 IRIS_PREGEN_TOTAL,
                 IRIS_PREGEN_QUEUE,
+                IRIS_PREGEN_REMAINING,
                 IRIS_PREGEN_THROUGHPUT,
                 IRIS_PREGEN_ETA_MS,
                 IRIS_PREGEN_ELAPSED_MS,
