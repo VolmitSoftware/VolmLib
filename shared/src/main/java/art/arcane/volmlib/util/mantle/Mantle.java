@@ -1157,7 +1157,7 @@ public abstract class Mantle<P extends TectonicPlate<C>, C extends MantleChunk<?
 
     private void ensureOpen() {
         if (closed.get()) {
-            throw new IllegalStateException("The Mantle is closed");
+            throw new MantleClosedException("The Mantle is closed");
         }
     }
 
