@@ -13,9 +13,11 @@ import org.bukkit.craftbukkit.CraftServer;
 import org.bukkit.craftbukkit.CraftWorld;
 
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 
 public final class NativeBiomeRegistryImpl implements NativeBiomeRegistry<Holder<Biome>, Biome> {
     private final Registry<Biome> registry;
+    private final ConcurrentHashMap<org.bukkit.block.Biome, Holder<Biome>> bukkitBiomes = new ConcurrentHashMap<>();
 
     public NativeBiomeRegistryImpl() {
         this(((CraftServer) Bukkit.getServer()).getServer().registryAccess().lookup(Registries.BIOME).orElse(null));
@@ -36,7 +38,18 @@ public final class NativeBiomeRegistryImpl implements NativeBiomeRegistry<Holder
 
     @Override
     public Holder<Biome> lookup(org.bukkit.block.Biome biome) {
-        return NativeBiomeAccessImpl.biomeToBiomeBase(registry, biome);
+        if (biome == null) {
+            return null;
+        }
+        Holder<Biome> cached = bukkitBiomes.get(biome);
+        if (cached != null) {
+            return cached;
+        }
+        Holder<Biome> resolved = NativeBiomeAccessImpl.biomeToBiomeBase(registry, biome);
+        if (resolved != null) {
+            bukkitBiomes.putIfAbsent(biome, resolved);
+        }
+        return resolved;
     }
 
     @Override

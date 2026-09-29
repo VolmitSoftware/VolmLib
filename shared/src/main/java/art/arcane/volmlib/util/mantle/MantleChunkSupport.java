@@ -6,7 +6,6 @@ import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.util.concurrent.Semaphore;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReferenceArray;
 
@@ -81,22 +80,21 @@ public abstract class MantleChunkSupport<M> extends FlaggedChunk {
         ref.release(Integer.MAX_VALUE);
     }
 
-    public boolean sealUntil(long deadlineNanos) throws InterruptedException {
-        closed.set(true);
-        long remainingNanos = Math.max(0L, deadlineNanos - System.nanoTime());
-        boolean sealed;
-        try {
-            sealed = ref.tryAcquire(Integer.MAX_VALUE, remainingNanos, TimeUnit.NANOSECONDS);
-        } catch (InterruptedException error) {
-            closed.set(false);
-            throw error;
-        }
-        if (!sealed) {
-            closed.set(false);
-            return false;
+    /**
+     * Takes every use permit when nobody uses the chunk, so no use can start until {@link #unlockUses}.
+     */
+    public boolean tryLockUses() {
+        return ref.tryAcquire(Integer.MAX_VALUE);
+    }
+
+    /**
+     * Returns the permits {@link #tryLockUses} took, closing the chunk first when it is sealed for a save.
+     */
+    public void unlockUses(boolean seal) {
+        if (seal) {
+            closed.set(true);
         }
         ref.release(Integer.MAX_VALUE);
-        return true;
     }
 
     public void reopen() {

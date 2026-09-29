@@ -26,6 +26,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReferenceArray;
 
 public abstract class TectonicPlateSupport<C> {
@@ -37,6 +38,7 @@ public abstract class TectonicPlateSupport<C> {
     private final int sectionHeight;
     private final AtomicReferenceArray<C> chunks;
     private final AtomicBoolean closed;
+    private final AtomicInteger pins;
     private final int x;
     private final int z;
 
@@ -44,6 +46,7 @@ public abstract class TectonicPlateSupport<C> {
         this.sectionHeight = worldHeight >> 4;
         this.chunks = new AtomicReferenceArray<>(1024);
         this.closed = new AtomicBoolean(false);
+        this.pins = new AtomicInteger();
         this.x = x;
         this.z = z;
     }
@@ -95,6 +98,9 @@ public abstract class TectonicPlateSupport<C> {
     }
 
     public boolean inUse() {
+        if (pins.get() > 0) {
+            return true;
+        }
         for (int i = 0; i < chunks.length(); i++) {
             C chunk = chunks.get(i);
             if (chunk != null && isChunkInUse(chunk)) {
@@ -104,8 +110,31 @@ public abstract class TectonicPlateSupport<C> {
         return false;
     }
 
+    /**
+     * Keeps the plate open until {@link #unpin()}: while any pin is held no save seals the plate and a close
+     * waits for it. Fails, taking no pin, once the plate is closed or being closed.
+     */
+    public boolean pin() {
+        pins.incrementAndGet();
+        if (closed.get()) {
+            pins.decrementAndGet();
+            return false;
+        }
+        return true;
+    }
+
+    public void unpin() {
+        pins.decrementAndGet();
+    }
+
+    /**
+     * Closes the plate for good, waiting for pins and then for chunk users to finish.
+     */
     public void close() throws InterruptedException {
         closed.set(true);
+        while (pins.get() > 0) {
+            Thread.yield();
+        }
         for (int i = 0; i < chunks.length(); i++) {
             C chunk = chunks.get(i);
             if (chunk != null) {
@@ -114,20 +143,39 @@ public abstract class TectonicPlateSupport<C> {
         }
     }
 
-    public boolean sealUntil(long deadlineNanos) throws InterruptedException {
+    /**
+     * Seals the plate for a save without waiting. Succeeds only when no pin and no chunk use is held, and leaves
+     * the plate and every chunk open otherwise.
+     */
+    public boolean trySeal() {
+        if (inUse()) {
+            return false;
+        }
+        // A pin taken after this write sees the plate closed; one taken before it shows up in the check below.
         closed.set(true);
-        try {
-            for (int i = 0; i < chunks.length(); i++) {
-                C chunk = chunks.get(i);
-                if (chunk != null && !sealChunkUntil(chunk, deadlineNanos)) {
-                    reopen();
-                    return false;
-                }
+        if (pins.get() > 0) {
+            closed.set(false);
+            return false;
+        }
+        int length = chunks.length();
+        for (int i = 0; i < length; i++) {
+            C chunk = chunks.get(i);
+            if (chunk != null && !tryLockChunk(chunk)) {
+                unlockChunks(i, false);
+                closed.set(false);
+                return false;
             }
-            return true;
-        } catch (InterruptedException error) {
-            reopen();
-            throw error;
+        }
+        unlockChunks(length, true);
+        return true;
+    }
+
+    private void unlockChunks(int end, boolean seal) {
+        for (int i = 0; i < end; i++) {
+            C chunk = chunks.get(i);
+            if (chunk != null) {
+                unlockChunk(chunk, seal);
+            }
         }
     }
 
@@ -165,11 +213,23 @@ public abstract class TectonicPlateSupport<C> {
 
     public void delete(int x, int z) {
         requireOpen();
+        deletePinned(x, z);
+    }
+
+    void deletePinned(int x, int z) {
         chunks.set(index(x, z), null);
     }
 
     public C getOrCreate(int x, int z) {
         requireOpen();
+        return getOrCreatePinned(x, z);
+    }
+
+    /**
+     * {@link #getOrCreate} for a caller holding a pin, which keeps the plate open even while a save or close is
+     * deciding whether it may proceed.
+     */
+    C getOrCreatePinned(int x, int z) {
         final int index = index(x, z);
         final C chunk = chunks.get(index);
         if (chunk != null) {
@@ -225,7 +285,9 @@ public abstract class TectonicPlateSupport<C> {
 
     protected abstract void closeChunk(C chunk) throws InterruptedException;
 
-    protected abstract boolean sealChunkUntil(C chunk, long deadlineNanos) throws InterruptedException;
+    protected abstract boolean tryLockChunk(C chunk);
+
+    protected abstract void unlockChunk(C chunk, boolean seal);
 
     protected abstract void reopenChunk(C chunk);
 

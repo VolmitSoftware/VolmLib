@@ -23,19 +23,19 @@ import art.arcane.volmlib.util.function.Consumer2;
 
 import java.io.DataInputStream;
 import java.io.IOException;
-import java.util.LinkedHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReferenceArray;
 
 public class HashPalette<T> implements Palette<T> {
     private final Object lock = new Object();
     private final KMap<T, Integer> palette;
-    private final KMap<Integer, T> lookup;
     private final AtomicInteger size;
+    private volatile AtomicReferenceArray<T> lookup;
 
     public HashPalette() {
         this.size = new AtomicInteger(1);
         this.palette = new KMap<>();
-        this.lookup = new KMap<>();
+        this.lookup = new AtomicReferenceArray<>(32);
     }
 
     @Override
@@ -44,7 +44,8 @@ public class HashPalette<T> implements Palette<T> {
             return null;
         }
 
-        return lookup.get(id);
+        AtomicReferenceArray<T> values = lookup;
+        return id < values.length() ? values.get(id) : null;
     }
 
     @Override
@@ -56,7 +57,7 @@ public class HashPalette<T> implements Palette<T> {
         return palette.computeIfAbsent(t, $ -> {
             synchronized (lock) {
                 int index = size.getAndIncrement();
-                lookup.put(index, t);
+                store(index, t);
                 return index;
             }
         });
@@ -80,32 +81,51 @@ public class HashPalette<T> implements Palette<T> {
     @Override
     public void iterate(Consumer2<T, Integer> c) {
         synchronized (lock) {
+            AtomicReferenceArray<T> values = lookup;
             for (int i = 1; i < size.get(); i++) {
-                c.accept(lookup.get(i), i);
+                c.accept(values.get(i), i);
             }
         }
     }
 
     @Override
     public Palette<T> from(Palette<T> oldPalette) {
-        oldPalette.iterate((t, i) -> {
-            if (t == null) throw new NullPointerException("Null palette entries are not allowed!");
-            lookup.put(i, t);
-            palette.put(t, i);
-        });
-        size.set(oldPalette.size() + 1);
+        synchronized (lock) {
+            oldPalette.iterate((t, i) -> {
+                if (t == null) throw new NullPointerException("Null palette entries are not allowed!");
+                store(i, t);
+                palette.put(t, i);
+            });
+            size.set(oldPalette.size() + 1);
+        }
         return this;
     }
 
     @Override
     public Palette<T> from(int size, Writable<T> writable, DataInputStream in) throws IOException {
-        for (int i = 1; i <= size; i++) {
-            T t = writable.readNodeData(in);
-            if (t == null) throw new NullPointerException("Null palette entries are not allowed!");
-            lookup.put(i, t);
-            palette.put(t, i);
+        synchronized (lock) {
+            for (int i = 1; i <= size; i++) {
+                T t = writable.readNodeData(in);
+                if (t == null) throw new NullPointerException("Null palette entries are not allowed!");
+                store(i, t);
+                palette.put(t, i);
+            }
+            this.size.set(size + 1);
         }
-        this.size.set(size + 1);
         return this;
+    }
+
+    private void store(int index, T value) {
+        AtomicReferenceArray<T> values = lookup;
+        if (index >= values.length()) {
+            AtomicReferenceArray<T> grown = new AtomicReferenceArray<>(Math.max(index + 1, values.length() << 1));
+            for (int i = 0; i < values.length(); i++) {
+                grown.set(i, values.get(i));
+            }
+            grown.set(index, value);
+            lookup = grown;
+            return;
+        }
+        values.set(index, value);
     }
 }

@@ -27,6 +27,7 @@ import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.util.Arrays;
+import java.util.concurrent.atomic.AtomicLongArray;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
@@ -239,6 +240,9 @@ public class DataContainer<T> {
             return;
         }
         int valuesPerLong = 64 / wireBits;
+        int wordCount = (length + valuesPerLong - 1) / valuesPerLong;
+        byte[] buffer = DataBits.scratch(wordCount * DataBits.MAX_VARLONG_BYTES);
+        int written = 0;
         if (data.getSize() != length) {
             int word = 0;
             long packed = 0L;
@@ -250,18 +254,18 @@ public class DataContainer<T> {
                 int index = expandedPosition(position);
                 int targetWord = index / valuesPerLong;
                 while (word < targetWord) {
-                    Varint.writeUnsignedVarLong(packed, dos);
+                    written = Varint.writeUnsignedVarLong(packed, buffer, written);
                     packed = 0L;
                     word++;
                 }
                 packed |= (long) id << ((index % valuesPerLong) * wireBits);
             }
-            int wordCount = (length + valuesPerLong - 1) / valuesPerLong;
             while (word < wordCount) {
-                Varint.writeUnsignedVarLong(packed, dos);
+                written = Varint.writeUnsignedVarLong(packed, buffer, written);
                 packed = 0L;
                 word++;
             }
+            dos.write(buffer, 0, written);
             return;
         }
         int position = 0;
@@ -270,8 +274,9 @@ public class DataContainer<T> {
             for (int valueIndex = 0; valueIndex < valuesPerLong && position < length; valueIndex++) {
                 packed |= (long) logicalId(data, position++) << (valueIndex * wireBits);
             }
-            Varint.writeUnsignedVarLong(packed, dos);
+            written = Varint.writeUnsignedVarLong(packed, buffer, written);
         }
+        dos.write(buffer, 0, written);
     }
 
     private Palette<T> newPalette(DataInputStream din) throws IOException {
@@ -357,6 +362,52 @@ public class DataContainer<T> {
         }
     }
 
+    /**
+     * Writes the value of every present position into {@code destination} and leaves absent positions
+     * untouched, with one palette resolution per id, one read per packed word and empty words skipped.
+     *
+     * @return the number of positions written
+     */
+    @SuppressWarnings("unchecked")
+    public int copyPresent(T[] destination) {
+        if (destination.length < length) {
+            throw new IllegalArgumentException("Destination holds " + destination.length + " of " + length + " positions");
+        }
+        read.lock();
+        try {
+            DataBits localData = data;
+            Palette<T> localPalette = palette;
+            Object[] values = new Object[localPalette.size() + 1];
+            for (int id = 1; id < values.length; id++) {
+                values[id] = localPalette.get(id);
+            }
+            int bits = localData.getBits();
+            int valuesPerLong = 64 / bits;
+            long mask = (1L << bits) - 1L;
+            int size = localData.getSize();
+            boolean compact = size != length;
+            AtomicLongArray words = localData.getRaw();
+            int written = 0;
+            for (int word = 0; word < words.length(); word++) {
+                long packed = words.get(word);
+                int position = word * valuesPerLong;
+                int end = Math.min(position + valuesPerLong, size);
+                while (packed != 0L && position < end) {
+                    int id = (int) (packed & mask);
+                    if (id > 0 && id < values.length) {
+                        destination[compact ? expandedPosition(position) : position] = (T) values[id];
+                        written++;
+                    }
+                    packed >>>= bits;
+                    position++;
+                }
+            }
+            return written;
+        } finally {
+            read.unlock();
+        }
+    }
+
     public T get(int position) {
         Validate.inclusiveBetween(0L, (length - 1L), position);
         read.lock();
@@ -376,13 +427,7 @@ public class DataContainer<T> {
     public boolean isEmptyData() {
         read.lock();
         try {
-            DataBits bits = data;
-            for (int position = 0; position < bits.getSize(); position++) {
-                if (bits.getUnchecked(position) > 0) {
-                    return false;
-                }
-            }
-            return true;
+            return data.isZero();
         } finally {
             read.unlock();
         }
@@ -434,6 +479,11 @@ public class DataContainer<T> {
     private void trim() {
         DataBits localData = data;
         int paletteSize = palette.size();
+        int size = localData.getSize();
+        int bits = localData.getBits();
+        int valuesPerLong = localData.valuesPerLong();
+        int words = localData.wordCount();
+        long mask = (1L << bits) - 1L;
         long present = 0L;
         int scanned = 0;
         if (paletteSize <= 63) {
@@ -441,15 +491,25 @@ public class DataContainer<T> {
             if (allPresent == 0L) {
                 return;
             }
-            for (; scanned < localData.getSize(); scanned++) {
-                int id = localData.getUnchecked(scanned);
-                if (id > 63) {
-                    break;
+            scan:
+            for (int word = 0; scanned < size; word++) {
+                long packed = localData.word(word);
+                int count = Math.min(valuesPerLong, size - scanned);
+                if (packed == 0L) {
+                    scanned += count;
+                    continue;
                 }
-                if (id > 0) {
-                    present |= 1L << (id - 1);
-                    if (present == allPresent) {
-                        return;
+                for (int value = 0; value < count; value++, scanned++) {
+                    int id = (int) (packed & mask);
+                    packed >>>= bits;
+                    if (id > 63) {
+                        break scan;
+                    }
+                    if (id > 0) {
+                        present |= 1L << (id - 1);
+                        if (present == allPresent) {
+                            return;
+                        }
                     }
                 }
             }
@@ -463,8 +523,18 @@ public class DataContainer<T> {
             }
         }
 
-        for (int i = scanned; i < localData.getSize(); i++) {
-            int x = localData.getUnchecked(i);
+        int word = scanned / valuesPerLong;
+        int offset = scanned - word * valuesPerLong;
+        long packed = scanned < size ? localData.word(word) >>> (offset * bits) : 0L;
+        for (int i = scanned; i < size; i++) {
+            int x = (int) (packed & mask);
+            if (++offset == valuesPerLong) {
+                offset = 0;
+                word++;
+                packed = word < words ? localData.word(word) : 0L;
+            } else {
+                packed >>>= bits;
+            }
             if (x <= 0) continue;
             if (x >= remap.length) {
                 remap = Arrays.copyOf(remap, Math.max(x + 1, remap.length << 1));
@@ -484,18 +554,40 @@ public class DataContainer<T> {
         if (distinct == paletteSize)
             return;
 
-        int bits = localData.getSize() != length ? memoryBits(distinct + 1) : bits(distinct + 1);
-        Palette<T> trimmed = newPalette(bits);
+        int trimmedBits = size != length ? memoryBits(distinct + 1) : bits(distinct + 1);
+        Palette<T> trimmed = newPalette(trimmedBits);
         for (int id = 1; id <= maxId; id++) {
             if (remap[id] != 0) {
                 remap[id] = trimmed.add(palette.get(id));
             }
         }
 
-        DataBits tBits = new DataBits(bits, localData.getSize());
-        for (int i = 0; i < localData.getSize(); i++) {
-            int x = localData.getUnchecked(i);
-            setUnpublished(tBits, i, x <= 0 ? 0 : remap[x]);
+        DataBits tBits = new DataBits(trimmedBits, size);
+        int targetPerLong = tBits.valuesPerLong();
+        int targetWord = 0;
+        int targetOffset = 0;
+        long target = 0L;
+        word = 0;
+        offset = 0;
+        packed = words > 0 ? localData.word(0) : 0L;
+        for (int i = 0; i < size; i++) {
+            int x = (int) (packed & mask);
+            if (++offset == valuesPerLong) {
+                offset = 0;
+                word++;
+                packed = word < words ? localData.word(word) : 0L;
+            } else {
+                packed >>>= bits;
+            }
+            target |= (long) (x <= 0 ? 0 : remap[x]) << (targetOffset * trimmedBits);
+            if (++targetOffset == targetPerLong) {
+                tBits.getRaw().setPlain(targetWord++, target);
+                target = 0L;
+                targetOffset = 0;
+            }
+        }
+        if (targetOffset > 0) {
+            tBits.getRaw().setPlain(targetWord, target);
         }
 
         data = tBits;
