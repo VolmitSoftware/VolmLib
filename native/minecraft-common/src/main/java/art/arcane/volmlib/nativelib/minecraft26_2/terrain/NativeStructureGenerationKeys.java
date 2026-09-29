@@ -85,6 +85,9 @@ public final class NativeStructureGenerationKeys {
     private static float placementFrequency(StructurePlacement placement) {
         StructurePlacement activePlacement = Objects.requireNonNull(
                 placement, "Native structure placement frequency requires a placement");
+        if (!NativeWorldgenVersion.FREQUENCY_PLACEMENT.isInstance(activePlacement)) {
+            return 1F;
+        }
         try {
             return ((Float) FREQUENCY_METHOD.invoke(activePlacement)).floatValue();
         } catch (ReflectiveOperationException error) {
@@ -96,7 +99,7 @@ public final class NativeStructureGenerationKeys {
 
     private static Method resolveFrequencyMethod() {
         Method frequencyMethod = null;
-        for (Method method : StructurePlacement.class.getDeclaredMethods()) {
+        for (Method method : NativeWorldgenVersion.FREQUENCY_PLACEMENT.getDeclaredMethods()) {
             if (Modifier.isStatic(method.getModifiers())
                     || method.getParameterCount() != 0
                     || method.getReturnType() != float.class) {

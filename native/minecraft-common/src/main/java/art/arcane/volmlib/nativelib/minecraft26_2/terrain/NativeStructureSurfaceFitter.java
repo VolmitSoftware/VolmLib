@@ -315,7 +315,7 @@ public final class NativeStructureSurfaceFitter {
         NativeStructureTemplateOccupancy.OccupancyResult occupancy =
                 NativeStructureTemplateOccupancy.resolve(
                         world, piece, referencePosition, influenceArea,
-                        () -> world.getLevel().getStructureManager(),
+                        () -> NativeWorldgenVersion.templateManager(world.getLevel()),
                         influenceArea::isInside, budget::consume);
         if (!occupancy.resolved()) {
             return;
@@ -396,7 +396,7 @@ public final class NativeStructureSurfaceFitter {
                     NativeStructureTemplateOccupancy.OccupancyResult occupancy =
                             NativeStructureTemplateOccupancy.resolve(
                                     world, poolPiece, referencePosition, influenceArea,
-                                    () -> world.getLevel().getStructureManager(),
+                                    () -> NativeWorldgenVersion.templateManager(world.getLevel()),
                                     influenceArea::isInside, budget::consume);
                     if (!occupancy.resolved()) {
                         continue;
@@ -643,7 +643,7 @@ public final class NativeStructureSurfaceFitter {
             WorldGenLevel world, BoundingBox area, PoolElementStructurePiece piece,
             BlockPos reference, TemplateCellBudget budget, Set<Long> columns) {
         NativeStructureTemplateOccupancy.OccupancyResult occupancy = NativeStructureTemplateOccupancy.resolve(
-                world, piece, reference, area, () -> world.getLevel().getStructureManager(),
+                world, piece, reference, area, () -> NativeWorldgenVersion.templateManager(world.getLevel()),
                 area::isInside, budget::consume);
         for (Map.Entry<Long, NativeStructureTemplateOccupancy.OccupancyCell> entry : occupancy.cells().entrySet()) {
             NativeStructureTemplateOccupancy.OccupancyCell cell = entry.getValue();

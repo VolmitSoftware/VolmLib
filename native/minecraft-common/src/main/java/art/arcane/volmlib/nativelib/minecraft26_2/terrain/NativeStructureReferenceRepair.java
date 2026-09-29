@@ -8,7 +8,6 @@ import art.arcane.volmlib.nativelib.terrain.NativeGenerationScope;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import it.unimi.dsi.fastutil.longs.LongSet;
 import net.minecraft.core.Registry;
-import net.minecraft.core.SectionPos;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerLevel;
@@ -72,8 +71,8 @@ public final class NativeStructureReferenceRepair {
             if (!valid) {
                 continue;
             }
-            structureManager.addReferenceForStructure(
-                    SectionPos.bottomOf(targetChunk), start.structure(),
+            NativeWorldgenVersion.addReferenceForStructure(
+                    structureManager, start.structure(),
                     start.origin().pack(), targetChunk);
         }
     }
@@ -147,8 +146,8 @@ public final class NativeStructureReferenceRepair {
         synchronized (originChunk) {
             StructureStart current = originChunk.getStartForStructure(structure);
             if (current == start && current.isValid()) {
-                structureManager.setStartForStructure(
-                        SectionPos.bottomOf(originChunk), structure,
+                NativeWorldgenVersion.setStartForStructure(
+                        structureManager, structure,
                         StructureStart.INVALID_START, originChunk);
             }
         }

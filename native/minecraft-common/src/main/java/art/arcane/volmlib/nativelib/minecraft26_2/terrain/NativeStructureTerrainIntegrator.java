@@ -143,7 +143,7 @@ public final class NativeStructureTerrainIntegrator {
         }
         carveOrganicColumns(world, area, organicCarve(
                 carveFootprint(start, Math.max(0, terrain.getHorizontalPadding()),
-                        () -> world.getLevel().getStructureManager()),
+                        () -> NativeWorldgenVersion.templateManager(world.getLevel())),
                 terrain, shape, carveNoiseIdentity(world, structureId, start)));
     }
 

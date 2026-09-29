@@ -6,7 +6,6 @@ import art.arcane.volmlib.nativelib.terrain.structure.StructureInjectionPolicy;
 import net.minecraft.core.Holder;
 import net.minecraft.core.Registry;
 import net.minecraft.core.RegistryAccess;
-import net.minecraft.core.SectionPos;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
@@ -37,7 +36,6 @@ public final class NativeStructureStartInjector {
         Objects.requireNonNull(context, "Native structure injection context must not be null");
         ChunkAccess chunk = context.chunk();
         Registry<Structure> registry = context.registryAccess().lookupOrThrow(Registries.STRUCTURE);
-        SectionPos section = SectionPos.bottomOf(chunk);
         Map<Structure, P> configuredStarts = new LinkedHashMap<>();
         for (P plan : context.policy().plansAt(chunk.getPos().x(), chunk.getPos().z())) {
             Identifier identifier = Identifier.tryParse(plan.structureKey());
@@ -56,8 +54,8 @@ public final class NativeStructureStartInjector {
                 }
                 continue;
             }
-            StructureStart existing = context.structureManager().getStartForStructure(
-                    section, structure, chunk);
+            StructureStart existing = NativeWorldgenVersion.startForStructure(
+                    context.structureManager(), structure, chunk);
             boolean replacement = plan.replacesSource();
             if (!replacement && existing != null && existing.isValid()) {
                 replacement = context.policy().sourceReplaced(identifier.toString(),
@@ -85,8 +83,8 @@ public final class NativeStructureStartInjector {
                     generationContext, holder, plan, references);
             if (!isUsableGeneratedStart(generated)) {
                 if (replacement) {
-                    context.structureManager().setStartForStructure(
-                            section, structure, StructureStart.INVALID_START, chunk);
+                    NativeWorldgenVersion.setStartForStructure(
+                            context.structureManager(), structure, StructureStart.INVALID_START, chunk);
                 }
                 context.policy().discard(
                         identifier.toString(),
@@ -98,8 +96,8 @@ public final class NativeStructureStartInjector {
             context.policy().record(plan, NativeStructureOwnershipFingerprint.capture(
                     identifier.toString(), generated, referenceBounds));
             try {
-                context.structureManager().setStartForStructure(
-                        section, structure, generated, chunk);
+                NativeWorldgenVersion.setStartForStructure(
+                        context.structureManager(), structure, generated, chunk);
             } catch (RuntimeException | Error publicationError) {
                 try {
                     context.policy().discard(
