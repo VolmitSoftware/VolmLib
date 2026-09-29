@@ -12,6 +12,8 @@ public class ColorFormatterTest {
         assertEquals("\u00a7x\u00a71\u00a72\u00a7a\u00a7B\u00a7e\u00a7F\u00a7l",
             ColorFormatter.getLastColors("\u00a7cOld\u00a7x\u00a71\u00a72\u00a7a\u00a7B\u00a7e\u00a7FHex\u00a7lBold"));
         assertEquals("", ColorFormatter.getLastColors("plain\u00a7Atext"));
+        assertEquals("\u00a7X\u00a71\u00a72\u00a7a\u00a7B\u00a7e\u00a7F",
+            ColorFormatter.getLastColors("\u00a7cOld\u00a7X\u00a71\u00a72\u00a7a\u00a7B\u00a7e\u00a7FHex"));
     }
 
     @Test

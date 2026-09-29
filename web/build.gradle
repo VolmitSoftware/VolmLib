@@ -20,9 +20,25 @@ tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
 }
 
+sourceSets {
+    main {
+        java {
+            srcDirs = ['../shared/src/main/java']
+            include('art/arcane/volmlib/util/web/MclogsClient.java')
+        }
+        resources {
+            srcDirs = []
+        }
+    }
+    test {
+        java {
+            srcDirs = []
+        }
+    }
+}
+
 dependencies {
     implementation('com.google.code.gson:gson:2.10.1')
-    testImplementation('junit:junit:4.13.2')
 }
 
 publishing {

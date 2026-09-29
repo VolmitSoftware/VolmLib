@@ -119,7 +119,7 @@ public final class ColorFormatter {
             if (input.charAt(index) != '\u00a7') {
                 continue;
             }
-            if (index >= 12 && input.charAt(index - 11) == 'x'
+            if (index >= 12 && Character.toLowerCase(input.charAt(index - 11)) == 'x'
                     && input.charAt(index - 12) == '\u00a7' && expandedHexAt(input, index - 12)) {
                 colors.insert(0, input.substring(index - 12, index + 2));
                 break;

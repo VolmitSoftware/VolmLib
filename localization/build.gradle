@@ -20,6 +20,39 @@ tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
 }
 
+sourceSets {
+    main {
+        java {
+            srcDirs = ['../shared/src/main/java']
+            include('art/arcane/volmlib/util/localization/**')
+            exclude('art/arcane/volmlib/util/localization/BukkitLanguageEditor.java')
+            exclude('art/arcane/volmlib/util/localization/BukkitLanguageEditorPresentation.java')
+            exclude('art/arcane/volmlib/util/localization/BukkitLanguageSwitcher.java')
+            exclude('art/arcane/volmlib/util/localization/BukkitVolmitCommand.java')
+            include('art/arcane/volmlib/util/config/ConfigDescription.java')
+            include('art/arcane/volmlib/util/config/ConfigDoc.java')
+            include('art/arcane/volmlib/util/config/ConfigDocumentation.java')
+            include('art/arcane/volmlib/util/config/ConfigExposePolicy.java')
+            include('art/arcane/volmlib/util/config/ConfigJson.java')
+            include('art/arcane/volmlib/util/config/TomlCodec.java')
+            include('art/arcane/volmlib/util/director/DirectorMessages.java')
+            include('art/arcane/volmlib/util/director/help/DirectorHelpMessages.java')
+            include('art/arcane/volmlib/util/director/runtime/DirectorRuntimeMessages.java')
+            include('art/arcane/volmlib/util/format/ColorFormatter.java')
+            include('art/arcane/volmlib/util/io/AtomicFileIO.java')
+            include('art/arcane/volmlib/util/plugin/ComponentText.java')
+        }
+        resources {
+            srcDirs = []
+        }
+    }
+    test {
+        java {
+            srcDirs = []
+        }
+    }
+}
+
 dependencies {
     api('net.kyori:adventure-api:4.26.1')
     implementation('net.kyori:adventure-text-minimessage:4.26.1')
@@ -29,7 +62,6 @@ dependencies {
     implementation('com.moandjiezana.toml:toml4j:0.7.2') {
         transitive = false
     }
-    testImplementation('junit:junit:4.13.2')
 }
 
 publishing {
