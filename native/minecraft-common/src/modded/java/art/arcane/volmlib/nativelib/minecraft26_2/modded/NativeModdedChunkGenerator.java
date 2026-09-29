@@ -30,11 +30,11 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.WorldGenRegion;
 import net.minecraft.util.random.WeightedList;
+import net.minecraft.world.attribute.EnvironmentAttributes;
 import net.minecraft.world.entity.MobCategory;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.LevelHeightAccessor;
-import net.minecraft.world.level.NaturalSpawner;
 import net.minecraft.world.level.NoiseColumn;
 import net.minecraft.world.level.StructureManager;
 import net.minecraft.world.level.WorldGenLevel;
@@ -58,6 +58,7 @@ import net.minecraft.world.level.levelgen.RandomState;
 import net.minecraft.world.level.levelgen.RandomSupport;
 import net.minecraft.world.level.levelgen.WorldgenRandom;
 import net.minecraft.world.level.levelgen.blending.Blender;
+import net.minecraft.world.level.levelgen.densityfunction.SamplerContext;
 import net.minecraft.world.level.levelgen.structure.Structure;
 import net.minecraft.world.level.levelgen.structure.StructureSet;
 import net.minecraft.world.level.levelgen.structure.StructureStart;
@@ -69,6 +70,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Map;
 import java.util.OptionalInt;
+import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -123,7 +125,8 @@ public final class NativeModdedChunkGenerator<C, P extends StructureStartPlan, O
     @Override
     public ChunkGeneratorStructureState createState(HolderLookup<StructureSet> structureSets, RandomState randomState, long seed) {
         ChunkGeneratorStructureState state = ChunkGeneratorStructureState.createForNormal(
-                randomState, seed, structureBiomeSource.forStructureState(structureSets), structureSets);
+                randomState, seed, getOrigin(randomState), structureBiomeSource.forStructureState(structureSets),
+                structureSets);
         return NativeStructureSetFrequencyOverrides.apply(state, policy.structureFrequencies());
     }
 
@@ -160,7 +163,7 @@ public final class NativeModdedChunkGenerator<C, P extends StructureStartPlan, O
         spawnTables.evictRuntime(runtimeId);
     }
     public NativeBiomeResolver biomeResolver() {
-        return new NativeBiomeResolver(structureBiomeSource::getVisibleNoiseBiome);
+        return new NativeBiomeResolver(structureBiomeSource::visibleResolver);
     }
     private C engine() {
         return policy.current();
@@ -207,7 +210,7 @@ public final class NativeModdedChunkGenerator<C, P extends StructureStartPlan, O
     }
 
     @Override
-    public void addDebugScreenInfo(List<String> info, RandomState state, BlockPos pos) {
+    public void addDebugScreenInfo(List<String> info, RandomState state, BlockPos pos, SamplerContext samplerContext) {
         policy.addDebugInformation(info);
     }
 
@@ -272,7 +275,8 @@ public final class NativeModdedChunkGenerator<C, P extends StructureStartPlan, O
 
     @Override
     public WeightedList<MobSpawnSettings.SpawnerData> getMobsAt(
-            Holder<Biome> biome, StructureManager structureManager, MobCategory category, BlockPos pos) {
+            Level level, StructureManager structureManager, MobCategory category, BlockPos pos) {
+        Holder<Biome> biome = level.getBiome(pos);
         C current = engine();
         NativeSpawnSelection selection = policy.spawnSelection(current, new NativeModdedGeneratorPolicy.SpawnQuery(pos.getX(), pos.getY(), pos.getZ(),
                 biome.unwrapKey().map(key -> key.identifier().toString()).orElse("")));
@@ -283,13 +287,14 @@ public final class NativeModdedChunkGenerator<C, P extends StructureStartPlan, O
                      current, pos.getX(), pos.getZ(), "modded_mob_spawn_table");
              NativeGenerationLease lease = policy.lease(current, "modded_mob_spawn_table");
              NativeGenerationScope ignored = policy.context(current, lease.sessionId())) {
-            WeightedList<MobSpawnSettings.SpawnerData> explicitSpawns =
-                    biome.value().getMobSettings().getMobs(category);
+            WeightedList<MobSpawnSettings.SpawnerData> environmentSpawns = level.environmentAttributes()
+                    .getValue(EnvironmentAttributes.NATURAL_MOB_SPAWNS, pos).getMobsToSpawn(category);
             WeightedList<MobSpawnSettings.SpawnerData> resolvedSpawns = super.getMobsAt(
-                    biome, structureManager, category, pos);
-            if (resolvedSpawns != explicitSpawns) {
+                    level, structureManager, category, pos);
+            if (resolvedSpawns != environmentSpawns) {
                 return resolvedSpawns;
             }
+            WeightedList<MobSpawnSettings.SpawnerData> explicitSpawns = biomeSpawns(biome, category);
 
             Registry<Biome> registry = structureManager.registryAccess().lookupOrThrow(Registries.BIOME);
             Holder<Biome> vanillaSpawnBiome;
@@ -305,8 +310,7 @@ public final class NativeModdedChunkGenerator<C, P extends StructureStartPlan, O
                 return explicitSpawns;
             }
 
-            WeightedList<MobSpawnSettings.SpawnerData> vanillaSpawns =
-                    vanillaSpawnBiome.value().getMobSettings().getMobs(category);
+            WeightedList<MobSpawnSettings.SpawnerData> vanillaSpawns = biomeSpawns(vanillaSpawnBiome, category);
             if (explicitSpawns.isEmpty()) {
                 return vanillaSpawns;
             }
@@ -325,6 +329,11 @@ public final class NativeModdedChunkGenerator<C, P extends StructureStartPlan, O
         }
     }
 
+    private static WeightedList<MobSpawnSettings.SpawnerData> biomeSpawns(Holder<Biome> biome, MobCategory category) {
+        return biome.value().getAttributes().applyModifier(EnvironmentAttributes.NATURAL_MOB_SPAWNS,
+                EnvironmentAttributes.NATURAL_MOB_SPAWNS.defaultValue()).getMobsToSpawn(category);
+    }
+
     @Override
     public CompletableFuture<ChunkAccess> createBiomes(RandomState randomState, Blender blender,
                                                        StructureManager structureManager, ChunkAccess chunk) {
@@ -335,13 +344,16 @@ public final class NativeModdedChunkGenerator<C, P extends StructureStartPlan, O
              NativeGenerationScope runtimeScope = openHistoryRuntimeScope(route);
              NativeGenerationLease lease = policy.lease(current, "modded_create_biomes");
              NativeGenerationScope ignored = policy.context(current, lease.sessionId())) {
-            chunk.fillBiomesFromNoise(structureBiomeSource::getVisibleNoiseBiome, randomState.sampler());
+            chunk.fillBiomesFromNoise(structureBiomeSource.visibleResolver(
+                    randomState.createClimateSampler(SamplerContext.builder().enableCaches().build())));
             return CompletableFuture.completedFuture(chunk);
         }
     }
 
     @Override
-    public CompletableFuture<ChunkAccess> fillFromNoise(Blender blender, RandomState randomState, StructureManager structureManager, ChunkAccess chunk) {
+    public CompletableFuture<ChunkAccess> buildTerrain(ChunkAccess chunk, Blender blender, RandomState randomState,
+                                                       StructureManager structureManager, BiomeManager biomeManager,
+                                                       WorldGenRegion carverBiomeRegion, Set<Holder<Biome>> possibleBiomes) {
         C generationEngine = engine();
         ChunkPos pos = chunk.getPos();
         policy.generating(pos.x(), pos.z());
@@ -496,30 +508,6 @@ public final class NativeModdedChunkGenerator<C, P extends StructureStartPlan, O
     }
 
     @Override
-    public void applyCarvers(WorldGenRegion region, long seed, RandomState randomState, BiomeManager biomeManager, StructureManager structureManager, ChunkAccess chunk) {
-        C current = engine(region.getLevel());
-        ChunkPos chunkPos = chunk.getPos();
-        try (NativeGenerationRoute route = openHistoryRoute(
-                     current, chunkPos.x(), chunkPos.z(), "modded_apply_carvers");
-             NativeGenerationScope runtimeScope = openHistoryRuntimeScope(route);
-             NativeGenerationLease lease = policy.lease(current, "modded_apply_carvers");
-             NativeGenerationScope ignored = policy.context(current, lease.sessionId())) {
-        }
-    }
-
-    @Override
-    public void buildSurface(WorldGenRegion region, StructureManager structureManager, RandomState randomState, ChunkAccess chunk) {
-        C current = engine(region.getLevel());
-        ChunkPos chunkPos = chunk.getPos();
-        try (NativeGenerationRoute route = openHistoryRoute(
-                     current, chunkPos.x(), chunkPos.z(), "modded_build_surface");
-             NativeGenerationScope runtimeScope = openHistoryRuntimeScope(route);
-             NativeGenerationLease lease = policy.lease(current, "modded_build_surface");
-             NativeGenerationScope ignored = policy.context(current, lease.sessionId())) {
-        }
-    }
-
-    @Override
     public void applyBiomeDecoration(WorldGenLevel level, ChunkAccess chunk, StructureManager structureManager) {
         C current = engine(level.getLevel());
         ChunkPos chunkPos = chunk.getPos();
@@ -648,7 +636,7 @@ public final class NativeModdedChunkGenerator<C, P extends StructureStartPlan, O
             Holder<Biome> vanillaBiome = spawnTables.vanillaSpawnBiome(visibleBiome.value());
             WorldgenRandom random = new WorldgenRandom(new LegacyRandomSource(RandomSupport.generateUniqueSeed()));
             random.setDecorationSeed(region.getSeed(), center.getMinBlockX(), center.getMinBlockZ());
-            NaturalSpawner.spawnMobsForChunkGeneration(
+            NativeInitialMobSpawner.spawn(
                     region, vanillaBiome == null ? visibleBiome : vanillaBiome, center, random);
         }
     }

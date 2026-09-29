@@ -10,7 +10,6 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.tags.ItemTags;
 import net.minecraft.world.entity.EquipmentSlot;
-import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -94,7 +93,7 @@ public final class NativeHarvestSession {
             if (!current.isEmpty() && !matches) {
                 return false;
             }
-            Item brokenItem = toolBefore.getItem();
+            ItemStack brokenItem = toolBefore.copy();
             player.getInventory().setItem(heldSlot, ItemStack.EMPTY);
             if (!current.isEmpty()) {
                 player.onEquippedItemBroken(brokenItem, EquipmentSlot.MAINHAND);
@@ -126,7 +125,7 @@ public final class NativeHarvestSession {
         }
         int damage = current.getDamageValue() + 1;
         if (damage >= current.getMaxDamage()) {
-            Item brokenItem = current.getItem();
+            ItemStack brokenItem = current.copy();
             player.getInventory().setSelectedItem(ItemStack.EMPTY);
             player.onEquippedItemBroken(brokenItem, EquipmentSlot.MAINHAND);
             player.inventoryMenu.sendAllDataToRemote();

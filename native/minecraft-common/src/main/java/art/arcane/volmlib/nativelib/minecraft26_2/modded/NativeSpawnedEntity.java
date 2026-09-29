@@ -88,7 +88,7 @@ public final class NativeSpawnedEntity {
         entity.setCustomNameVisible(options.isCustomNameVisible());
         entity.setGlowingTag(options.isGlowing());
         entity.setNoGravity(!options.isGravity());
-        entity.setInvulnerable(options.isInvulnerable());
+        entity.setPermanentlyInvulnerable(options.isInvulnerable());
         entity.setSilent(options.isSilent());
     }
 
@@ -166,11 +166,11 @@ public final class NativeSpawnedEntity {
     }
 
     public MotionState pausePhysics(int invulnerableTicks) {
-        MotionState original = new MotionState(entity.isInvulnerable(), entity.noPhysics,
-                entity.invulnerableTime, entity instanceof Mob mob && mob.isNoAi());
-        entity.setInvulnerable(true);
+        MotionState original = new MotionState(entity.isPermanentlyInvulnerable(), entity.noPhysics,
+                entity.getInvulnerableTime(), entity instanceof Mob mob && mob.isNoAi());
+        entity.setPermanentlyInvulnerable(true);
         entity.noPhysics = true;
-        entity.invulnerableTime = invulnerableTicks;
+        entity.setInvulnerableTime(invulnerableTicks);
         if (entity instanceof Mob mob) {
             mob.setNoAi(true);
         }
@@ -178,9 +178,9 @@ public final class NativeSpawnedEntity {
     }
 
     public void restoreMotion(MotionState state) {
-        entity.invulnerableTime = state.invulnerableTicks();
+        entity.setInvulnerableTime(state.invulnerableTicks());
         entity.noPhysics = state.noPhysics();
-        entity.setInvulnerable(state.invulnerable());
+        entity.setPermanentlyInvulnerable(state.invulnerable());
         if (entity instanceof Mob mob) {
             mob.setNoAi(state.noAi());
         }

@@ -17,8 +17,11 @@ import net.minecraft.util.Mth;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.level.LevelReader;
 import net.minecraft.world.level.biome.Biome;
+import net.minecraft.world.level.biome.BiomeResolver;
 import net.minecraft.world.level.biome.BiomeSource;
 import net.minecraft.world.level.biome.Climate;
+import net.minecraft.world.level.levelgen.RandomState;
+import net.minecraft.world.level.levelgen.densityfunction.SamplerContext;
 import net.minecraft.world.level.levelgen.structure.Structure;
 import net.minecraft.world.level.levelgen.structure.StructureSet;
 
@@ -111,12 +114,12 @@ public final class NativeModdedBiomeSource<P extends NativeModdedBiomePolicy<Hol
     }
 
     @Override
-    public Holder<Biome> getNoiseBiome(int x, int y, int z, Climate.Sampler sampler) {
-        return policy.getNoiseBiome(x, y, z, sampler);
+    public BiomeResolver createResolver(Climate.Sampler sampler) {
+        return new Resolver(sampler);
     }
 
-    public Holder<Biome> getVisibleNoiseBiome(int x, int y, int z, Climate.Sampler sampler) {
-        return policy.getVisibleNoiseBiome(x, y, z, sampler);
+    public BiomeResolver visibleResolver(Climate.Sampler sampler) {
+        return (x, y, z) -> policy.getVisibleNoiseBiome(x, y, z, sampler);
     }
 
     public Holder<Biome> getVisibleSurfaceBiome(int x, int z) {
@@ -130,22 +133,17 @@ public final class NativeModdedBiomeSource<P extends NativeModdedBiomePolicy<Hol
     @Override
     public Pair<BlockPos, Holder<Biome>> findClosestBiome3d(BlockPos origin, int searchRadius,
             int sampleResolutionHorizontal, int sampleResolutionVertical, Predicate<Holder<Biome>> allowed,
-            Climate.Sampler sampler, LevelReader level) {
+            RandomState randomState, LevelReader level) {
+        Climate.Sampler sampler = randomState.createClimateSampler(SamplerContext.builder().enableCaches().build());
         NativeBiomeSourcePolicy.BiomeLocation<Holder<Biome>> found = policy.findClosestBiome3d(
                 new NativeModdedBiomePolicy.ClosestQuery<>(allowed, sampler,
                         () -> location(serializedSource.findClosestBiome3d(origin, searchRadius,
-                                sampleResolutionHorizontal, sampleResolutionVertical, allowed, sampler, level)),
+                                sampleResolutionHorizontal, sampleResolutionVertical, allowed, randomState, level)),
                         () -> location(super.findClosestBiome3d(origin, searchRadius,
-                                sampleResolutionHorizontal, sampleResolutionVertical, allowed, sampler, level)),
+                                sampleResolutionHorizontal, sampleResolutionVertical, allowed, randomState, level)),
                         (candidates, resolver) -> search(new Search(origin, searchRadius,
                                 sampleResolutionHorizontal, sampleResolutionVertical, level), candidates, resolver)));
         return found == null ? null : Pair.of(new BlockPos(found.x(), found.y(), found.z()), found.biome());
-    }
-
-    @Override
-    public Set<Holder<Biome>> getBiomesWithin(int x, int y, int z, int radius, Climate.Sampler sampler) {
-        return policy.getBiomesWithin(new NativeModdedBiomePolicy.NearbyQuery<>(x, y, z, radius, sampler,
-                () -> super.getBiomesWithin(x, y, z, radius, sampler)));
     }
 
     private static String key(Holder<Biome> biome) {
@@ -218,12 +216,31 @@ public final class NativeModdedBiomeSource<P extends NativeModdedBiomePolicy<Hol
 
         @Override
         public Holder<Biome> serializedNoise(int x, int y, int z, Climate.Sampler sampler) {
-            return serializedSource.getNoiseBiome(x, y, z, sampler);
+            return serializedSource.createResolver(sampler).getNoiseBiome(x, y, z);
         }
 
         @Override
         public String holderKey(Holder<Biome> holder) {
             return key(holder);
+        }
+    }
+
+    private final class Resolver implements BiomeResolver {
+        private final Climate.Sampler sampler;
+
+        private Resolver(Climate.Sampler sampler) {
+            this.sampler = sampler;
+        }
+
+        @Override
+        public Holder<Biome> getNoiseBiome(int x, int y, int z) {
+            return policy.getNoiseBiome(x, y, z, sampler);
+        }
+
+        @Override
+        public Set<Holder<Biome>> getBiomesWithin(int x, int y, int z, int radius) {
+            return policy.getBiomesWithin(new NativeModdedBiomePolicy.NearbyQuery<>(x, y, z, radius, sampler,
+                    () -> BiomeResolver.super.getBiomesWithin(x, y, z, radius)));
         }
     }
 
@@ -260,16 +277,16 @@ public final class NativeModdedBiomeSource<P extends NativeModdedBiomePolicy<Hol
         }
 
         @Override
-        public Holder<Biome> getNoiseBiome(int x, int y, int z, Climate.Sampler sampler) {
-            return delegate.policy.requiredStructureBiome(x, y, z, sampler);
+        public BiomeResolver createResolver(Climate.Sampler sampler) {
+            return (x, y, z) -> delegate.policy.requiredStructureBiome(x, y, z, sampler);
         }
 
         @Override
         public Pair<BlockPos, Holder<Biome>> findBiomeHorizontal(int x, int y, int z, int searchRadius,
-                Predicate<Holder<Biome>> allowed, RandomSource random, Climate.Sampler sampler) {
+                Predicate<Holder<Biome>> allowed, RandomSource random, RandomState randomState) {
             int step = delegate.policy.horizontalSearchStep(y, searchRadius);
-            return step == 1 ? super.findBiomeHorizontal(x, y, z, searchRadius, allowed, random, sampler)
-                    : super.findBiomeHorizontal(x, y, z, searchRadius, step, allowed, random, false, sampler);
+            return step == 1 ? super.findBiomeHorizontal(x, y, z, searchRadius, allowed, random, randomState)
+                    : super.findBiomeHorizontal(x, y, z, searchRadius, step, allowed, random, false, randomState);
         }
     }
 }

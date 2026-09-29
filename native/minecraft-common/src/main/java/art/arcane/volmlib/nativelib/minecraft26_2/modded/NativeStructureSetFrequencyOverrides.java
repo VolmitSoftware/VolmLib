@@ -26,6 +26,7 @@ import net.minecraft.core.Vec3i;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.level.chunk.ChunkGeneratorStructureState;
 import net.minecraft.world.level.levelgen.structure.StructureSet;
+import net.minecraft.world.level.levelgen.structure.placement.AbstractSpreadingStructurePlacement;
 import net.minecraft.world.level.levelgen.structure.placement.ConcentricRingsStructurePlacement;
 import net.minecraft.world.level.levelgen.structure.placement.RandomSpreadStructurePlacement;
 import net.minecraft.world.level.levelgen.structure.placement.StructurePlacement;
@@ -110,15 +111,15 @@ public final class NativeStructureSetFrequencyOverrides {
 
         StructureSet originalSet = holder.value();
         StructurePlacement originalPlacement = originalSet.placement();
-        Optional<StructurePlacement.ExclusionZone> originalZone = exclusionZone(originalPlacement);
-        Optional<StructurePlacement.ExclusionZone> scaledZone = originalZone;
+        Optional<AbstractSpreadingStructurePlacement.ExclusionZone> originalZone = exclusionZone(originalPlacement);
+        Optional<AbstractSpreadingStructurePlacement.ExclusionZone> scaledZone = originalZone;
         if (originalZone.isPresent()) {
             Holder<StructureSet> target = canonicalHolder(
                     originalZone.get().otherSet(), holdersByKey);
             Holder<StructureSet> scaledTarget = scaleHolder(
                     target, importedStructures, holdersByKey, scaledByIdentity);
             if (scaledTarget != originalZone.get().otherSet()) {
-                scaledZone = Optional.of(new StructurePlacement.ExclusionZone(
+                scaledZone = Optional.of(new AbstractSpreadingStructurePlacement.ExclusionZone(
                         scaledTarget, originalZone.get().chunkCount()));
             }
         }
@@ -141,7 +142,7 @@ public final class NativeStructureSetFrequencyOverrides {
             if (importedStructures.frequencyMultiplier(structureSetKey(current)) != 1D) {
                 return true;
             }
-            Optional<StructurePlacement.ExclusionZone> zone =
+            Optional<AbstractSpreadingStructurePlacement.ExclusionZone> zone =
                     exclusionZone(current.value().placement());
             if (zone.isEmpty()) {
                 return false;
@@ -161,21 +162,21 @@ public final class NativeStructureSetFrequencyOverrides {
 
     private static StructurePlacement scalePlacement(
             StructurePlacement placement,
-            Optional<StructurePlacement.ExclusionZone> originalZone,
-            Optional<StructurePlacement.ExclusionZone> scaledZone,
+            Optional<AbstractSpreadingStructurePlacement.ExclusionZone> originalZone,
+            Optional<AbstractSpreadingStructurePlacement.ExclusionZone> scaledZone,
             double multiplier
     ) {
         Vec3i locateOffset = (Vec3i) declaredFieldValue(
-                StructurePlacement.class, placement, Vec3i.class);
-        StructurePlacement.FrequencyReductionMethod reductionMethod =
-                (StructurePlacement.FrequencyReductionMethod) declaredFieldValue(
-                        StructurePlacement.class,
+                AbstractSpreadingStructurePlacement.class, placement, Vec3i.class);
+        AbstractSpreadingStructurePlacement.FrequencyReductionMethod reductionMethod =
+                (AbstractSpreadingStructurePlacement.FrequencyReductionMethod) declaredFieldValue(
+                        AbstractSpreadingStructurePlacement.class,
                         placement,
-                        StructurePlacement.FrequencyReductionMethod.class);
+                        AbstractSpreadingStructurePlacement.FrequencyReductionMethod.class);
         float frequency = (float) declaredFieldValue(
-                StructurePlacement.class, placement, float.class);
+                AbstractSpreadingStructurePlacement.class, placement, float.class);
         int salt = (int) declaredFieldValue(
-                StructurePlacement.class, placement, int.class);
+                AbstractSpreadingStructurePlacement.class, placement, int.class);
 
         if (placement.getClass() == RandomSpreadStructurePlacement.class) {
             RandomSpreadStructurePlacement randomSpread =
@@ -219,15 +220,18 @@ public final class NativeStructureSetFrequencyOverrides {
                 + placement.getClass().getName());
     }
 
-    private static Optional<StructurePlacement.ExclusionZone> exclusionZone(
+    private static Optional<AbstractSpreadingStructurePlacement.ExclusionZone> exclusionZone(
             StructurePlacement placement
     ) {
-        Object value = declaredFieldValue(StructurePlacement.class, placement, Optional.class);
+        if (!(placement instanceof AbstractSpreadingStructurePlacement)) {
+            return Optional.empty();
+        }
+        Object value = declaredFieldValue(AbstractSpreadingStructurePlacement.class, placement, Optional.class);
         if (value instanceof Optional<?> optional && (optional.isEmpty()
-                || optional.get() instanceof StructurePlacement.ExclusionZone)) {
+                || optional.get() instanceof AbstractSpreadingStructurePlacement.ExclusionZone)) {
             @SuppressWarnings("unchecked")
-            Optional<StructurePlacement.ExclusionZone> resolved =
-                    (Optional<StructurePlacement.ExclusionZone>) optional;
+            Optional<AbstractSpreadingStructurePlacement.ExclusionZone> resolved =
+                    (Optional<AbstractSpreadingStructurePlacement.ExclusionZone>) optional;
             return resolved;
         }
         throw new IllegalStateException("Could not read native structure exclusion zone from "
