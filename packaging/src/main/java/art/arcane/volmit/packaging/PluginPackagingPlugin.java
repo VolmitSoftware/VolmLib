@@ -146,6 +146,7 @@ public class PluginPackagingPlugin implements Plugin<Project> {
             task.getInputs().property("packaging.mode", mode.label());
             task.getInputs().property("packaging.maximumBytes", policy.getMaximumBytes());
             task.getInputs().property("packaging.modded", policy.isModded());
+            task.getInputs().property("packaging.intermediate", policy.isIntermediate());
             task.getInputs().property("packaging.stripDirectories", policy.isStripDirectories());
             task.getInputs().property("packaging.stripLocalVariables", policy.isStripLocalVariables());
             task.getInputs().property("packaging.releaseCompression", policy.isReleaseCompression());

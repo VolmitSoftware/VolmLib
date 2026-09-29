@@ -96,6 +96,13 @@ public final class NativeTileReader {
         this.registries = registries;
     }
 
+    public static NativeTileReader forServer(Supplier<NativeModdedServer> server) {
+        return new NativeTileReader(() -> {
+            NativeModdedServer host = server.get();
+            return host == null ? null : host.registryAccess();
+        });
+    }
+
     private static final class ReplayInputStream extends InputStream {
         private final InputStream source;
         private byte[] buffer = new byte[256];

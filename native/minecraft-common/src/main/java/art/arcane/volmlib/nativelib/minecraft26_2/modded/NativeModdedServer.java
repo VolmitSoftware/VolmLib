@@ -3,7 +3,6 @@ package art.arcane.volmlib.nativelib.minecraft26_2.modded;
 import art.arcane.volmlib.nativelib.terrain.NativeWorld;
 import art.arcane.volmlib.nativelib.minecraft26_2.terrain.NativeRegistryDefinitions;
 import net.minecraft.core.registries.Registries;
-import net.minecraft.core.HolderLookup;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
@@ -45,10 +44,6 @@ public final class NativeModdedServer {
 
     public RegistryAccess registryAccess() {
         return server.registryAccess();
-    }
-
-    public HolderLookup.Provider reloadableRegistries() {
-        return server.reloadableRegistries().lookup();
     }
 
     public Thread refreshWorlds() {
