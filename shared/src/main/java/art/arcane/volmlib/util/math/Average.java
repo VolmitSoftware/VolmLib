@@ -7,6 +7,7 @@ public class Average {
     protected int cursor;
     private double average;
     private double lastSum;
+    private int nonZeroValues;
     private boolean dirty;
     private boolean brandNew;
 
@@ -17,6 +18,7 @@ public class Average {
         average = 0;
         cursor = 0;
         lastSum = 0;
+        nonZeroValues = 0;
         dirty = false;
     }
 
@@ -26,12 +28,14 @@ public class Average {
         if (brandNew) {
             DoubleArrayUtils.fill(values, value);
             lastSum = size() * value;
+            nonZeroValues = value == 0D ? 0 : size();
             brandNew = false;
             return;
         }
 
         double current = values[cursor];
-        lastSum = (lastSum - current) + value;
+        nonZeroValues += (value == 0D ? 0 : 1) - (current == 0D ? 0 : 1);
+        lastSum = nonZeroValues == 0 ? 0D : (lastSum - current) + value;
         values[cursor] = value;
         cursor = cursor + 1 < size() ? cursor + 1 : 0;
     }
