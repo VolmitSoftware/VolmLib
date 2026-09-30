@@ -43,7 +43,7 @@ public class MemoryMonitor {
         garbageLast = 0;
         pressure = 0;
 
-        looper = new Looper() {
+        looper = new Looper("Memory Monitor") {
             @Override
             protected long loop() {
                 sample();
@@ -51,7 +51,6 @@ public class MemoryMonitor {
             }
         };
         looper.setPriority(Thread.MIN_PRIORITY);
-        looper.setName("Memory Monitor");
         looper.start();
     }
 
