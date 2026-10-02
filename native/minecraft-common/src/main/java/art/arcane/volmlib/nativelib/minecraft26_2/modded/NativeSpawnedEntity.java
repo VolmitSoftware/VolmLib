@@ -93,8 +93,11 @@ public final class NativeSpawnedEntity {
     }
 
     public boolean persistence(boolean persistent) {
-        NativeEntityBehavior.configurePersistence(entity, persistent);
-        return !persistent || (entity.getType().canSerialize() && entity.shouldBeSaved());
+        NativeEntityBehavior.configureSaving(entity, true);
+        if (persistent && entity instanceof Mob mob) {
+            mob.setPersistenceRequired();
+        }
+        return entity.getType().canSerialize() && entity.shouldBeSaved();
     }
 
     public String typeKey() {
@@ -161,7 +164,8 @@ public final class NativeSpawnedEntity {
             panda.setHiddenGene(gene(options.getPandaHiddenGene()));
         }
         if (entity instanceof Villager villager) {
-            NativeEntityBehavior.configurePersistence(villager, true);
+            NativeEntityBehavior.configureSaving(villager, true);
+            villager.setPersistenceRequired();
         }
     }
 

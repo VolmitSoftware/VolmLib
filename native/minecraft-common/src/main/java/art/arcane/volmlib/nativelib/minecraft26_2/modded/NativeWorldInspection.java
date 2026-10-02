@@ -111,9 +111,9 @@ public final class NativeWorldInspection {
     public Persistence persistence() {
         ItemEntity item = new ItemEntity(level, 0D, level.getMinY(), 0D, Items.COBBLESTONE.getDefaultInstance());
         boolean vanilla = item.shouldBeSaved();
-        NativeEntityBehavior.configurePersistence(item, false);
+        NativeEntityBehavior.configureSaving(item, false);
         boolean suppressed = !item.shouldBeSaved();
-        NativeEntityBehavior.configurePersistence(item, true);
+        NativeEntityBehavior.configureSaving(item, true);
         return new Persistence(vanilla, suppressed, item.shouldBeSaved());
     }
 

@@ -73,7 +73,7 @@ public final class NativeEntityRuntime {
     }
 
     public boolean air(int x, int y, int z) {
-        return level.getBlockState(new BlockPos(x, y, z)).is(Blocks.AIR);
+        return NativeBlockProperties.isAir(level.getBlockState(new BlockPos(x, y, z)));
     }
 
     public boolean solid(int x, int y, int z) {
@@ -169,11 +169,14 @@ public final class NativeEntityRuntime {
     }
 
     public static boolean isAreaClearForSpawn(int blockX, int blockY, int blockZ, float width, float height, NativeBlockPositionPredicate isAir) {
-        int radius = (int) (width / 2F);
-        int endY = blockY + (int) height;
-        for (int x = blockX - radius; x <= blockX + radius; x++) {
+        int startX = (int) Math.floor(blockX + 0.5 - width / 2D);
+        int endX = (int) Math.floor(Math.nextDown(blockX + 0.5 + width / 2D));
+        int endY = (int) Math.floor(Math.nextDown(blockY + (double) height));
+        int startZ = (int) Math.floor(blockZ + 0.5 - width / 2D);
+        int endZ = (int) Math.floor(Math.nextDown(blockZ + 0.5 + width / 2D));
+        for (int x = startX; x <= endX; x++) {
             for (int y = blockY; y <= endY; y++) {
-                for (int z = blockZ - radius; z <= blockZ + radius; z++) {
+                for (int z = startZ; z <= endZ; z++) {
                     if (!isAir.test(x, y, z)) {
                         return false;
                     }

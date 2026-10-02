@@ -18,13 +18,10 @@ public final class NativeEntityBehavior {
         tags = Objects.requireNonNull(configuredTags, "configuredTags");
     }
 
-    public static void configurePersistence(Entity entity, boolean persistent) {
+    public static void configureSaving(Entity entity, boolean persistent) {
         String tag = Objects.requireNonNull(tags, "Entity behavior tags have not been bound").nonPersistent();
         if (persistent) {
             entity.removeTag(tag);
-            if (entity instanceof Mob mob) {
-                mob.setPersistenceRequired();
-            }
             return;
         }
         if (!entity.entityTags().contains(tag) && !entity.addTag(tag)) {
@@ -41,7 +38,7 @@ public final class NativeEntityBehavior {
         return vanillaResult && (configured == null || !entityTags.contains(configured.nonPersistent()));
     }
 
-    public static void configurePersistenceTags(Set<String> entityTags, boolean persistent) {
+    public static void configureSavingTags(Set<String> entityTags, boolean persistent) {
         String tag = Objects.requireNonNull(tags, "Entity behavior tags have not been bound").nonPersistent();
         if (persistent) {
             entityTags.remove(tag);

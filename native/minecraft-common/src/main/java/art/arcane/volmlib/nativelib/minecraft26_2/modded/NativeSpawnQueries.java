@@ -8,13 +8,17 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.MobCategory;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.NaturalSpawner;
+import net.minecraft.world.level.gamerules.GameRules;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.phys.AABB;
 
 import java.util.function.LongConsumer;
+import java.util.HashMap;
+import java.util.Map;
 
 public final class NativeSpawnQueries {
     private NativeSpawnQueries() {
@@ -28,12 +32,32 @@ public final class NativeSpawnQueries {
         return level(world).getMaxLocalRawBrightness(new BlockPos(x, y, z));
     }
 
+    public static boolean ambientAllowed(NativeWorld world, int chunkX, int chunkZ, boolean initial) {
+        ServerLevel level = level(world);
+        return level.getGameRules().get(GameRules.SPAWN_MOBS)
+                && (initial || level.isPositionEntityTicking(new BlockPos(
+                        (chunkX << 4) + 8, level.getMinY(), (chunkZ << 4) + 8)));
+    }
+
     public static int livingEntities(NativeWorld world, int chunkX, int chunkZ) {
         ServerLevel level = level(world);
         int baseX = chunkX << 4;
         int baseZ = chunkZ << 4;
         AABB box = new AABB(baseX, level.getMinY(), baseZ, baseX + 16, level.getMaxY(), baseZ + 16);
         return level.getEntities((Entity) null, box, entity -> livingInChunk(entity, chunkX, chunkZ)).size();
+    }
+
+    public static Map<String, Integer> livingEntityCategories(NativeWorld world, int chunkX, int chunkZ) {
+        ServerLevel level = level(world);
+        int baseX = chunkX << 4;
+        int baseZ = chunkZ << 4;
+        AABB box = new AABB(baseX, level.getMinY(), baseZ, baseX + 16, level.getMaxY(), baseZ + 16);
+        Map<String, Integer> counts = new HashMap<>();
+        for (Entity entity : level.getEntities((Entity) null, box,
+                entity -> livingInChunk(entity, chunkX, chunkZ) && !(entity instanceof Player))) {
+            counts.merge(entity.getType().getCategory().getName(), 1, Integer::sum);
+        }
+        return counts;
     }
 
     public static Population population(NativeWorld world) {
