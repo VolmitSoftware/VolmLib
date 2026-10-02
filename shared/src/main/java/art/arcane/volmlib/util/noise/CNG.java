@@ -76,7 +76,7 @@ public class CNG {
     private transient boolean unityOpacity;
     private transient double effectiveScale;
     private transient double signedFractureScale;
-    private transient boolean fastPathStateDirty = true;
+    private transient volatile boolean fastPathStateDirty = true;
     private transient int coordCacheSalt;
     private transient Object coordCacheIdentity = new Object();
 

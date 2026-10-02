@@ -126,6 +126,9 @@ import art.arcane.volmlib.nativelib.terrain.structure.StructureStagePolicy.Footp
 import art.arcane.volmlib.nativelib.terrain.structure.StructureStagePolicy.LocateRequest;
 
 public final class NativeBukkitStructureStage<C, D, P extends StructureStartPlan, O extends StructureOwnershipRecordView<O>> {
+    private static final Comparator<StructureStart> START_ORDER = Comparator
+            .comparingInt((StructureStart start) -> start.getChunkPos().x())
+            .thenComparingInt(start -> start.getChunkPos().z());
     private final ChunkGenerator generator;
     private final NativeBiomeSourceImpl customBiomeSource;
     private final int runtimeMinY;
@@ -388,7 +391,7 @@ public final class NativeBukkitStructureStage<C, D, P extends StructureStartPlan
                 try {
                     StructurePlacementDecision sourceDecision = policy.structurePolicy(policy.current()).resolve(
                             structureId, NativeStructureVegetationClearer.isUndergroundStep(structure.step()));
-                    List<StructureStart> starts = structureManager.startsForStructure(sectionPos.x(), sectionPos.z(), structure);
+                    List<StructureStart> starts = orderedStarts(structureManager.startsForStructure(sectionPos.x(), sectionPos.z(), structure));
                     List<NativePlacement> resolvedPlacements = new ArrayList<>(starts.size());
                     for (StructureStart start : starts) {
                         BoundingBox footprint = start.getBoundingBox();
@@ -485,6 +488,15 @@ public final class NativeBukkitStructureStage<C, D, P extends StructureStartPlan
                     "foundation repair", nativeStructureBatchContext(placementGroups),
                     chunkPos.x(), chunkPos.z(), error);
         }
+    }
+
+    static List<StructureStart> orderedStarts(List<StructureStart> starts) {
+        if (starts.size() < 2) {
+            return starts;
+        }
+        List<StructureStart> ordered = new ArrayList<>(starts);
+        ordered.sort(START_ORDER);
+        return ordered;
     }
 
     private boolean isHistoricalStructureStart(WorldGenLevel world, StructureStart start) {

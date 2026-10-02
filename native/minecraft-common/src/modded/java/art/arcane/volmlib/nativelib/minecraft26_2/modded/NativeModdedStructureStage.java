@@ -91,6 +91,9 @@ import net.minecraft.world.level.levelgen.structure.StructureStart;
 import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplateManager;
 
 public final class NativeModdedStructureStage<C, P extends StructureStartPlan, O extends StructureOwnershipRecordView<O>> {
+    private static final Comparator<StructureStart> START_ORDER = Comparator
+            .comparingInt((StructureStart start) -> start.getChunkPos().x())
+            .thenComparingInt(start -> start.getChunkPos().z());
     private final ChunkGenerator generator;
     private final Supplier<? extends NativeModdedBiomeSource<?>> biomeSource;
     private final Policy<C, P, O> policy;
@@ -332,7 +335,7 @@ public final class NativeModdedStructureStage<C, P extends StructureStartPlan, O
                 try {
                     StructurePlacementDecision sourceDecision = policy.structurePolicy(current).resolve(
                             structureId, NativeStructureVegetationClearer.isUndergroundStep(structure.step()));
-                    List<StructureStart> starts = structureManager.startsForStructure(sectionPos.x(), sectionPos.z(), structure);
+                    List<StructureStart> starts = orderedStarts(structureManager.startsForStructure(sectionPos.x(), sectionPos.z(), structure));
                     List<NativePlacement> resolvedPlacements = new ArrayList<>(starts.size());
                     for (StructureStart start : starts) {
                         BoundingBox footprint = start.getBoundingBox();
@@ -453,6 +456,15 @@ public final class NativeModdedStructureStage<C, P extends StructureStartPlan, O
             context.append(placementGroups.get(i).structureId());
         }
         return context.append(']').toString();
+    }
+
+    static List<StructureStart> orderedStarts(List<StructureStart> starts) {
+        if (starts.size() < 2) {
+            return starts;
+        }
+        List<StructureStart> ordered = new ArrayList<>(starts);
+        ordered.sort(START_ORDER);
+        return ordered;
     }
 
     private void placeVanillaStructure(WorldGenLevel world, StructureManager structureManager,
