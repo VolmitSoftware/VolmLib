@@ -3,6 +3,10 @@ package art.arcane.volmlib.nativelib.v26_3_R1.environment;
 import art.arcane.volmlib.nativelib.environment.WorldEnvironment;
 import art.arcane.volmlib.nativelib.environment.WorldEnvironmentAccess;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.core.BlockPos;
+import net.minecraft.tags.FluidTags;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.material.FluidState;
 import net.minecraft.world.attribute.EnvironmentAttributeSystem;
 import net.minecraft.world.attribute.EnvironmentAttributes;
 import net.minecraft.world.level.dimension.DimensionType;
@@ -40,8 +44,22 @@ public final class NativeWorldEnvironmentAccess implements WorldEnvironmentAcces
             attributes.getValue(EnvironmentAttributes.CLOUD_HEIGHT, eye));
         WorldEnvironment.Dimension settings = new WorldEnvironment.Dimension(dimension.minY(), dimension.height(), dimension.hasSkyLight(),
             WorldEnvironment.CardinalLighting.valueOf(dimension.cardinalLightType().name()),
-            level.isFlat() ? dimension.minY() : 63.0D, dimension.hasEndFlashes());
-        return new WorldEnvironment(level.getGameTime(), sky, fog, lighting, clouds, settings);
+            level.isFlat() ? dimension.minY() : 63.0D, dimension.hasEndFlashes(), dimension.hasFixedTime(), dimension.logicalHeight(),
+            dimension.hasCeiling(), dimension.ambientLight());
+        return new WorldEnvironment(level.getGameTime(), sky, fog, lighting, clouds, settings, eyeMedium(level, eye));
+    }
+
+    private static WorldEnvironment.EyeMedium eyeMedium(ServerLevel world, Vec3 eye) {
+        BlockPos position = BlockPos.containing(eye);
+        FluidState fluid = world.getFluidState(position);
+        if (fluid.is(FluidTags.WATER) && eye.y < position.getY() + fluid.getHeightForCamera(world, position)) {
+            return WorldEnvironment.EyeMedium.WATER;
+        }
+        if (fluid.is(FluidTags.LAVA) && eye.y < position.getY() + fluid.getHeight(world, position)) {
+            return WorldEnvironment.EyeMedium.LAVA;
+        }
+        return world.getBlockState(position).is(Blocks.POWDER_SNOW)
+            ? WorldEnvironment.EyeMedium.POWDER_SNOW : WorldEnvironment.EyeMedium.NONE;
     }
 
     private static WorldEnvironment.Color color(Vector3fc value) {

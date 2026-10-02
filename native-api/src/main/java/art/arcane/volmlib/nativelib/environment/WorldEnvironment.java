@@ -2,13 +2,14 @@ package art.arcane.volmlib.nativelib.environment;
 
 import java.util.Objects;
 
-public record WorldEnvironment(long gameTime, Sky sky, Fog fog, Lighting lighting, Clouds clouds, Dimension dimension) {
+public record WorldEnvironment(long gameTime, Sky sky, Fog fog, Lighting lighting, Clouds clouds, Dimension dimension, EyeMedium eyeMedium) {
     public WorldEnvironment {
         Objects.requireNonNull(sky, "sky");
         Objects.requireNonNull(fog, "fog");
         Objects.requireNonNull(lighting, "lighting");
         Objects.requireNonNull(clouds, "clouds");
         Objects.requireNonNull(dimension, "dimension");
+        Objects.requireNonNull(eyeMedium, "eyeMedium");
     }
 
     public record Color(float red, float green, float blue) {
@@ -49,10 +50,14 @@ public record WorldEnvironment(long gameTime, Sky sky, Fog fog, Lighting lightin
     }
 
     public record Dimension(int minY, int height, boolean hasSkyLight, CardinalLighting cardinalLighting,
-                            double horizonHeight, boolean hasEndFlashes) {
+                            double horizonHeight, boolean hasEndFlashes, boolean hasFixedTime, int logicalHeight, boolean hasCeiling, float ambientLight) {
         public Dimension {
             Objects.requireNonNull(cardinalLighting, "cardinalLighting");
         }
+    }
+
+    public enum EyeMedium {
+        NONE, WATER, LAVA, POWDER_SNOW
     }
 
     public enum Skybox {
