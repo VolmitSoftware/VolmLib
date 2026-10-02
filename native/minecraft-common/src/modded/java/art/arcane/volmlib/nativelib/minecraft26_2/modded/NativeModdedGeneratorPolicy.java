@@ -40,6 +40,9 @@ public interface NativeModdedGeneratorPolicy<C, P extends StructureStartPlan, O 
     boolean allowsNewGeneration(C context, int chunkX, int chunkZ);
     boolean historyBypass(C context);
     boolean stacked(C context);
+    default boolean terrainTransformed() {
+        return false;
+    }
     int runtimeId(C context);
     int terrainHeight(C context, int x, int z, boolean ignoreFluid, boolean host);
     NativeBlockColumn resolvedColumn(C context, int x, int z);

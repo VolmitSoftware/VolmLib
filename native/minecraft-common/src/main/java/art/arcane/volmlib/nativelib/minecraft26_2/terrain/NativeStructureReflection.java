@@ -236,9 +236,6 @@ public final class NativeStructureReflection {
         if (resolved == null) {
             throw new IllegalStateException("StructureTemplate palette List field is missing");
         }
-        if (!Modifier.isFinal(resolved.getModifiers())) {
-            throw new IllegalStateException("StructureTemplate palette field has an unexpected access contract");
-        }
         if (!resolved.trySetAccessible()) {
             throw new IllegalStateException("StructureTemplate palette field is inaccessible");
         }

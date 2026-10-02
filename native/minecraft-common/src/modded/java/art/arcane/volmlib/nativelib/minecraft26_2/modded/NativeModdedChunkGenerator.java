@@ -122,6 +122,10 @@ public final class NativeModdedChunkGenerator<C, P extends StructureStartPlan, O
         return new Components<>(biomes, policy.featureStage(biomes));
     }
 
+    public boolean hasTerrainTransformer() {
+        return policy.terrainTransformed();
+    }
+
     @Override
     public ChunkGeneratorStructureState createState(HolderLookup<StructureSet> structureSets, RandomState randomState, long seed) {
         ChunkGeneratorStructureState state = ChunkGeneratorStructureState.createForNormal(
@@ -150,6 +154,9 @@ public final class NativeModdedChunkGenerator<C, P extends StructureStartPlan, O
     }
     public void installVolumeIndex(NativeWorld world, C context) {
         nativeStructures.installVolumeIndex((ServerLevel) world.nativeHandle(), context);
+    }
+    public void initializeStructureState(NativeWorld world) {
+        ((ServerLevel) world.nativeHandle()).getChunkSource().getGeneratorState().ensureStructuresGenerated();
     }
     public void clearCaches() {
         generationWorld = null;

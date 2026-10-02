@@ -4,6 +4,7 @@
   "package": "art.arcane.volmlib.nativelib.minecraft26_2.modded.mixin",
   "compatibilityLevel": "JAVA_21",
   "mixins": [
+    "ServerLevelStructureBootstrapMixin",
     "EntityPersistenceMixin",
     "MobAwarenessMixin",
     "StructureTemplatePaletteConcurrencyMixin",
