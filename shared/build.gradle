@@ -180,3 +180,157 @@ publishing {
         }
     }
 }
+
+sourceSets {
+    nativeBillow {
+        compileClasspath = sourceSets.main.output + sourceSets.main.compileClasspath
+    }
+}
+
+tasks.named('compileNativeBillowJava', JavaCompile).configure {
+    options.release.set(25)
+    options.compilerArgs.add('-parameters')
+}
+
+String nativeBillowOs = System.getProperty('os.name').toLowerCase(Locale.ROOT).contains('mac') ? 'macos' : 'linux'
+String nativeBillowArch = ['aarch64', 'arm64'].contains(System.getProperty('os.arch')) ? 'aarch64' : 'x86_64'
+String nativeBillowName = nativeBillowOs == 'macos' ? 'libvolmlib-billow.dylib' : 'libvolmlib-billow.so'
+Provider<Directory> nativeBillowResources = layout.buildDirectory.dir('generated/nativeBillowResources')
+Provider<RegularFile> nativeBillowLibrary = nativeBillowResources.map { Directory directory ->
+    directory.file("art/arcane/volmlib/native-billow/${nativeBillowOs}-${nativeBillowArch}/${nativeBillowName}")
+}
+
+Provider<String> nativeBillowCompilerDetails = providers.exec { commandLine('rustc', '-vV') }.standardOutput.asText
+String nativeBillowTarget = nativeBillowArch + (nativeBillowOs == 'macos' ? '-apple-darwin' : '-unknown-linux-gnu')
+
+tasks.register('buildNativeBillow', Exec) {
+    inputs.file('src/main/rust/billow.rs')
+    inputs.property('rustCompilerVersion', nativeBillowCompilerDetails.map { String version -> version.trim() })
+    inputs.property('targetPlatform', nativeBillowOs + '-' + nativeBillowArch)
+    inputs.property('compilerFlags', '--edition=2024 --crate-type=cdylib -C opt-level=3 -C panic=abort')
+    outputs.file(nativeBillowLibrary)
+    doFirst {
+        if (!['Mac OS X', 'Linux'].contains(System.getProperty('os.name')) ||
+                !['aarch64', 'arm64', 'amd64', 'x86_64'].contains(System.getProperty('os.arch'))) {
+            throw new GradleException('Native Billow builds support macOS/Linux aarch64/x86_64 hosts')
+        }
+        if (!nativeBillowCompilerDetails.get().readLines().contains('host: ' + nativeBillowTarget)) {
+            throw new GradleException('rustc host must match native Billow resource target ' + nativeBillowTarget)
+        }
+        nativeBillowLibrary.get().asFile.parentFile.mkdirs()
+    }
+    commandLine('rustc', '--edition=2024', '--crate-type=cdylib', '-C', 'opt-level=3', '-C', 'panic=abort',
+            'src/main/rust/billow.rs', '-o', nativeBillowLibrary.get().asFile.absolutePath)
+}
+
+tasks.named('jar').configure {
+    from(sourceSets.nativeBillow.output)
+}
+
+tasks.named('sourcesJar').configure {
+    from(sourceSets.nativeBillow.allSource)
+    exclude('art/arcane/volmlib/native-billow/**')
+    from('src/main/rust') { into('rust') }
+}
+
+if (providers.gradleProperty('includeNativeBillow').map { String enabled -> Boolean.parseBoolean(enabled) }.getOrElse(false)) {
+    sourceSets.main.resources.srcDir(nativeBillowResources)
+    tasks.named('processResources').configure { dependsOn(tasks.named('buildNativeBillow')) }
+    tasks.named('sourcesJar').configure { dependsOn(tasks.named('buildNativeBillow')) }
+} else {
+    tasks.named('jar').configure { exclude('art/arcane/volmlib/native-billow/**') }
+}
+
+tasks.withType(Test).configureEach {
+    classpath += sourceSets.nativeBillow.output
+}
+
+tasks.withType(Test).configureEach {
+    doFirst { systemProperty('volmlib.test.runtimeClasspath', classpath.asPath) }
+    systemProperty('volmlib.test.nativeBillow', providers.gradleProperty('includeNativeBillow').orElse('false').get())
+}
+
+Provider<RegularFile> incorrectBillowLibrary = layout.buildDirectory.file("nativeBillowTest/${nativeBillowName}")
+tasks.register('buildIncorrectBillowTestLibrary', Exec) {
+    inputs.file('src/test/rust/incorrect-billow.rs')
+    outputs.file(incorrectBillowLibrary)
+    doFirst { incorrectBillowLibrary.get().asFile.parentFile.mkdirs() }
+    commandLine('rustc', '--edition=2024', '--crate-type=cdylib', 'src/test/rust/incorrect-billow.rs', '-o', incorrectBillowLibrary.get().asFile.absolutePath)
+}
+if (providers.gradleProperty('includeNativeBillow').map { String enabled -> Boolean.parseBoolean(enabled) }.getOrElse(false)) {
+    tasks.withType(Test).configureEach {
+        dependsOn(tasks.named('buildIncorrectBillowTestLibrary'))
+        systemProperty('volmlib.test.incorrectBillowLibrary', incorrectBillowLibrary.get().asFile.absolutePath)
+    }
+}
+
+Provider<RegularFile> missingSymbolLibrary = layout.buildDirectory.file("nativeBillowTest/missing-${nativeBillowName}")
+tasks.register('buildMissingSymbolTestLibrary', Exec) {
+    inputs.file('src/test/rust/missing-symbol.rs')
+    outputs.file(missingSymbolLibrary)
+    doFirst { missingSymbolLibrary.get().asFile.parentFile.mkdirs() }
+    commandLine('rustc', '--edition=2024', '--crate-type=cdylib', 'src/test/rust/missing-symbol.rs', '-o', missingSymbolLibrary.get().asFile.absolutePath)
+}
+if (providers.gradleProperty('includeNativeBillow').map { String enabled -> Boolean.parseBoolean(enabled) }.getOrElse(false)) {
+    tasks.withType(Test).configureEach {
+        dependsOn(tasks.named('buildMissingSymbolTestLibrary'))
+        systemProperty('volmlib.test.missingSymbolLibrary', missingSymbolLibrary.get().asFile.absolutePath)
+    }
+}
+
+sourceSets {
+    billowBatchTest {
+        compileClasspath = sourceSets.main.output + sourceSets.nativeBillow.output + sourceSets.test.compileClasspath
+        runtimeClasspath = output + compileClasspath + sourceSets.test.runtimeClasspath
+    }
+}
+
+tasks.named('compileBillowBatchTestJava', JavaCompile).configure {
+    options.release.set(25)
+    options.compilerArgs.add('-parameters')
+}
+
+tasks.named('sourcesJar').configure {
+    from('native/billow') {
+        include('Cargo.toml', 'Cargo.lock', 'build.rs', 'src/**')
+        into('rust/batch')
+    }
+}
+
+tasks.register('buildBillowNative', Exec) {
+    workingDir(file('native/billow'))
+    commandLine('cargo', 'build', '--release', '--locked')
+    inputs.files(fileTree('native/billow/src'), file('native/billow/Cargo.toml'), file('native/billow/Cargo.lock'), file('native/billow/build.rs'))
+    outputs.dir(file('native/billow/target/release'))
+}
+
+tasks.register('testBillowBatch', Test) {
+    dependsOn(tasks.named('billowBatchTestClasses'))
+    testClassesDirs = sourceSets.billowBatchTest.output.classesDirs
+    classpath = sourceSets.billowBatchTest.runtimeClasspath
+    jvmArgs('--enable-native-access=ALL-UNNAMED')
+}
+
+tasks.register('testBillowNative', Test) {
+    dependsOn(tasks.named('buildBillowNative'), tasks.named('billowBatchTestClasses'))
+    testClassesDirs = sourceSets.billowBatchTest.output.classesDirs
+    classpath = sourceSets.billowBatchTest.runtimeClasspath
+    String systemName = System.getProperty('os.name').toLowerCase(Locale.ROOT)
+    String libraryName = systemName.contains('mac') ? 'libvolmlib_billow.dylib' : systemName.contains('win') ? 'volmlib_billow.dll' : 'libvolmlib_billow.so'
+    File batchLibrary = file("native/billow/target/release/${libraryName}")
+    inputs.file(batchLibrary).withPropertyName('billowBatchLibrary')
+    systemProperty('volmlib.billow.library', batchLibrary.absolutePath)
+    if (['Mac OS X', 'Linux'].contains(System.getProperty('os.name'))
+            && ['aarch64', 'arm64', 'amd64', 'x86_64'].contains(System.getProperty('os.arch'))) {
+        dependsOn(tasks.named('buildNativeBillow'))
+        inputs.file(nativeBillowLibrary).withPropertyName('scalarBillowLibrary')
+        systemProperty('volmlib.noise.nativeBillow', 'true')
+        systemProperty('volmlib.noise.nativeBillowLibrary', nativeBillowLibrary.get().asFile.absolutePath)
+        systemProperty('volmlib.test.scalarBillowCoexistence', 'true')
+    }
+    jvmArgs('--enable-native-access=ALL-UNNAMED')
+}
+
+tasks.named('check').configure {
+    dependsOn(tasks.named('testBillowBatch'))
+}

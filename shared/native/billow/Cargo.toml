@@ -1,0 +1,18 @@
+[package]
+name = "volmlib-billow"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wgpu = "30.0.1"
+pollster = "0.4"
+bytemuck = { version = "1.25", features = ["derive"] }
+
+[dev-dependencies]
+naga = { version = "30.0.1", features = ["wgsl-in", "spv-out", "hlsl-out", "msl-out"] }
+
+[profile.release]
+opt-level = 3

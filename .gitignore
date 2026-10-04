@@ -15,3 +15,5 @@ BUILDS/
 .run/
 .worktrees/
 .qa/
+
+shared/native/billow/target/
