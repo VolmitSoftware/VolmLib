@@ -10,6 +10,11 @@ import net.bytebuddy.dynamic.DynamicType;
 import net.bytebuddy.matcher.ElementMatchers;
 import net.bytebuddy.utility.JavaModule;
 import net.minecraft.core.registries.Registries;
+import net.minecraft.core.Registry;
+import net.minecraft.core.RegistrySynchronization;
+import net.minecraft.network.protocol.configuration.ClientboundRegistryDataPacket;
+import art.arcane.volmlib.nativelib.terrain.RegistryClientNames;
+import java.util.ArrayList;
 import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
@@ -49,6 +54,7 @@ public final class NativeWorldLifecycle implements NativeWorldLifecycleFactory.C
     private final AtomicBoolean injected = new AtomicBoolean();
     private volatile ResettableClassFileTransformer levelStorageAccessTransformer;
     private volatile ResettableClassFileTransformer serverLevelTransformer;
+    private volatile ResettableClassFileTransformer registryPacketTransformer;
     private volatile ResettableClassFileTransformer pluginClassLoaderTransformer;
     private boolean pluginClassLoaderCloseDeferred;
     private ResettableClassFileTransformer serverStorageCloseTransformer;
@@ -114,6 +120,18 @@ public final class NativeWorldLifecycle implements NativeWorldLifecycleFactory.C
                                         .and(ElementMatchers.takesArgument(0, MinecraftServer.class))
                                         .and(ElementMatchers.takesArgument(5, LevelStem.class)))))
                         .installOn(policy.instrumentation());
+                registryPacketTransformer = new AgentBuilder.Default()
+                        .disableClassFormatChanges()
+                        .with(AgentBuilder.RedefinitionStrategy.RETRANSFORMATION)
+                        .with(AgentBuilder.RedefinitionStrategy.Listener.ErrorEscalating.FAIL_FAST)
+                        .type(ElementMatchers.is(ClientboundRegistryDataPacket.class))
+                        .transform((builder, typeDescription, classLoader, module, protectionDomain) ->
+                                builder.visit(Advice.withCustomMapping()
+                                        .bind(PluginName.class, policy.pluginName())
+                                        .bind(PolicyClassName.class, RegistryClientNames.class.getName())
+                                        .to(RegistryPacketAdvice.class).on(ElementMatchers.isConstructor()
+                                                .and(ElementMatchers.takesArguments(ResourceKey.class, List.class)))))
+                        .installOn(policy.instrumentation());
                 NativeGenerationHooks.install(ClassReloadingStrategy.of(policy.instrumentation()), generatorClassName);
 
                 injected.set(true);
@@ -126,6 +144,8 @@ public final class NativeWorldLifecycle implements NativeWorldLifecycleFactory.C
                 } catch (RuntimeException cleanupFailure) {
                     policy.reportFailure("Failed to remove the server storage shutdown boundary", cleanupFailure);
                 }
+                ResettableClassFileTransformer partialRegistryPacket = registryPacketTransformer;
+                registryPacketTransformer = null;
                 ResettableClassFileTransformer partialServerLevel = serverLevelTransformer;
                 ResettableClassFileTransformer partialStorageAccess = levelStorageAccessTransformer;
                 ResettableClassFileTransformer partialPluginClassLoader = pluginClassLoaderTransformer;
@@ -133,6 +153,7 @@ public final class NativeWorldLifecycle implements NativeWorldLifecycleFactory.C
                 levelStorageAccessTransformer = null;
                 pluginClassLoaderTransformer = null;
                 for (ResettableClassFileTransformer partial : new ResettableClassFileTransformer[]{
+                        partialRegistryPacket,
                         partialServerLevel,
                         partialStorageAccess,
                         partialPluginClassLoader
@@ -167,6 +188,8 @@ public final class NativeWorldLifecycle implements NativeWorldLifecycleFactory.C
 
     public void uninjectBukkit() {
         synchronized (injected) {
+            ResettableClassFileTransformer activeRegistryPacket = registryPacketTransformer;
+            registryPacketTransformer = null;
             ResettableClassFileTransformer activeServerLevel = serverLevelTransformer;
             ResettableClassFileTransformer activeStorageAccess = levelStorageAccessTransformer;
             serverLevelTransformer = null;
@@ -174,6 +197,7 @@ public final class NativeWorldLifecycle implements NativeWorldLifecycleFactory.C
             injected.set(false);
             NativeWorldLifecyclePolicies.unregister(policy);
             for (ResettableClassFileTransformer transformer : new ResettableClassFileTransformer[]{
+                    activeRegistryPacket,
                     activeServerLevel,
                     activeStorageAccess
             }) {
@@ -356,17 +380,54 @@ public final class NativeWorldLifecycle implements NativeWorldLifecycleFactory.C
 
     @Retention(RetentionPolicy.RUNTIME)
     @Target(ElementType.PARAMETER)
-    private @interface PluginName {
+    @interface PluginName {
     }
 
     @Retention(RetentionPolicy.RUNTIME)
     @Target(ElementType.PARAMETER)
-    private @interface PolicyClassName {
+    @interface PolicyClassName {
     }
 
     @Retention(RetentionPolicy.RUNTIME)
     @Target(ElementType.PARAMETER)
     @interface BridgeClassName {
+    }
+
+    static class RegistryPacketAdvice {
+        @Advice.OnMethodEnter
+        @SuppressWarnings("unchecked")
+        static void enter(
+                @Advice.Argument(0) ResourceKey<? extends Registry<?>> registry,
+                @Advice.Argument(value = 1, readOnly = false) List<RegistrySynchronization.PackedRegistryEntry> entries,
+                @PluginName String pluginName,
+                @PolicyClassName String namesClassName
+        ) throws ReflectiveOperationException {
+            if (!registry.equals(Registries.BIOME)) {
+                return;
+            }
+            Plugin plugin = Bukkit.getPluginManager().getPlugin(pluginName);
+            if (plugin == null) {
+                return;
+            }
+            List<String> physicalKeys = new ArrayList<>(entries.size());
+            for (RegistrySynchronization.PackedRegistryEntry entry : entries) {
+                physicalKeys.add(entry.id().toString());
+            }
+            Class<?> names = Class.forName(namesClassName, true, plugin.getClass().getClassLoader());
+            List<String> clientKeys = (List<String>) names.getMethod("resolve", String.class, List.class)
+                    .invoke(null, registry.identifier().toString(), physicalKeys);
+            if (clientKeys.equals(physicalKeys)) {
+                return;
+            }
+            List<RegistrySynchronization.PackedRegistryEntry> renamed = new ArrayList<>(entries.size());
+            for (int index = 0; index < entries.size(); index++) {
+                RegistrySynchronization.PackedRegistryEntry entry = entries.get(index);
+                String clientKey = clientKeys.get(index);
+                renamed.add(clientKey.equals(physicalKeys.get(index)) ? entry
+                        : new RegistrySynchronization.PackedRegistryEntry(Identifier.parse(clientKey), entry.data()));
+            }
+            entries = List.copyOf(renamed);
+        }
     }
 
     private static class LevelStorageAccessAdvice {

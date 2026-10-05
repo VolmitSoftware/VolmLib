@@ -202,14 +202,15 @@ public class NativeChunkGenerator<C, D, P extends StructureStartPlan, O extends 
                 biomeSourceReference::get,
                 () -> {
                     ServerLevel active = levelReference.get();
-                    return active == null ? null : active.getChunkSource().getGeneratorState();
+                    return active == null || !active.structureManager().shouldGenerateStructures()
+                            ? null : active.getChunkSource().getGeneratorState();
                 }),
                 context.volumes())::volumesAt);
     }
 
     @Override
     public @Nullable Pair<BlockPos, Holder<Structure>> findNearestMapStructure(ServerLevel level, HolderSet<Structure> holders, BlockPos pos, int radius, boolean findUnexplored) {
-        if (!context.generateStructures()) {
+        if (!level.structureManager().shouldGenerateStructures() || !context.generateStructures()) {
             return null;
         }
         if (level != runtimeLevel || level.getChunkSource().getGenerator() != this) {
@@ -263,7 +264,7 @@ public class NativeChunkGenerator<C, D, P extends StructureStartPlan, O extends 
 
     @Override
     public void createStructures(RegistryAccess registryAccess, ChunkGeneratorStructureState structureState, StructureManager structureManager, ChunkAccess access, StructureTemplateManager templateManager, ResourceKey<Level> levelKey) {
-        if (!context.generateStructures()) {
+        if (!structureManager.shouldGenerateStructures() || !context.generateStructures()) {
             return;
         }
         if (runtimeLevel.getChunkSource().getGenerator() != this
@@ -317,7 +318,7 @@ public class NativeChunkGenerator<C, D, P extends StructureStartPlan, O extends 
 
     @Override
     public void createReferences(WorldGenLevel generatoraccessseed, StructureManager structuremanager, ChunkAccess ichunkaccess) {
-        if (!context.generateStructures()) {
+        if (!structuremanager.shouldGenerateStructures() || !context.generateStructures()) {
             return;
         }
         if (runtimeLevel.getChunkSource().getGenerator() != this) {

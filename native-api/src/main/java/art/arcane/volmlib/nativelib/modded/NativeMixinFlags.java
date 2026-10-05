@@ -29,6 +29,7 @@ package art.arcane.volmlib.nativelib.modded;
  */
 public final class NativeMixinFlags {
     private static volatile boolean entityPersistenceRan;
+    private static volatile boolean registryClientNamesRan;
     private static volatile boolean livingEntityLootRan;
     private static volatile boolean mobAwarenessRan;
     private static volatile boolean structureTemplatePaletteRan;
@@ -77,6 +78,16 @@ public final class NativeMixinFlags {
         }
     }
 
+    public static void markRegistryClientNames() {
+        if (!registryClientNamesRan) {
+            registryClientNamesRan = true;
+        }
+    }
+
+    public static boolean registryClientNamesRan() {
+        return registryClientNamesRan;
+    }
+
     public static boolean entityPersistenceRan() {
         return entityPersistenceRan;
     }
@@ -103,6 +114,7 @@ public final class NativeMixinFlags {
 
     public static void reset() {
         entityPersistenceRan = false;
+        registryClientNamesRan = false;
         livingEntityLootRan = false;
         mobAwarenessRan = false;
         structureTemplatePaletteRan = false;

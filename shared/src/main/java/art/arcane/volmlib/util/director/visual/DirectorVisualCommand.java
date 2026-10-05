@@ -265,7 +265,7 @@ public final class DirectorVisualCommand {
             this.type = type;
             this.required = required;
             this.contextual = contextual;
-            this.defaultValue = defaultValue == null ? "" : defaultValue;
+            this.defaultValue = defaultValue;
             this.names = names;
             this.handler = handler;
             this.param = new ParamView(this.defaultValue);
@@ -347,7 +347,7 @@ public final class DirectorVisualCommand {
         }
 
         public boolean hasDefault() {
-            return !defaultValue.trim().isEmpty();
+            return defaultValue != null;
         }
 
         public KList<String> getNames() {

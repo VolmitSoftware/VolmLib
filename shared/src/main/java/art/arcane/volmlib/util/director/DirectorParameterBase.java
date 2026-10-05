@@ -100,13 +100,13 @@ public abstract class DirectorParameterBase {
 
     public Object getDefaultValue() throws DirectorParsingException {
         DirectorParameterHandler<?> handler = getHandler();
-        return param.defaultValue().trim().isEmpty() || handler == null
+        return !hasDefault() || handler == null
                 ? null
                 : handler.parse(param.defaultValue().trim(), true);
     }
 
     public boolean hasDefault() {
-        return !param.defaultValue().trim().isEmpty();
+        return !Param.NO_DEFAULT.equals(param.defaultValue());
     }
 
     public String example() {

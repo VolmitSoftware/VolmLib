@@ -183,7 +183,7 @@ public final class DirectorRuntimeEngine implements DirectorCommandEngine {
                 value = contexts.resolve(descriptor.getType(), invocation, contextMap).orElse(null);
             }
 
-            if (value == null && descriptor.getDefaultValue() != null && !descriptor.getDefaultValue().trim().isEmpty()) {
+            if (value == null && descriptor.getDefaultValue() != null) {
                 ValueResult defaultResult = parseValue(parameter, descriptor.getDefaultValue());
                 if (!defaultResult.valid) {
                     String message = resolveText(

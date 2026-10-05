@@ -22,7 +22,6 @@ public interface StructureStagePolicy<C, P extends StructureStartPlan, O extends
     IntBinaryOperator surfaceHeight(C context);
     IntBinaryOperator worldgenHeight(C context, int runtimeMinY, boolean floor);
     NativeBlockState paletteBlock(StructurePalette palette, RNG rng, int x, int y, int z);
-    RuntimeException structuresDisabled(int chunkX, int chunkZ);
     String generationLabel(String structureId);
     public record Footprint(int minX, int minZ, int maxX, int maxZ) {
     }

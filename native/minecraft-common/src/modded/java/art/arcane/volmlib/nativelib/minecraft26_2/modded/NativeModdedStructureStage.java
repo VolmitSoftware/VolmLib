@@ -119,7 +119,8 @@ public final class NativeModdedStructureStage<C, P extends StructureStartPlan, O
                 biomeSourceReference::get,
                 () -> {
                     ServerLevel active = levelReference.get();
-                    return active == null ? null : active.getChunkSource().getGeneratorState();
+                    return active == null || !active.structureManager().shouldGenerateStructures()
+                            ? null : active.getChunkSource().getGeneratorState();
                 }),
                 policy.volumePolicy()));
     }
@@ -306,8 +307,7 @@ public final class NativeModdedStructureStage<C, P extends StructureStartPlan, O
 
     public void placeVanillaStructures(WorldGenLevel world, ChunkAccess chunk, StructureManager structureManager) {
         if (!structureManager.shouldGenerateStructures()) {
-            ChunkPos disabledChunk = chunk.getPos();
-            throw policy.structuresDisabled(disabledChunk.x(), disabledChunk.z());
+            return;
         }
         ChunkPos chunkPos = chunk.getPos();
         SectionPos sectionPos = SectionPos.of(chunkPos, world.getMinSectionY());

@@ -43,6 +43,38 @@ public class DirectorRuntimeEngineArgumentMappingTest {
     }
 
     @Test
+    public void explicitEmptyDefaultsRemainOptionalAndReachTheInvokedMethod() {
+        DirectorExecutionResult omitted = run("open", "supplies");
+
+        assertTrue(omitted.isSuccess());
+        assertEquals("supplies", rootCommand.name);
+        assertEquals("", rootCommand.player);
+        assertEquals("", rootCommand.arguments);
+        assertEquals(List.of(), sender.messages);
+
+        assertTrue(run("open", "supplies", "player=Guide", "args=quantity=2").isSuccess());
+        assertEquals("Guide", rootCommand.player);
+        assertEquals("quantity=2", rootCommand.arguments);
+        assertFalse(run("open").isSuccess());
+        assertTrue(sender.messages.get(sender.messages.size() - 1).contains("name"));
+    }
+
+    @Test
+    public void absentDefaultsStayRequiredWhileExplicitEmptyDefaultsArePreserved() {
+        DirectorRuntimeNode node = engine.getRoot().getChildren().stream()
+            .filter(child -> child.getDescriptor().getName().equals("open")).findFirst().orElseThrow();
+        List<DirectorParameterDescriptor> parameters = node.getDescriptor().getParameters();
+
+        assertTrue(parameters.get(0).isRequired());
+        assertNull(parameters.get(0).getDefaultValue());
+        assertFalse(parameters.get(1).isRequired());
+        assertEquals("", parameters.get(1).getDefaultValue());
+        assertFalse(parameters.get(2).isRequired());
+        assertEquals("", parameters.get(2).getDefaultValue());
+        assertFalse(run("open", "supplies", "Guide").isSuccess());
+    }
+
+    @Test
     public void multipleRequiredParametersBindPositionallyInOrder() {
         DirectorExecutionResult result = run("link", "from", "to");
 
@@ -232,6 +264,17 @@ public class DirectorRuntimeEngineArgumentMappingTest {
         String linkSource;
         String linkTarget;
         String text;
+        String player;
+        String arguments;
+
+        @Director
+        public void open(@Param(name = "name") String name,
+                         @Param(name = "player", defaultValue = "") String player,
+                         @Param(name = "args", defaultValue = "") String arguments) {
+            this.name = name;
+            this.player = player;
+            this.arguments = arguments;
+        }
 
         @Director(aliases = {"make"}, description = "Create a world", descriptionKey = "director.test.create")
         public void create(

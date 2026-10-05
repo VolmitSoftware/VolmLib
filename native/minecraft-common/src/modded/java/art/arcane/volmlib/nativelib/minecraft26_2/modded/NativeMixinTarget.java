@@ -4,6 +4,7 @@ import java.lang.reflect.Method;
 
 public enum NativeMixinTarget {
     ENTITY("net.minecraft.world.entity.Entity"),
+    REGISTRY_PACKET("net.minecraft.network.protocol.configuration.ClientboundRegistryDataPacket"),
     LIVING_ENTITY("net.minecraft.world.entity.LivingEntity"),
     MOB("net.minecraft.world.entity.Mob"),
     STRUCTURE_PALETTE("net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate$Palette"),

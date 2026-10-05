@@ -202,12 +202,16 @@ Provider<RegularFile> nativeBillowLibrary = nativeBillowResources.map { Director
 
 Provider<String> nativeBillowCompilerDetails = providers.exec { commandLine('rustc', '-vV') }.standardOutput.asText
 String nativeBillowTarget = nativeBillowArch + (nativeBillowOs == 'macos' ? '-apple-darwin' : '-unknown-linux-gnu')
+List<String> nativeBillowCompilerFlags = ['--edition=2024', '--crate-type=cdylib', '-C', 'opt-level=3', '-C', 'panic=abort']
+if (nativeBillowOs == 'macos') {
+    nativeBillowCompilerFlags.addAll(['-C', 'link-arg=-Wl,-install_name,@rpath/libvolmlib-billow.dylib'])
+}
 
 tasks.register('buildNativeBillow', Exec) {
     inputs.file('src/main/rust/billow.rs')
     inputs.property('rustCompilerVersion', nativeBillowCompilerDetails.map { String version -> version.trim() })
     inputs.property('targetPlatform', nativeBillowOs + '-' + nativeBillowArch)
-    inputs.property('compilerFlags', '--edition=2024 --crate-type=cdylib -C opt-level=3 -C panic=abort')
+    inputs.property('compilerFlags', nativeBillowCompilerFlags)
     outputs.file(nativeBillowLibrary)
     doFirst {
         if (!['Mac OS X', 'Linux'].contains(System.getProperty('os.name')) ||
@@ -219,8 +223,8 @@ tasks.register('buildNativeBillow', Exec) {
         }
         nativeBillowLibrary.get().asFile.parentFile.mkdirs()
     }
-    commandLine('rustc', '--edition=2024', '--crate-type=cdylib', '-C', 'opt-level=3', '-C', 'panic=abort',
-            'src/main/rust/billow.rs', '-o', nativeBillowLibrary.get().asFile.absolutePath)
+    commandLine(['rustc'] + nativeBillowCompilerFlags +
+            ['src/main/rust/billow.rs', '-o', nativeBillowLibrary.get().asFile.absolutePath])
 }
 
 tasks.named('jar').configure {

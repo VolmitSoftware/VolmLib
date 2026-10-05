@@ -53,13 +53,13 @@ public final class DirectorAnnotationCompatibility {
             }
 
             String paramName = param.name().isEmpty() ? parameter.getName() : param.name();
-            String defaultValue = param.defaultValue().trim();
+            String defaultValue = Param.NO_DEFAULT.equals(param.defaultValue()) ? null : param.defaultValue().trim();
             parameters.add(new DirectorParameterDescriptor(
                     paramName,
                     resolveDescriptionKey(param.descriptionKey()),
                     resolveDescription(param.description()),
                     parameter.getType(),
-                    defaultValue.isEmpty(),
+                    defaultValue == null,
                     param.contextual(),
                     param.contextualOverride(),
                     defaultValue,

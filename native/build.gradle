@@ -1,3 +1,6 @@
+import org.gradle.api.attributes.Attribute
+import org.gradle.api.artifacts.component.ModuleComponentIdentifier
+
 plugins {
     id 'io.papermc.paperweight.userdev' version '2.0.0-beta.21' apply false
 }
@@ -60,6 +63,22 @@ subprojects {
         testImplementation('org.mockito:mockito-core:5.18.0')
         testImplementation('net.bytebuddy:byte-buddy:1.18.11')
         testImplementation('net.bytebuddy:byte-buddy-agent:1.18.11')
+    }
+
+    configurations.create('nativeShrinkLibraries') {
+        canBeConsumed = true
+        canBeResolved = false
+        attributes.attribute(Attribute.of('art.arcane.volmlib.native.linkage', String), 'mapped-server')
+        outgoing.artifact(tasks.named('paperweightUserdevSetup').flatMap { setup -> setup.mappedServerJar })
+        outgoing.artifact(providers.provider {
+            configurations.compileClasspath.incoming.artifactView {
+                componentFilter { identifier ->
+                    identifier instanceof ModuleComponentIdentifier
+                        && identifier.group == 'com.mojang'
+                        && identifier.module == 'datafixerupper'
+                }
+            }.files.singleFile
+        })
     }
 
     tasks.withType(Test).configureEach {

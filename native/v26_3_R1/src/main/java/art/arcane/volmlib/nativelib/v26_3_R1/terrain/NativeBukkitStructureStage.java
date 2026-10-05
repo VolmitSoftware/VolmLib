@@ -363,8 +363,7 @@ public final class NativeBukkitStructureStage<C, D, P extends StructureStartPlan
 
     public void placeVanillaStructures(WorldGenLevel world, ChunkAccess chunk, StructureManager structureManager) {
         if (!structureManager.shouldGenerateStructures()) {
-            ChunkPos disabledChunk = chunk.getPos();
-            throw policy.structuresDisabled(disabledChunk.x(), disabledChunk.z());
+            return;
         }
         ChunkPos chunkPos = chunk.getPos();
         SectionPos sectionPos = SectionPos.of(chunkPos, world.getMinSectionY());

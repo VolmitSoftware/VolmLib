@@ -12,6 +12,7 @@ import java.lang.annotation.Target;
 @Target(ElementType.PARAMETER)
 public @interface Param {
     String DEFAULT_DESCRIPTION = "No Description Provided";
+    String NO_DEFAULT = "\u0000";
 
     String name() default "";
 
@@ -19,7 +20,7 @@ public @interface Param {
 
     String descriptionKey() default "";
 
-    String defaultValue() default "";
+    String defaultValue() default NO_DEFAULT;
 
     String[] aliases() default "";
 

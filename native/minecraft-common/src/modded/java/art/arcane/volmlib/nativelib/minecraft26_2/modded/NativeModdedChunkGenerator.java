@@ -256,6 +256,9 @@ public final class NativeModdedChunkGenerator<C, P extends StructureStartPlan, O
     public Pair<BlockPos, Holder<Structure>> findNearestMapStructure(ServerLevel level, HolderSet<Structure> holders,
                                                                      BlockPos pos, int radius,
                                                                      boolean findUnexplored) {
+        if (!level.structureManager().shouldGenerateStructures()) {
+            return null;
+        }
         C current = engine();
         int chunkX = Math.floorDiv(pos.getX(), 16);
         int chunkZ = Math.floorDiv(pos.getZ(), 16);
@@ -552,6 +555,9 @@ public final class NativeModdedChunkGenerator<C, P extends StructureStartPlan, O
 
     @Override
     public void createStructures(RegistryAccess registryAccess, ChunkGeneratorStructureState structureState, StructureManager structureManager, ChunkAccess chunk, StructureTemplateManager templateManager, ResourceKey<Level> levelKey) {
+        if (!structureManager.shouldGenerateStructures()) {
+            return;
+        }
         C current = engine(levelKey);
         ChunkPos chunkPos = chunk.getPos();
         try (NativeGenerationRoute route = openHistoryRoute(
@@ -592,6 +598,9 @@ public final class NativeModdedChunkGenerator<C, P extends StructureStartPlan, O
 
     @Override
     public void createReferences(WorldGenLevel level, StructureManager structureManager, ChunkAccess chunk) {
+        if (!structureManager.shouldGenerateStructures()) {
+            return;
+        }
         C current = engine(level.getLevel());
         ChunkPos chunkPos = chunk.getPos();
         try (NativeGenerationRoute route = openHistoryRoute(
