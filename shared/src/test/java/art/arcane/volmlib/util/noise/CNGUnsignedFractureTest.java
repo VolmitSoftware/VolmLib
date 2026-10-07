@@ -22,12 +22,12 @@ import static org.junit.Assert.fail;
 
 public class CNGUnsignedFractureTest {
     @Test
-    public void deepFracturesPreserveRawBitsAcrossSeedsTransformsAndCoordinates() {
+    public void deepFracturesPreserveRawBitsAcrossSeedsTransformsAndCoordinates() throws Exception {
         for (long seed = 1; seed <= 5; seed++) {
             CNG noise = CNG.signatureDouble(new RNG(seed));
             for (int transform = 0; transform < 3; transform++) {
                 for (int index = 0; index < 512; index++) {
-                    assertBits(noise.noise(x(index), z(index)), noise.noiseFast2D(x(index), z(index)));
+                    assertBits(referenceRootNoise(noise, x(index), z(index)), noise.noiseFast2D(x(index), z(index)));
                 }
                 noise.zoom(1.31D).pow(1.13D).up(0.03D).down(0.01D).patch(0.97D);
                 noise.getFracture().oct(2);
@@ -40,13 +40,68 @@ public class CNGUnsignedFractureTest {
         CNG noise = CNG.signatureDouble(new RNG(1337));
         AtomicInteger calls = new AtomicInteger();
         instrument(noise, calls::incrementAndGet);
-        double expected = noise.noise(1.25D, -3.75D);
+        double expected = referenceRootNoise(noise, 1.25D, -3.75D);
         assertEquals(31, calls.getAndSet(0));
         assertBits(expected, noise.noiseFast2D(1.25D, -3.75D));
         assertEquals(9, calls.getAndSet(0));
         assertBits(expected, noise.noiseFast2D(1.25D, -3.75D));
         assertEquals(9, calls.get());
         assertMemoCleared();
+    }
+
+    @Test
+    public void fittedRangesMemoizePureDeepGraphsAndRetainPublicPostArithmetic() throws Exception {
+        CNG noise = CNG.signatureDouble(new RNG(1337));
+        AtomicInteger calls = new AtomicInteger();
+        instrument(noise, calls::incrementAndGet);
+        double expected = referenceRootNoise(noise, 1.25D, -3.75D);
+        assertEquals(31, calls.getAndSet(0));
+        assertBits(expected, noise.noise(1.25D, -3.75D));
+        assertEquals(9, calls.getAndSet(0));
+        assertBits(-19.25D + (37.75D - -19.25D) * expected,
+                noise.fitDouble(-19.25D, 37.75D, 1.25D, -3.75D));
+        assertEquals(9, calls.get());
+        assertMemoCleared();
+        CNG negativeZero = new CNG(new RNG(7L), new FlatNoise(7L) {
+            @Override
+            public double noise(double x, double z) {
+                return -0D;
+            }
+        }, 1D, 1);
+        assertBits(referenceRootNoise(negativeZero, 1D, 2D), negativeZero.noise(1D, 2D));
+    }
+
+    @Test
+    public void eligiblePublicRootsPreserveSignedZeroPostArithmetic() throws Exception {
+        for (double opacity : new double[]{0D, -0D, -1D, 1D}) {
+            for (double up : new double[]{0D, -0D}) {
+                for (double down : new double[]{0D, -0D}) {
+                    CNG noise = new CNG(new RNG(41L), new SimplexNoise(41L), opacity, 1);
+                    CNG node = noise;
+                    for (int depth = 0; depth < 4; depth++) {
+                        CNG next = new CNG(new RNG(51L + depth), new SimplexNoise(51L + depth), 1D, 1);
+                        node.fractureWith(next, 7.25D);
+                        node = next;
+                    }
+                    noise.up(up).down(down);
+                    assertTrue(eligible(noise));
+                    for (double coordinate : new double[]{0D, -0D, -19.375D, 37.125D}) {
+                        double expected = referenceRootNoise(noise, coordinate, -coordinate);
+                        assertBits(expected, noise.noise(coordinate, -coordinate));
+                        assertBits(-19.25D + (37.75D - -19.25D) * expected,
+                                noise.fitDouble(-19.25D, 37.75D, coordinate, -coordinate));
+                    }
+                }
+            }
+        }
+    }
+
+    private static double referenceRootNoise(CNG noise, double x, double z) throws Exception {
+        Method raw = CNG.class.getDeclaredMethod("getNoise", double.class, double.class);
+        Method post = CNG.class.getDeclaredMethod("applyPost", double.class, double.class, double.class);
+        raw.setAccessible(true);
+        post.setAccessible(true);
+        return (double) post.invoke(noise, (double) raw.invoke(noise, x, z), x, z);
     }
 
     @Test

@@ -974,6 +974,9 @@ public class CNG {
     }
 
     public double noise(double x, double z) {
+        if (fracture != null && fracture.fracture != null && canMemoizeUnsignedFracture()) {
+            return sampleUnsignedRoot2D(x, z);
+        }
         if (isCachedCoordinate(x, z)) {
             return getCachedNoise(x, z);
         }
@@ -982,6 +985,10 @@ public class CNG {
     }
 
     public double noiseFast2D(double x, double z) {
+        return sampleUnsignedRoot2D(x, z);
+    }
+
+    private double sampleUnsignedRoot2D(double x, double z) {
         if (fracture == null || fracture.fracture == null || !canMemoizeUnsignedFracture()) {
             return sampleUnsigned2D(x, z, null);
         }
@@ -1116,10 +1123,10 @@ public class CNG {
      * root call and stays in L1.
      */
     private static final class SignedCaches {
-        private final Object[] owners2D = new Object[COORD_CACHE_SIZE];
-        private final long[] entries2D = new long[COORD_CACHE_SIZE * 4];
-        private final Object[] owners3D = new Object[COORD_CACHE_SIZE];
-        private final long[] entries3D = new long[COORD_CACHE_SIZE * 4];
+        private Object[] owners2D;
+        private long[] entries2D;
+        private Object[] owners3D;
+        private long[] entries3D;
         private final SignedMemo memo2D = new SignedMemo();
         private final SignedMemo memo3D = new SignedMemo();
         private boolean active;
@@ -1191,6 +1198,10 @@ public class CNG {
         Object identity = coordCacheIdentity();
         int slot = coordSlot(kx, kz, coordCacheSalt());
         int entry = slot << 2;
+        if (caches.entries2D == null) {
+            caches.owners2D = new Object[COORD_CACHE_SIZE];
+            caches.entries2D = new long[COORD_CACHE_SIZE * 4];
+        }
         long[] entries = caches.entries2D;
         if (caches.owners2D[slot] == identity && entries[entry] == kx && entries[entry + 1] == kz) {
             return Double.longBitsToDouble(entries[entry + 2]);
@@ -1262,6 +1273,10 @@ public class CNG {
         Object identity = coordCacheIdentity();
         int slot = coordSlot(kx ^ Long.rotateLeft(ky, 21), kz, coordCacheSalt());
         int entry = slot << 2;
+        if (caches.entries3D == null) {
+            caches.owners3D = new Object[COORD_CACHE_SIZE];
+            caches.entries3D = new long[COORD_CACHE_SIZE * 4];
+        }
         long[] entries = caches.entries3D;
         if (caches.owners3D[slot] == identity && entries[entry] == kx && entries[entry + 1] == ky
                 && entries[entry + 2] == kz) {
