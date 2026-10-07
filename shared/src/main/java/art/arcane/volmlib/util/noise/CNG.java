@@ -28,15 +28,23 @@ import art.arcane.volmlib.util.stream.ProceduralStream;
 import art.arcane.volmlib.util.stream.arithmetic.FittedStream;
 import art.arcane.volmlib.util.stream.sources.CNGStream;
 import lombok.Data;
+import lombok.AccessLevel;
+import lombok.EqualsAndHashCode;
+import lombok.Getter;
+import lombok.Setter;
+import lombok.ToString;
 import art.arcane.volmlib.util.VolmLog;
 
 import java.io.DataOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.lang.ref.WeakReference;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
+import java.util.ArrayList;
 import java.util.IdentityHashMap;
+import java.util.Iterator;
 import java.util.List;
 
 @Data
@@ -53,6 +61,11 @@ public class CNG {
     public static final NoiseInjector SRC_POW = (s, v) -> new double[]{Math.pow(s, v), 0};
     public static final NoiseInjector DST_MOD = (s, v) -> new double[]{v % s, 0};
     public static final NoiseInjector DST_POW = (s, v) -> new double[]{Math.pow(v, s), 0};
+    @Getter(AccessLevel.NONE)
+    @Setter(AccessLevel.NONE)
+    @EqualsAndHashCode.Exclude
+    @ToString.Exclude
+    private transient List<WeakReference<CNG>> parents;
     private final double opacity;
     private double scale;
     private double bakedScale;
@@ -71,6 +84,11 @@ public class CNG {
     private double down;
     private double power;
     private ProceduralStream<Double> customGenerator;
+    @Getter(AccessLevel.NONE)
+    @Setter(AccessLevel.NONE)
+    @EqualsAndHashCode.Exclude
+    @ToString.Exclude
+    private transient boolean unsignedFractureMemoizable;
     private transient boolean identityPostFastPath;
     private transient boolean identitySignedFastPath;
     private transient boolean unityOpacity;
@@ -295,8 +313,7 @@ public class CNG {
             }
         }
 
-        cache = fbc;
-        coordCacheIdentity = new Object();
+        setCache(fbc);
         return this;
     }
 
@@ -325,8 +342,97 @@ public class CNG {
         }
 
         children.add(c);
+        if (c != null) {
+            c.registerParent(this);
+        }
         markFastPathStateDirty();
         return this;
+    }
+
+    public void setScale(double scale) {
+        scale(scale);
+    }
+
+    public void setBakedScale(double bakedScale) {
+        this.bakedScale = bakedScale;
+        markFastPathStateDirty();
+    }
+
+    public void setFscale(double fscale) {
+        this.fscale = fscale;
+        markFastPathStateDirty();
+    }
+
+    public void setChildren(KList<CNG> children) {
+        KList<CNG> previous = this.children;
+        this.children = children;
+        if (previous != null) {
+            for (CNG child : previous) {
+                if (child != null && !referencesChild(child)) {
+                    child.unregisterParent(this);
+                }
+            }
+        }
+        if (children != null) {
+            for (CNG child : children) {
+                if (child != null) {
+                    child.registerParent(this);
+                }
+            }
+        }
+        markFastPathStateDirty();
+    }
+
+    public void setFracture(CNG fracture) {
+        fractureWith(fracture, fscale);
+    }
+
+    public void setCache(FloatCache cache) {
+        markFastPathStateDirty();
+        this.cache = cache;
+    }
+
+    public void setGenerator(NoiseGenerator generator) {
+        this.generator = generator;
+        noscale = generator.isNoScale();
+        if (generator instanceof OctaveNoise octaveNoise) {
+            octaveNoise.setOctaves(oct);
+        }
+        markFastPathStateDirty();
+    }
+
+    public void setInjector(NoiseInjector injector) {
+        injectWith(injector);
+    }
+
+    public void setNoscale(boolean noscale) {
+        this.noscale = noscale;
+        markFastPathStateDirty();
+    }
+
+    public void setOct(int octaves) {
+        oct(octaves);
+    }
+
+    public void setPatch(double patch) {
+        patch(patch);
+    }
+
+    public void setUp(double up) {
+        up(up);
+    }
+
+    public void setDown(double down) {
+        down(down);
+    }
+
+    public void setPower(double power) {
+        pow(power);
+    }
+
+    public void setCustomGenerator(ProceduralStream<Double> customGenerator) {
+        this.customGenerator = customGenerator;
+        markFastPathStateDirty();
     }
 
     public RNG getRNG() {
@@ -334,8 +440,15 @@ public class CNG {
     }
 
     public CNG fractureWith(CNG c, double scale) {
+        CNG previous = fracture;
         fracture = c;
         fscale = scale;
+        if (previous != null && !referencesChild(previous)) {
+            previous.unregisterParent(this);
+        }
+        if (c != null) {
+            c.registerParent(this);
+        }
         markFastPathStateDirty();
         return this;
     }
@@ -918,6 +1031,11 @@ public class CNG {
     }
 
     private boolean canMemoizeUnsignedFracture() {
+        ensureFastPathState();
+        return unsignedFractureMemoizable;
+    }
+
+    private boolean computeUnsignedMemoEligibility() {
         CNG node = this;
         for (int depth = 0; depth < 4; depth++) {
             node = node.fracture;
@@ -1260,9 +1378,93 @@ public class CNG {
     }
 
     private void markFastPathStateDirty() {
+        invalidateLocalState();
+        List<CNG> ancestors = liveParents();
+        if (ancestors.isEmpty()) {
+            return;
+        }
+        IdentityHashMap<CNG, Boolean> visited = new IdentityHashMap<>();
+        visited.put(this, Boolean.TRUE);
+        for (CNG parent : ancestors) {
+            parent.invalidateAncestors(visited);
+        }
+    }
+
+    private void invalidateAncestors(IdentityHashMap<CNG, Boolean> visited) {
+        if (visited.put(this, Boolean.TRUE) != null) {
+            return;
+        }
+        invalidateLocalState();
+        for (CNG parent : liveParents()) {
+            parent.invalidateAncestors(visited);
+        }
+    }
+
+    private void invalidateLocalState() {
         fastPathStateDirty = true;
         cache = null;
         coordCacheIdentity = new Object();
+    }
+
+    private boolean referencesChild(CNG candidate) {
+        if (fracture == candidate) {
+            return true;
+        }
+        if (children != null) {
+            for (CNG child : children) {
+                if (child == candidate) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private void registerParent(CNG parent) {
+        if (parents == null) {
+            parents = new ArrayList<>(1);
+        }
+        Iterator<WeakReference<CNG>> iterator = parents.iterator();
+        while (iterator.hasNext()) {
+            CNG existing = iterator.next().get();
+            if (existing == parent) {
+                return;
+            }
+            if (existing == null) {
+                iterator.remove();
+            }
+        }
+        parents.add(new WeakReference<>(parent));
+    }
+
+    private void unregisterParent(CNG parent) {
+        if (parents == null) {
+            return;
+        }
+        parents.removeIf(reference -> reference.get() == null || reference.get() == parent);
+        if (parents.isEmpty()) {
+            parents = null;
+        }
+    }
+
+    private List<CNG> liveParents() {
+        if (parents == null) {
+            return List.of();
+        }
+        List<CNG> live = new ArrayList<>(parents.size());
+        Iterator<WeakReference<CNG>> iterator = parents.iterator();
+        while (iterator.hasNext()) {
+            CNG parent = iterator.next().get();
+            if (parent == null) {
+                iterator.remove();
+            } else {
+                live.add(parent);
+            }
+        }
+        if (parents.isEmpty()) {
+            parents = null;
+        }
+        return live;
     }
 
     private Object coordCacheIdentity() {
@@ -1301,6 +1503,7 @@ public class CNG {
                 && patch == 1D;
         unityOpacity = opacity == 1D;
         signedFractureScale = 0.5D * fscale;
+        unsignedFractureMemoizable = computeUnsignedMemoEligibility();
         fastPathStateDirty = false;
     }
 

@@ -89,6 +89,10 @@ public final class NativeProtocolPlayer {
         return Commands.LEVEL_GAMEMASTERS.check(player.permissions());
     }
 
+    public boolean isServerOwner() {
+        return player.level().getServer().isSingleplayerOwner(player.nameAndId());
+    }
+
     public void sendMessage(String message) {
         player.sendSystemMessage(Component.literal(message));
     }

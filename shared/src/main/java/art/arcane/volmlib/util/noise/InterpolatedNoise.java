@@ -35,13 +35,18 @@ public class InterpolatedNoise implements NoiseGenerator, OctaveNoise {
     private final InterpolationMethod method;
     private final NoiseGenerator generator;
     private final double coordinateScale;
-    private final ThreadLocal<LatticeMemo> memo = ThreadLocal.withInitial(LatticeMemo::new);
+    private final boolean latticeSamples;
+    private final ThreadLocal<LatticeMemo> memo = ThreadLocal.withInitial(this::createMemo);
     private volatile int sourceVersion;
 
     public InterpolatedNoise(long seed, NoiseType type, InterpolationMethod method) {
         this.method = method;
         generator = type.create(seed);
         coordinateScale = type.getCoordinateScale();
+        latticeSamples = !generator.isStatic() && switch (method) {
+            case NONE, STARCAST_3, STARCAST_6, STARCAST_9, STARCAST_12 -> false;
+            default -> true;
+        };
     }
 
     @Override
@@ -69,7 +74,11 @@ public class InterpolatedNoise implements NoiseGenerator, OctaveNoise {
         }
     }
 
-    private final class LatticeMemo implements NoiseProvider {
+    private LatticeMemo createMemo() {
+        return latticeSamples ? new GridMemo() : new LatticeMemo();
+    }
+
+    private class LatticeMemo implements NoiseProvider {
         private final long[] xBits = new long[MEMO_SLOTS];
         private final long[] zBits = new long[MEMO_SLOTS];
         private final double[] values = new double[MEMO_SLOTS];
@@ -96,6 +105,25 @@ public class InterpolatedNoise implements NoiseGenerator, OctaveNoise {
             zBits[slot] = zKey;
             values[slot] = value;
             filled[slot] = true;
+            return value;
+        }
+    }
+
+    private final class GridMemo extends LatticeMemo {
+        @Override
+        public double noise(double x, double z) {
+            long xKey = Double.doubleToRawLongBits(x);
+            long zKey = Double.doubleToRawLongBits(z);
+            int slot = ((int) (x * (1D / 32D)) & 7) | (((int) (z * (1D / 32D)) & 7) << 3);
+            LatticeMemo samples = this;
+            if (samples.filled[slot] && samples.xBits[slot] == xKey && samples.zBits[slot] == zKey) {
+                return samples.values[slot];
+            }
+            double value = generator.noise(x * coordinateScale, z * coordinateScale);
+            samples.xBits[slot] = xKey;
+            samples.zBits[slot] = zKey;
+            samples.values[slot] = value;
+            samples.filled[slot] = true;
             return value;
         }
     }

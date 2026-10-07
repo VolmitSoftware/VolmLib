@@ -1,6 +1,7 @@
 package art.arcane.volmlib.util.noise;
 
 import art.arcane.volmlib.util.math.RNG;
+import art.arcane.volmlib.util.cache.FloatCache;
 import org.junit.Test;
 
 import java.lang.reflect.Field;
@@ -121,6 +122,42 @@ public class CNGUnsignedFractureTest {
         assertBits(noise.noise(13.5D, -6.25D), noise.noiseFast2D(13.5D, -6.25D));
         noise.getFracture().child(new CNG(new RNG(17)));
         assertFalse(eligible(noise));
+    }
+
+    @Test
+    public void warmedEligibilityRetiresAfterDescendantBecomesStateful() {
+        CNG serial = CNG.signatureDouble(new RNG(1337));
+        CNG fast = CNG.signatureDouble(new RNG(1337));
+        fast.noiseFast2D(13.5D, -6.25D);
+        leaf(serial).setGenerator(new StatefulNoise());
+        leaf(fast).setGenerator(new StatefulNoise());
+        for (int index = 0; index < 64; index++) {
+            assertBits(serial.noise(x(index), z(index)), fast.noiseFast2D(x(index), z(index)));
+        }
+        leaf(serial).setGenerator(new SimplexNoise(19));
+        leaf(fast).setGenerator(new SimplexNoise(19));
+        for (int index = 0; index < 64; index++) {
+            assertBits(serial.noise(x(index), z(index)), fast.noiseFast2D(x(index), z(index)));
+        }
+    }
+
+    @Test
+    public void warmedEligibilityObservesDescendantCompositionAndSnapshots() {
+        CNG noise = CNG.signatureDouble(new RNG(1337));
+        noise.noiseFast2D(1D, 2D);
+        CNG leaf = leaf(noise);
+        leaf.child(new CNG(new RNG(79)));
+        assertBits(noise.noise(1D, 2D), noise.noiseFast2D(1D, 2D));
+        leaf.setChildren(null);
+        assertBits(noise.noise(1D, 2D), noise.noiseFast2D(1D, 2D));
+        FloatCache snapshot = new FloatCache(4, 4);
+        for (int index = 0; index < 16; index++) {
+            snapshot.set(index, 0.17F + index * 0.01F);
+        }
+        leaf.setCache(snapshot);
+        assertBits(noise.noise(1D, 2D), noise.noiseFast2D(1D, 2D));
+        leaf.setCache(null);
+        assertBits(noise.noise(1D, 2D), noise.noiseFast2D(1D, 2D));
     }
 
     @Test
