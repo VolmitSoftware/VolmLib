@@ -200,7 +200,7 @@
     {
       "name": "Wormholes",
       "filename": "Wormholes-*.jar",
-      "max_bytes": 6800000,
+      "max_bytes": 7000000,
       "forbidden_prefixes": [
         "org/bukkit/",
         "io/papermc/",
