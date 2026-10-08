@@ -9,9 +9,11 @@ public interface ScoreboardPackets {
     boolean supportsNumberFormats();
     ScoreboardHandle newScoreboard() throws Exception;
     ObjectiveHandle newObjective(ScoreboardHandle scoreboard, String name, String displayName, boolean hideScores) throws Exception;
+    ObjectiveHandle newObjectiveJson(ScoreboardHandle scoreboard, String name, String displayNameJson, boolean hideScores) throws Exception;
     void sendObjectivePacket(Player player, ObjectiveHandle objective, ObjectiveOperation operation) throws Exception;
     void sendDisplayObjectivePacket(Player player, ObjectiveHandle objective) throws Exception;
     void sendTeamPacket(Player player, ScoreboardHandle scoreboard, String teamName, String entryName, String prefix, String suffix) throws Exception;
+    void sendTeamPacketJson(Player player, ScoreboardHandle scoreboard, String teamName, String entryName, String prefixJson, String suffixJson) throws Exception;
     void sendTeamRemovePacket(Player player, ScoreboardHandle scoreboard, String teamName) throws Exception;
     void sendScorePacket(Player player, String owner, String objectiveName, int score, boolean hideScores) throws Exception;
     void sendResetScorePacket(Player player, String owner, String objectiveName) throws Exception;

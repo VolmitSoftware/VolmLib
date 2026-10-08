@@ -1,6 +1,7 @@
 package art.arcane.volmlib.util.hud;
 
 import org.bukkit.boss.BarColor;
+import org.bukkit.boss.BarFlag;
 import org.bukkit.boss.BarStyle;
 import org.bukkit.boss.BossBar;
 import org.bukkit.entity.Player;
@@ -14,6 +15,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -37,6 +39,9 @@ public class HudBossBarLaneTest {
   private Player player;
   private AtomicLong now;
   private List<ScheduledSweep> scheduledSweeps;
+  private final List<Runnable> viewerTasks = new ArrayList<>();
+  private final List<Runnable> retiredViewerTasks = new ArrayList<>();
+  private boolean deferViewerTasks;
 
   @Before
   public void setUp() {
@@ -135,6 +140,23 @@ public class HudBossBarLaneTest {
   }
 
   @Test
+  public void test_show_addsAndRemovesFlagsWithoutRepeatingUnchangedFlags() {
+    HudBossBarLane gloss = lane("Gloss");
+    HudBossBarLane.Options flagged = new HudBossBarLane.Options(HudPriority.STATUS, "Arena", 0.5D,
+        BarColor.RED, BarStyle.SOLID, 5000L, 3, Set.of(BarFlag.CREATE_FOG));
+    gloss.show(player, "arena", flagged);
+    BossBar bar = createdBars.get(0);
+    verify(bar).addFlag(BarFlag.CREATE_FOG);
+    when(bar.hasFlag(BarFlag.CREATE_FOG)).thenReturn(true);
+    clearInvocations(bar);
+    gloss.show(player, "arena", flagged);
+    verify(bar, never()).addFlag(any(BarFlag.class));
+    gloss.show(player, "arena", new HudBossBarLane.Options(HudPriority.STATUS, "Arena", 0.5D,
+        BarColor.RED, BarStyle.SOLID, 5000L, 3, Set.of()));
+    verify(bar).removeFlag(BarFlag.CREATE_FOG);
+  }
+
+  @Test
   public void test_show_belowTheCapKeepsEveryOwnBar() {
     HudBossBarLane gloss = lane("Gloss");
     assertTrue(gloss.show(player, "gloss:a", HudPriority.STATUS, "A", 0.1D, BarColor.RED, BarStyle.SOLID, 5_000L, 2));
@@ -157,7 +179,8 @@ public class HudBossBarLaneTest {
 
   @Test
   public void test_legacyShow_withoutAPluginStillShowsAndWritesNoMetadata() {
-    HudBossBarLane lane = new HudBossBarLane(null, now::get, this::createBar, (runnable, delayTicks) -> false);
+    HudBossBarLane lane = new HudBossBarLane(null, now::get, new HudBossBarLane.Runtime(this::createBar,
+        (runnable, delayTicks) -> false, this::dispatchViewer));
     lane.show(player, "shaped:portal", "Portal", 0.5D, BarColor.PURPLE, BarStyle.SOLID, 5_000L);
     verify(createdBars.get(0)).addPlayer(player);
     assertTrue(store.isEmpty());
@@ -175,13 +198,86 @@ public class HudBossBarLaneTest {
     assertEquals(40L, scheduledSweeps.get(0).delayTicks());
   }
 
+  @Test
+  public void test_expiredCleanupRunsOnViewerAndCannotRemoveRefreshedBar() {
+    HudBossBarLane lane = lane("Gloss");
+    lane.show(player, "notice", "First", 1, BarColor.WHITE, BarStyle.SOLID, 100);
+    BossBar bar = createdBars.get(0);
+    deferViewerTasks = true;
+    now.addAndGet(101);
+    lane.sweep();
+    lane.sweep();
+    assertEquals(1, viewerTasks.size());
+    verify(bar, never()).removeAll();
+    lane.show(player, "notice", "Refreshed", 1, BarColor.WHITE, BarStyle.SOLID, 100);
+    viewerTasks.remove(0).run();
+    verify(bar, never()).removeAll();
+    now.addAndGet(101);
+    lane.sweep();
+    viewerTasks.remove(0).run();
+    verify(bar).removeAll();
+  }
+
+  @Test
+  public void test_shutdownCleanupDoesNotWithdrawNewBarAfterRestart() {
+    HudBossBarLane lane = lane("Gloss");
+    lane.show(player, "notice", "Old", 1, BarColor.WHITE, BarStyle.SOLID, 100);
+    BossBar old = createdBars.get(0);
+    deferViewerTasks = true;
+    lane.shutdown();
+    lane.show(player, "notice", "New", 1, BarColor.WHITE, BarStyle.SOLID, 100);
+    viewerTasks.remove(0).run();
+    verify(old).removeAll();
+    verify(createdBars.get(1), never()).removeAll();
+    assertTrue(store.containsKey(HudBossBarLane.METADATA_KEY + "|notice"));
+  }
+
+  @Test
+  public void test_retiredViewerCallbackCannotRemoveRejoinedViewerBar() {
+    deferViewerTasks = true;
+    HudBossBarLane lane = new HudBossBarLane(null, now::get,
+        new HudBossBarLane.Runtime(this::createBar, (task, delay) -> false, this::dispatchViewer));
+    lane.show(player, "notice", "Notice", 0.5D, BarColor.RED, BarStyle.SOLID, 100L);
+    now.addAndGet(101L);
+    lane.sweep();
+    Player rejoined = mock(Player.class);
+    UUID playerId = player.getUniqueId();
+    when(rejoined.getUniqueId()).thenReturn(playerId);
+    lane.show(rejoined, "notice", "New session", 0.5D, BarColor.RED, BarStyle.SOLID, 100L);
+    retiredViewerTasks.remove(0).run();
+    lane.show(rejoined, "notice", "Still here", 0.5D, BarColor.RED, BarStyle.SOLID, 100L);
+    assertEquals(1, createdBars.size());
+    verify(createdBars.get(0), never()).removeAll();
+  }
+
+  @Test
+  public void test_retiredSweepGenerationDoesNotRescheduleAfterRestart() {
+    HudBossBarLane lane = lane("Gloss");
+    lane.startSweeper(20);
+    Runnable old = scheduledSweeps.get(0).runnable();
+    lane.shutdown();
+    lane.startSweeper(20);
+    old.run();
+    assertEquals(2, scheduledSweeps.size());
+  }
+
   private HudBossBarLane lane(String pluginName) {
     Plugin plugin = mock(Plugin.class);
     when(plugin.getName()).thenReturn(pluginName);
-    return new HudBossBarLane(plugin, now::get, this::createBar, (runnable, delayTicks) -> {
+    return new HudBossBarLane(plugin, now::get, new HudBossBarLane.Runtime(this::createBar, (runnable, delayTicks) -> {
       scheduledSweeps.add(new ScheduledSweep(runnable, delayTicks));
       return true;
-    });
+    }, this::dispatchViewer));
+  }
+
+  private boolean dispatchViewer(Player player, Runnable task, Runnable retired) {
+    if (deferViewerTasks) {
+      viewerTasks.add(task);
+      retiredViewerTasks.add(retired);
+    } else {
+      task.run();
+    }
+    return true;
   }
 
   private BossBar createBar(String title, BarColor color, BarStyle style) {

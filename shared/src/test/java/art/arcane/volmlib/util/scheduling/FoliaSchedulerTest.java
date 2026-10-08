@@ -1,6 +1,7 @@
 package art.arcane.volmlib.util.scheduling;
 
 import io.papermc.paper.threadedregions.scheduler.EntityScheduler;
+import io.papermc.paper.threadedregions.scheduler.ScheduledTask;
 import org.bukkit.Bukkit;
 import org.bukkit.Server;
 import org.bukkit.World;
@@ -19,10 +20,15 @@ import java.lang.reflect.Proxy;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.logging.Logger;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 
 public class FoliaSchedulerTest {
     private SchedulerHandler schedulerHandler;
@@ -159,6 +165,111 @@ public class FoliaSchedulerTest {
         assertTrue(FoliaScheduler.runEntity(plugin, entity, () -> invoked.add("task"), 0L, () -> invoked.add("retired")));
         assertTrue(invoked.isEmpty());
         assertTrue(schedulerHandler.methodNames().isEmpty());
+    }
+
+    @Test
+    public void cancellableEntityTasksRetainAndCancelTheNativeHandle() {
+        AtomicInteger cancelled = new AtomicInteger();
+        AtomicInteger retired = new AtomicInteger();
+        AtomicInteger executed = new AtomicInteger();
+        AtomicReference<Consumer<ScheduledTask>> callback = new AtomicReference<>();
+        AtomicReference<Runnable> nativeRetired = new AtomicReference<>();
+        ScheduledTask nativeTask = new ScheduledTask() {
+            @Override
+            public Plugin getOwningPlugin() {
+                return plugin;
+            }
+
+            @Override
+            public boolean isRepeatingTask() {
+                return false;
+            }
+
+            @Override
+            public CancelledState cancel() {
+                cancelled.incrementAndGet();
+                return CancelledState.CANCELLED_BY_CALLER;
+            }
+
+            @Override
+            public ExecutionState getExecutionState() {
+                return ExecutionState.IDLE;
+            }
+        };
+        EntityScheduler scheduler = proxy(EntityScheduler.class, (proxy, method, arguments) -> {
+            if (method.getName().equals("runDelayed")) {
+                @SuppressWarnings("unchecked")
+                Consumer<ScheduledTask> scheduled = (Consumer<ScheduledTask>) arguments[1];
+                callback.set(scheduled);
+                nativeRetired.set((Runnable) arguments[2]);
+                return nativeTask;
+            }
+            return defaultValue(method.getReturnType());
+        });
+        SchedulerUtils.TaskHandle handle = FoliaScheduler.scheduleEntity(plugin, entityWithScheduler(scheduler),
+            new FoliaScheduler.DelayedTask(20, executed::incrementAndGet, retired::incrementAndGet));
+        assertNotNull(handle);
+        handle.cancel();
+        handle.cancel();
+        nativeRetired.get().run();
+        callback.get().accept(nativeTask);
+        assertEquals(1, cancelled.get());
+        assertEquals(1, retired.get());
+        assertEquals(0, executed.get());
+    }
+
+    @Test
+    public void rejectedNativeCancellableTaskRetiresExactlyOnce() {
+        AtomicInteger retired = new AtomicInteger();
+        EntityScheduler scheduler = proxy(EntityScheduler.class, (proxy, method, arguments) -> {
+            if (method.getName().equals("runDelayed")) {
+                ((Runnable) arguments[2]).run();
+            }
+            return null;
+        });
+        assertNull(FoliaScheduler.scheduleEntity(plugin, entityWithScheduler(scheduler),
+            new FoliaScheduler.DelayedTask(5, () -> { }, retired::incrementAndGet)));
+        assertEquals(1, retired.get());
+        assertTrue(schedulerHandler.methodNames().isEmpty());
+    }
+
+    @Test
+    public void cancellableGlobalTasksUseTheBukkitNativeTaskAndPreserveDelay() {
+        AtomicInteger retired = new AtomicInteger();
+        SchedulerUtils.TaskHandle handle = FoliaScheduler.scheduleGlobal(plugin,
+            new FoliaScheduler.DelayedTask(17, () -> { }, retired::incrementAndGet));
+        assertNotNull(handle);
+        assertEquals(List.of(17L), schedulerHandler.delays());
+        handle.cancel();
+        assertEquals(1, retired.get());
+        assertTrue(handle.isCancelled());
+    }
+
+    @Test
+    public void nativeCancellationResultsDistinguishDrainedAndRunningTasks() {
+        for (ScheduledTask.CancelledState result : List.of(ScheduledTask.CancelledState.CANCELLED_ALREADY,
+            ScheduledTask.CancelledState.ALREADY_EXECUTED, ScheduledTask.CancelledState.RUNNING)) {
+            AtomicInteger retired = new AtomicInteger();
+            AtomicReference<Consumer<ScheduledTask>> callback = new AtomicReference<>();
+            ScheduledTask nativeTask = proxy(ScheduledTask.class, (proxy, method, arguments) ->
+                method.getName().equals("cancel") ? result : defaultValue(method.getReturnType()));
+            EntityScheduler scheduler = proxy(EntityScheduler.class, (proxy, method, arguments) -> {
+                if (method.getName().equals("runDelayed")) {
+                    @SuppressWarnings("unchecked")
+                    Consumer<ScheduledTask> scheduled = (Consumer<ScheduledTask>) arguments[1];
+                    callback.set(scheduled);
+                    return nativeTask;
+                }
+                return defaultValue(method.getReturnType());
+            });
+            SchedulerUtils.TaskHandle handle = FoliaScheduler.scheduleEntity(plugin, entityWithScheduler(scheduler),
+                new FoliaScheduler.DelayedTask(5, () -> { }, retired::incrementAndGet));
+            assertNotNull(handle);
+            handle.cancel();
+            assertEquals(result == ScheduledTask.CancelledState.RUNNING ? 0 : 1, retired.get());
+            callback.get().accept(nativeTask);
+            assertEquals(1, retired.get());
+        }
     }
 
     private static EntityScheduler retiredEntityScheduler() {

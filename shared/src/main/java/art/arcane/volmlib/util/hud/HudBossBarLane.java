@@ -3,6 +3,7 @@ package art.arcane.volmlib.util.hud;
 import art.arcane.volmlib.util.scheduling.FoliaScheduler;
 import org.bukkit.Bukkit;
 import org.bukkit.boss.BarColor;
+import org.bukkit.boss.BarFlag;
 import org.bukkit.boss.BarStyle;
 import org.bukkit.boss.BossBar;
 import org.bukkit.entity.Player;
@@ -18,6 +19,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.LongSupplier;
 
 public final class HudBossBarLane {
@@ -29,24 +31,33 @@ public final class HudBossBarLane {
   private final LongSupplier clock;
   private final BossBarFactory bossBars;
   private final SweepScheduler sweeper;
+  private final ViewerScheduler viewers;
+  private final AtomicLong sweepGeneration = new AtomicLong();
+  private final AtomicLong lastSweepMillis = new AtomicLong(Long.MIN_VALUE);
   private final AtomicBoolean sweeping = new AtomicBoolean();
   private final ConcurrentHashMap<String, TrackedBar> bars = new ConcurrentHashMap<>();
   private final ConcurrentHashMap<UUID, Set<String>> asserted = new ConcurrentHashMap<>();
 
   public HudBossBarLane() {
-    this(null, System::currentTimeMillis, Bukkit::createBossBar, (runnable, delayTicks) -> false);
+    this(null, System::currentTimeMillis, new Runtime(Bukkit::createBossBar,
+        (runnable, delayTicks) -> false, (player, runnable, retired) -> {
+          runnable.run();
+          return true;
+        }));
   }
 
   public HudBossBarLane(Plugin plugin) {
-    this(plugin, System::currentTimeMillis, Bukkit::createBossBar,
-        (runnable, delayTicks) -> FoliaScheduler.runGlobal(plugin, runnable, delayTicks));
+    this(plugin, System::currentTimeMillis, new Runtime(Bukkit::createBossBar,
+        (runnable, delayTicks) -> FoliaScheduler.runGlobal(plugin, runnable, delayTicks),
+        (player, runnable, retired) -> FoliaScheduler.runEntity(plugin, player, runnable, 0L, retired)));
   }
 
-  HudBossBarLane(Plugin plugin, LongSupplier clock, BossBarFactory bossBars, SweepScheduler sweeper) {
+  HudBossBarLane(Plugin plugin, LongSupplier clock, Runtime runtime) {
     this.plugin = plugin;
     this.clock = clock;
-    this.bossBars = bossBars;
-    this.sweeper = sweeper;
+    this.bossBars = runtime.bars();
+    this.sweeper = runtime.sweeper();
+    this.viewers = runtime.viewers();
   }
 
   public void show(Player player, String laneId, String title, double progress, BarColor color, BarStyle style, long staleMillis) {
@@ -54,6 +65,17 @@ public final class HudBossBarLane {
   }
 
   public boolean show(Player player, String laneId, int priority, String title, double progress, BarColor color, BarStyle style, long staleMillis, int maxBars) {
+    return show(player, laneId, new Options(priority, title, progress, color, style, staleMillis, maxBars, Set.of()));
+  }
+
+  public boolean show(Player player, String laneId, Options options) {
+    int priority = options.priority();
+    String title = options.title();
+    double progress = options.progress();
+    BarColor color = options.color();
+    BarStyle style = options.style();
+    long staleMillis = options.staleMillis();
+    int maxBars = options.maxBars();
     long now = clock.getAsLong();
     TrackedBar tracked = bars.computeIfAbsent(laneKey(player.getUniqueId(), laneId), key -> new TrackedBar(bossBars.create(title, color, style), player, style, now));
     tracked.player = player;
@@ -67,6 +89,15 @@ public final class HudBossBarLane {
       if (tracked.style != style) {
         tracked.bar.setStyle(style);
         tracked.style = style;
+      }
+      for (BarFlag flag : BarFlag.values()) {
+        if (options.flags().contains(flag)) {
+          if (!tracked.bar.hasFlag(flag)) {
+            tracked.bar.addFlag(flag);
+          }
+        } else if (tracked.bar.hasFlag(flag)) {
+          tracked.bar.removeFlag(flag);
+        }
       }
       tracked.bar.addPlayer(player);
       tracked.granted = true;
@@ -118,41 +149,84 @@ public final class HudBossBarLane {
     if (plugin == null || !sweeping.compareAndSet(false, true)) {
       return;
     }
-    scheduleSweep(Math.max(1L, periodTicks));
+    scheduleSweep(Math.max(1L, periodTicks), sweepGeneration.incrementAndGet());
   }
 
   public void shutdown() {
     sweeping.set(false);
-    Iterator<Map.Entry<String, TrackedBar>> iterator = bars.entrySet().iterator();
-    while (iterator.hasNext()) {
-      iterator.next().getValue().bar.removeAll();
-      iterator.remove();
+    sweepGeneration.incrementAndGet();
+    for (Map.Entry<String, TrackedBar> entry : bars.entrySet()) {
+      String key = entry.getKey();
+      TrackedBar tracked = entry.getValue();
+      if (!bars.remove(key, tracked)) {
+        continue;
+      }
+      Player player = tracked.player;
+      viewers.schedule(player, () -> {
+        tracked.bar.removeAll();
+        if (!bars.containsKey(key)) {
+          withdraw(player, laneIdOf(key));
+        }
+      }, () -> {});
     }
     asserted.clear();
   }
 
-  private void scheduleSweep(long periodTicks) {
+  private void scheduleSweep(long periodTicks, long generation) {
     sweeper.schedule(() -> {
-      if (!sweeping.get()) {
+      if (!sweeping.get() || sweepGeneration.get() != generation) {
         return;
       }
       sweep();
-      scheduleSweep(periodTicks);
+      scheduleSweep(periodTicks, generation);
     }, periodTicks);
   }
 
   private void sweep(long nowMillis) {
-    Iterator<Map.Entry<String, TrackedBar>> iterator = bars.entrySet().iterator();
-    while (iterator.hasNext()) {
-      Map.Entry<String, TrackedBar> entry = iterator.next();
+    long previous = lastSweepMillis.get();
+    if (previous != Long.MIN_VALUE && nowMillis - previous >= 0 && nowMillis - previous < 50
+        || !lastSweepMillis.compareAndSet(previous, nowMillis)) {
+      return;
+    }
+    for (Map.Entry<String, TrackedBar> entry : bars.entrySet()) {
       TrackedBar tracked = entry.getValue();
-      if (nowMillis - tracked.updatedMillis <= tracked.staleMillis) {
+      if (nowMillis - tracked.updatedMillis <= tracked.staleMillis || !tracked.cleanupQueued.compareAndSet(false, true)) {
         continue;
       }
+      String key = entry.getKey();
+      Player player = tracked.player;
+      boolean scheduled = viewers.schedule(player, () -> expire(key, tracked, player),
+          () -> retireExpired(key, tracked, player));
+      if (!scheduled) {
+        tracked.cleanupQueued.set(false);
+      }
+    }
+  }
+
+  private void retireExpired(String key, TrackedBar tracked, Player player) {
+    bars.computeIfPresent(key, (ignored, current) -> {
+      if (current != tracked || current.player != player) {
+        tracked.cleanupQueued.set(false);
+        return current;
+      }
+      Set<String> lanes = asserted.get(player.getUniqueId());
+      if (lanes != null) {
+        lanes.remove(laneIdOf(key));
+      }
+      return null;
+    });
+  }
+
+  private void expire(String key, TrackedBar tracked, Player player) {
+    try {
+      if (tracked.player != player || clock.getAsLong() - tracked.updatedMillis <= tracked.staleMillis
+          || !bars.remove(key, tracked)) {
+        return;
+      }
       tracked.bar.removeAll();
-      iterator.remove();
-      withdraw(tracked.player, laneIdOf(entry.getKey()));
-      tracked.player = null;
+      withdraw(player, laneIdOf(key));
+    } finally {
+      tracked.cleanupQueued.set(false);
     }
   }
 
@@ -256,6 +330,21 @@ public final class HudBossBarLane {
     return split < 0 ? null : laneKey.substring(split + 1);
   }
 
+  public record Options(int priority, String title, double progress, BarColor color, BarStyle style,
+                        long staleMillis, int maxBars, Set<BarFlag> flags) {
+    public Options {
+      flags = flags == null ? Set.of() : Set.copyOf(flags);
+    }
+  }
+
+  record Runtime(BossBarFactory bars, SweepScheduler sweeper, ViewerScheduler viewers) {
+  }
+
+  @FunctionalInterface
+  interface ViewerScheduler {
+    boolean schedule(Player player, Runnable runnable, Runnable retired);
+  }
+
   @FunctionalInterface
   interface BossBarFactory {
     BossBar create(String title, BarColor color, BarStyle style);
@@ -268,6 +357,7 @@ public final class HudBossBarLane {
 
   private static final class TrackedBar {
     private final BossBar bar;
+    private final AtomicBoolean cleanupQueued = new AtomicBoolean();
     private final long sinceMillis;
     private volatile Player player;
     private volatile BarStyle style;

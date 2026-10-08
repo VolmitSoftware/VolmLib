@@ -162,7 +162,7 @@ public class BoardDiffGatingTest {
     }
 
     @Test
-    public void shrinkingRowCountWipesScoresAndReappliesTheSurvivingRows() {
+    public void shrinkingRowCountResetsOnlyRemovedRows() {
         CharacterizationBoardRenderHarness h = harness();
         CharacterizationBoardRenderHarness.PlayerHandle player = h.newPlayer();
         CharacterizationBoardRenderHarness.ProviderHandle provider =
@@ -175,10 +175,8 @@ public class BoardDiffGatingTest {
         provider.lines = () -> List.of("A", "B");
         h.update(board);
 
-        // The row-count change wipes the scores, so both surviving rows must be re-scored even
-        // though their text is unchanged.
-        assertEquals(3, model.resetScoreCalls);
-        assertEquals(2, model.scoreWrites);
+        assertEquals(1, model.resetScoreCalls);
+        assertEquals(0, model.scoreWrites);
         assertEquals(0, model.teams.get(T0).prefixWrites);
         assertEquals(0, model.teams.get(T1).prefixWrites);
         assertEquals(Map.of(T0, 15, T1, 14), model.scores);
@@ -186,7 +184,7 @@ public class BoardDiffGatingTest {
     }
 
     @Test
-    public void growingRowCountReappliesEveryRow() {
+    public void growingRowCountAddsOnlyNewScores() {
         CharacterizationBoardRenderHarness h = harness();
         CharacterizationBoardRenderHarness.PlayerHandle player = h.newPlayer();
         CharacterizationBoardRenderHarness.ProviderHandle provider =
@@ -199,7 +197,7 @@ public class BoardDiffGatingTest {
         provider.lines = () -> List.of("A", "B", "C");
         h.update(board);
 
-        assertEquals(3, model.scoreWrites);
+        assertEquals(1, model.scoreWrites);
         assertEquals(1, model.teams.get(T2).prefixWrites);
         assertEquals(Map.of(T0, 15, T1, 14, T2, 13), model.scores);
     }

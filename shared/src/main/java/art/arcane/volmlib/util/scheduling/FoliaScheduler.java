@@ -13,7 +13,9 @@ import org.bukkit.scheduler.BukkitScheduler;
 import org.bukkit.scheduler.BukkitTask;
 
 import java.lang.reflect.Method;
+import java.lang.reflect.InvocationTargetException;
 import java.util.Arrays;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
@@ -25,6 +27,7 @@ import java.util.function.Consumer;
 public final class FoliaScheduler {
     private static final long TICK_MS = 50L;
     private static final Class<?> REGIONIZED_SERVER_CLASS = resolveClass("io.papermc.paper.threadedregions.RegionizedServer");
+    private static final Class<?> NATIVE_SCHEDULED_TASK = resolveClass("io.papermc.paper.threadedregions.scheduler.ScheduledTask");
     private static volatile boolean forcedFoliaThreading;
 
     private static final Method SERVER_GET_GLOBAL_REGION_SCHEDULER = resolveServerMethod("getGlobalRegionScheduler");
@@ -229,6 +232,69 @@ public final class FoliaScheduler {
 
     public static boolean runGlobal(Plugin plugin, Runnable runnable) {
         return runGlobal(plugin, runnable, 0L);
+    }
+
+    public record DelayedTask(long delayTicks, Runnable action, Runnable retired) {
+        public DelayedTask {
+            delayTicks = Math.max(1, delayTicks);
+            Objects.requireNonNull(action, "action");
+            Objects.requireNonNull(retired, "retired");
+        }
+    }
+
+    public static SchedulerUtils.TaskHandle scheduleGlobal(Plugin plugin, DelayedTask task) {
+        Objects.requireNonNull(task, "task");
+        if (!isPluginActive(plugin)) {
+            task.retired().run();
+            return null;
+        }
+        CancellableDelayedTask handle = new CancellableDelayedTask(task);
+        Object scheduler = getGlobalRegionScheduler(plugin);
+        if (scheduler != null) {
+            Consumer<Object> callback = ignored -> handle.run();
+            return scheduleNative(handle, scheduler, new NativeSchedule(
+                new Class<?>[]{Plugin.class, Consumer.class, long.class},
+                new Object[]{plugin, callback, task.delayTicks()}));
+        }
+        if (isFoliaThreading(plugin.getServer())) {
+            handle.retire();
+            return null;
+        }
+        return scheduleBukkit(plugin, new DelayedTask(task.delayTicks(), handle, handle::retire), handle);
+    }
+
+    public static SchedulerUtils.TaskHandle scheduleEntity(Plugin plugin, Entity entity, DelayedTask task) {
+        Objects.requireNonNull(task, "task");
+        UUID audience = entity instanceof Player player ? player.getUniqueId() : LanguageAudience.current();
+        if (!isPluginActive(plugin) || entity == null) {
+            task.retired().run();
+            return null;
+        }
+        Runnable contextual = audience == null ? task.action() : () -> LanguageAudience.run(audience, task.action());
+        CancellableDelayedTask handle = new CancellableDelayedTask(
+            new DelayedTask(task.delayTicks(), contextual, task.retired()));
+        Object scheduler = ENTITY_GET_SCHEDULER == null ? null : invokeNoThrow(ENTITY_GET_SCHEDULER, entity);
+        if (scheduler == null) {
+            scheduler = invokeDynamicNoThrow(entity, DYNAMIC_ENTITY_GET_SCHEDULER, NO_ARGUMENTS);
+        }
+        if (scheduler != null) {
+            Consumer<Object> callback = ignored -> handle.run();
+            return scheduleNative(handle, scheduler, new NativeSchedule(
+                new Class<?>[]{Plugin.class, Consumer.class, Runnable.class, long.class},
+                new Object[]{plugin, callback, (Runnable) handle::retire, task.delayTicks()}));
+        }
+        if (isFoliaThreading(plugin.getServer())) {
+            handle.retire();
+            return null;
+        }
+        Runnable guarded = () -> {
+            if (isEntityActive(entity)) {
+                handle.run();
+            } else {
+                handle.retire();
+            }
+        };
+        return scheduleBukkit(plugin, new DelayedTask(task.delayTicks(), guarded, handle::retire), handle);
     }
 
     public static boolean runGlobal(Plugin plugin, Runnable runnable, long delayTicks) {
@@ -984,8 +1050,83 @@ public final class FoliaScheduler {
         }
     }
 
+    private static SchedulerUtils.TaskHandle scheduleBukkit(Plugin plugin, DelayedTask task,
+                                                           CancellableDelayedTask handle) {
+        try {
+            BukkitTask nativeTask = Bukkit.getScheduler().runTaskLater(plugin, task.action(), task.delayTicks());
+            if (nativeTask == null) {
+                handle.retire();
+                return null;
+            }
+            handle.attach(() -> {
+                nativeTask.cancel();
+                return true;
+            });
+            return handle;
+        } catch (IllegalPluginAccessException | UnsupportedOperationException refused) {
+            handle.retire();
+            return null;
+        }
+    }
+
+    private static SchedulerUtils.TaskHandle scheduleNative(CancellableDelayedTask handle, Object scheduler,
+                                                           NativeSchedule schedule) {
+        Method method = cachedMethod(scheduler.getClass(), "runDelayed", schedule.parameters());
+        if (method == null) {
+            handle.retire();
+            return null;
+        }
+        Object nativeTask;
+        try {
+            nativeTask = method.invoke(scheduler, schedule.arguments());
+        } catch (InvocationTargetException failure) {
+            Throwable cause = failure.getCause();
+            if (cause instanceof IllegalPluginAccessException || cause instanceof UnsupportedOperationException) {
+                handle.retire();
+                return null;
+            }
+            if (cause instanceof RuntimeException runtime) {
+                throw runtime;
+            }
+            throw new IllegalStateException("Native delayed scheduling failed", cause);
+        } catch (IllegalAccessException failure) {
+            throw new IllegalStateException("Native delayed scheduling is inaccessible", failure);
+        }
+        if (nativeTask == null) {
+            handle.retire();
+            return null;
+        }
+        handle.attach(() -> cancelNativeTask(nativeTask));
+        return handle;
+    }
+
+    private static boolean cancelNativeTask(Object task) {
+        Class<?> contract = NATIVE_SCHEDULED_TASK != null && NATIVE_SCHEDULED_TASK.isInstance(task)
+            ? NATIVE_SCHEDULED_TASK : task.getClass();
+        Method cancel = cachedMethod(contract, "cancel", NO_PARAMETERS);
+        if (cancel == null) {
+            throw new IllegalStateException("Native delayed task has no cancellation method");
+        }
+        try {
+            Object result = cancel.invoke(task);
+            if (!(result instanceof Enum<?> cancelled)) {
+                throw new IllegalStateException("Native delayed task returned an unknown cancellation result");
+            }
+            return switch (cancelled.name()) {
+                case "CANCELLED_BY_CALLER", "CANCELLED_ALREADY", "ALREADY_EXECUTED" -> true;
+                case "RUNNING", "NEXT_RUNS_CANCELLED", "NEXT_RUNS_CANCELLED_ALREADY" -> false;
+                default -> throw new IllegalStateException("Unknown native cancellation state: " + cancelled.name());
+            };
+        } catch (ReflectiveOperationException failure) {
+            throw new IllegalStateException("Native delayed task cancellation failed", failure);
+        }
+    }
+
     private static boolean isPluginActive(Plugin plugin) {
         return plugin != null && plugin.isEnabled();
+    }
+
+    private record NativeSchedule(Class<?>[] parameters, Object[] arguments) {
     }
 
     private static final class SchedulerHandle {

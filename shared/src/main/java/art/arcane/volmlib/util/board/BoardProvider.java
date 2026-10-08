@@ -9,6 +9,14 @@ public interface BoardProvider {
 
     List<String> getLines(Player player);
 
+    default BoardTextFormat getTextFormat() {
+        return BoardTextFormat.LEGACY;
+    }
+
+    default int[] getLineSlots(Player player) {
+        return null;
+    }
+
     default boolean hideScoreNumbers(Player player) {
         return true;
     }

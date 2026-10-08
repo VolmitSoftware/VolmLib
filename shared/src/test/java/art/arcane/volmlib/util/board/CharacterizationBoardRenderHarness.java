@@ -415,6 +415,7 @@ public final class CharacterizationBoardRenderHarness implements AutoCloseable {
         public final AtomicInteger hideScoreNumbersCalls = new AtomicInteger();
         public volatile Supplier<String> title;
         public volatile Supplier<List<String>> lines;
+        public volatile int[] slots;
         public volatile boolean hideScoreNumbers;
         public final Object proxy;
 
@@ -435,6 +436,8 @@ public final class CharacterizationBoardRenderHarness implements AutoCloseable {
                     linesCalls.incrementAndGet();
                     yield new ArrayList<>(this.lines.get());
                 }
+                case "getLineSlots" -> slots;
+                case "getTextFormat" -> cls(PKG + "BoardTextFormat").getField("LEGACY").get(null);
                 case "hideScoreNumbers" -> {
                     hideScoreNumbersCalls.incrementAndGet();
                     yield this.hideScoreNumbers;

@@ -16,6 +16,7 @@ public class UIElement implements Element {
     private MaterialBlock material;
     private boolean enchanted;
     private String name;
+    private boolean nameSet;
     private double progress;
     private boolean bg;
     private Callback<Element> eLeft;
@@ -82,6 +83,7 @@ public class UIElement implements Element {
     @Override
     public UIElement setName(String name) {
         this.name = name;
+        nameSet = true;
         return this;
     }
 
@@ -315,8 +317,12 @@ public class UIElement implements Element {
             is.setAmount(getCount());
             is.setDurability(getEffectiveDurability());
             ItemMeta im = is.getItemMeta();
-            im.setDisplayName(getName());
-            im.setLore(getLore().copy());
+            if (baseItemStack == null || nameSet) {
+                im.setDisplayName(getName());
+            }
+            if (baseItemStack == null || !lore.isEmpty()) {
+                im.setLore(getLore().copy());
+            }
 
             if (isEnchanted()) {
                 im.addEnchant(Enchantment.FIRE_ASPECT, 1, true);

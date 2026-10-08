@@ -30,6 +30,7 @@ public class ReflectiveScoreboardPackets implements ScoreboardPackets {
     private final Object legacyScoreChange;
     private final Object legacyScoreRemove;
     private final Method craftChatMessageFromStringOrNull;
+    private final Method craftChatMessageFromJson;
     private final Object objectiveCriteriaDummy;
     private final Object renderTypeInteger;
     private final Object sidebarDisplaySlot;
@@ -59,6 +60,7 @@ public class ReflectiveScoreboardPackets implements ScoreboardPackets {
         Object foundLegacyScoreChange = null;
         Object foundLegacyScoreRemove = null;
         Method foundCraftChatMessageFromStringOrNull = null;
+        Method foundCraftChatMessageFromJson = null;
         Object foundObjectiveCriteriaDummy = null;
         Object foundRenderTypeInteger = null;
         Object foundSidebarDisplaySlot = null;
@@ -152,6 +154,7 @@ public class ReflectiveScoreboardPackets implements ScoreboardPackets {
             }
 
             foundCraftChatMessageFromStringOrNull = craftChatMessageClass.getMethod("fromStringOrNull", String.class);
+            foundCraftChatMessageFromJson = craftChatMessageClass.getMethod("fromJSON", String.class);
 
             reflectionReady = true;
         } catch (Throwable ignored) {
@@ -178,6 +181,7 @@ public class ReflectiveScoreboardPackets implements ScoreboardPackets {
         this.legacyScoreChange = foundLegacyScoreChange;
         this.legacyScoreRemove = foundLegacyScoreRemove;
         this.craftChatMessageFromStringOrNull = foundCraftChatMessageFromStringOrNull;
+        this.craftChatMessageFromJson = foundCraftChatMessageFromJson;
         this.objectiveCriteriaDummy = foundObjectiveCriteriaDummy;
         this.renderTypeInteger = foundRenderTypeInteger;
         this.sidebarDisplaySlot = foundSidebarDisplaySlot;
@@ -198,7 +202,15 @@ public class ReflectiveScoreboardPackets implements ScoreboardPackets {
     }
 
     public ObjectiveHandle newObjective(ScoreboardHandle scoreboard, String name, String displayName, boolean hideScores) throws Exception {
-        Object component = toVanillaComponent(displayName);
+        return createObjective(scoreboard, name, toVanillaComponent(displayName), hideScores);
+    }
+
+    @Override
+    public ObjectiveHandle newObjectiveJson(ScoreboardHandle scoreboard, String name, String displayNameJson, boolean hideScores) throws Exception {
+        return createObjective(scoreboard, name, craftChatMessageFromJson.invoke(null, displayNameJson), hideScores);
+    }
+
+    private ObjectiveHandle createObjective(ScoreboardHandle scoreboard, String name, Object component, boolean hideScores) throws Exception {
         Object numberFormat = hideScores && supportsNumberFormats() ? blankNumberFormat : null;
         return new NativeObjective(objectiveConstructor.newInstance(objectiveConstructorArguments(
                 objectiveConstructor.getParameterCount(),
@@ -231,9 +243,20 @@ public class ReflectiveScoreboardPackets implements ScoreboardPackets {
     }
 
     public void sendTeamPacket(Player player, ScoreboardHandle scoreboard, String teamName, String entryName, String prefix, String suffix) throws Exception {
-        Object team = playerTeamConstructor.newInstance(((NativeScoreboard) scoreboard).value(), teamName);
         Object prefixComponent = toVanillaComponent(prefix == null ? "" : prefix);
         Object suffixComponent = toVanillaComponent(suffix == null ? "" : suffix);
+        sendTeamComponents(player, scoreboard, teamName, entryName, prefixComponent, suffixComponent);
+    }
+
+    @Override
+    public void sendTeamPacketJson(Player player, ScoreboardHandle scoreboard, String teamName, String entryName, String prefixJson, String suffixJson) throws Exception {
+        sendTeamComponents(player, scoreboard, teamName, entryName,
+                craftChatMessageFromJson.invoke(null, prefixJson), craftChatMessageFromJson.invoke(null, suffixJson));
+    }
+
+    private void sendTeamComponents(Player player, ScoreboardHandle scoreboard, String teamName, String entryName,
+                                    Object prefixComponent, Object suffixComponent) throws Exception {
+        Object team = playerTeamConstructor.newInstance(((NativeScoreboard) scoreboard).value(), teamName);
         playerTeamSetPrefix.invoke(team, prefixComponent);
         playerTeamSetSuffix.invoke(team, suffixComponent);
         scoreboardAddPlayerToTeam.invoke(((NativeScoreboard) scoreboard).value(), entryName, team);
