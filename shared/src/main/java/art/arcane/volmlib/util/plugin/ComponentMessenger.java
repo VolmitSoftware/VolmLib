@@ -166,9 +166,14 @@ public final class ComponentMessenger {
     public static void sendActionBar(Player player, ComponentText message) {
         Player requiredPlayer = Objects.requireNonNull(player, "player");
         ComponentText requiredMessage = Objects.requireNonNull(message, "message");
-        requiredPlayer.spigot().sendMessage(
-                ChatMessageType.ACTION_BAR,
-                TextComponent.fromLegacyText(requiredMessage.legacy()));
+        BaseComponent[] components;
+        try {
+            components = ComponentSerializer.parse(
+                    SpigotJson.SERIALIZER.serialize((Component) requiredMessage.component()));
+        } catch (LinkageError unavailableSerializer) {
+            components = TextComponent.fromLegacyText(requiredMessage.legacy());
+        }
+        requiredPlayer.spigot().sendMessage(ChatMessageType.ACTION_BAR, components);
     }
 
     public static void showTitleMarkup(

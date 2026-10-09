@@ -8,11 +8,16 @@ import org.bukkit.inventory.InventoryView;
 import org.bukkit.inventory.PlayerInventory;
 import org.bukkit.metadata.MetadataValue;
 import org.bukkit.plugin.Plugin;
+import org.bukkit.profile.PlayerProfile;
 
 import java.util.List;
 import java.util.UUID;
 
 public interface Player {
+  default PlayerProfile getPlayerProfile() {
+    return null;
+  }
+
   default PlayerInventory getInventory() {
     return null;
   }

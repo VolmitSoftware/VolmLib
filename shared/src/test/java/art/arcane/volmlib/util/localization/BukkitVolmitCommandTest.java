@@ -286,6 +286,37 @@ public class BukkitVolmitCommandTest {
         return result;
     }
 
+    @Test
+    public void currentCommandTakesOverOlderRegisteredOwnerWithoutLosingTheNewLabelsOnUnload() {
+        BukkitVolmitCommand old = new BukkitVolmitCommand(plugin, switcher);
+        services.register(Map.class, Map.of("volmit.language.protocol", "2"), plugin, ServicePriority.Normal);
+        old.claim();
+        Plugin next = plugin("ShapedPortals");
+        services.register(Map.class, Map.of("volmit.language.protocol", "2", "command.revision", 1), next, ServicePriority.Normal);
+        BukkitVolmitCommand replacement = new BukkitVolmitCommand(next, mock(BukkitLanguageSwitcher.class));
+        replacement.claim();
+        assertSame(replacement, commands.get("volmit"));
+        assertSame(replacement, commands.get("volmit:volmit"));
+        old.release();
+        assertSame(replacement, commands.get("volmit"));
+        assertTrue(helpTopics.containsKey("/volmit"));
+    }
+
+    @Test
+    public void olderOwnerIsRestoredWhenTheCurrentOwnerCloses() {
+        BukkitVolmitCommand old = new BukkitVolmitCommand(plugin, switcher);
+        services.register(Map.class, Map.of("volmit.language.protocol", "2"), plugin, ServicePriority.Normal);
+        old.claim();
+        Plugin next = plugin("ShapedPortals");
+        BukkitVolmitCommand replacement = new BukkitVolmitCommand(next, mock(BukkitLanguageSwitcher.class));
+        replacement.claim();
+        assertSame(replacement, commands.get("volmit"));
+        replacement.release();
+        assertSame(old, commands.get("volmit"));
+        assertSame(old, commands.get("volmit:volmit"));
+        assertTrue(old.isRegistered());
+    }
+
     public interface CommandServer {
         CommandMap getCommandMap();
 

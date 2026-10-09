@@ -4,6 +4,8 @@ import org.gradle.api.DefaultTask;
 import org.gradle.api.GradleException;
 import org.gradle.api.file.ConfigurableFileCollection;
 import org.gradle.api.file.RegularFileProperty;
+import org.gradle.api.provider.ListProperty;
+import org.gradle.api.tasks.Input;
 import org.gradle.api.tasks.CacheableTask;
 import org.gradle.api.tasks.InputFiles;
 import org.gradle.api.tasks.OutputFile;
@@ -28,7 +30,6 @@ import java.util.TreeSet;
 
 @CacheableTask
 public abstract class VerifyNativeClassBoundary extends DefaultTask {
-    private static final String IMPLEMENTATION_PACKAGE = "art/arcane/volmlib/nativelib/";
     private static final List<String> NATIVE_PACKAGES = List.of(
             "net/minecraft/", "org/bukkit/craftbukkit/", "io/papermc/paper/configuration/",
             "ca/spottedleaf/moonrise/");
@@ -40,20 +41,24 @@ public abstract class VerifyNativeClassBoundary extends DefaultTask {
     @OutputFile
     public abstract RegularFileProperty getReport();
 
+    @Input
+    public abstract ListProperty<String> getNativeImplementationPackages();
+
     @TaskAction
     public void verify() throws IOException {
+        List<String> implementations = NativeImplementationPackages.validate(getNativeImplementationPackages().get());
         List<File> classes = new ArrayList<>(getClasses().getAsFileTree()
                 .matching(pattern -> pattern.include("**/*.class")).getFiles());
         classes.sort(Comparator.comparing(File::getAbsolutePath));
         List<String> violations = new ArrayList<>();
         for (File file : classes) {
             ClassReader reader = new ClassReader(Files.readAllBytes(file.toPath()));
-            for (String reference : nativeReferences(reader)) {
+            for (String reference : nativeReferences(reader, implementations)) {
                 violations.add(reader.getClassName().replace('/', '.') + " -> " + reference.replace('/', '.'));
             }
         }
         if (!violations.isEmpty()) {
-            throw new GradleException("Compiled native server references belong in VolmLib implementations:\n"
+            throw new GradleException("Compiled native server references belong in declared implementation packages:\n"
                     + String.join("\n", violations));
         }
         File report = getReport().get().getAsFile();
@@ -61,9 +66,12 @@ public abstract class VerifyNativeClassBoundary extends DefaultTask {
         Files.writeString(report.toPath(), "Verified " + classes.size() + " main classes.\n", StandardCharsets.UTF_8);
     }
 
-    static Set<String> nativeReferences(ClassReader reader) {
+    static Set<String> nativeReferences(ClassReader reader, List<String> implementations) {
         Set<String> references = new TreeSet<>();
-        if (!reader.getClassName().startsWith(IMPLEMENTATION_PACKAGE)) {
+        String name = reader.getClassName();
+        int lastSeparator = name.lastIndexOf('/');
+        String packageName = lastSeparator < 0 ? "" : name.substring(0, lastSeparator).replace('/', '.');
+        if (!NativeImplementationPackages.contains(packageName, implementations)) {
             reader.accept(new ClassRemapper(new ClassWriter(0), new NativeReferences(references)), ClassReader.SKIP_DEBUG);
         }
         return references;

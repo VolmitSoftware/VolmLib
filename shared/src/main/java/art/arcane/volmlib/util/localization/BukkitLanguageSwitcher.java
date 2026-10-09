@@ -7,6 +7,7 @@ import art.arcane.volmlib.util.plugin.ComponentText;
 import art.arcane.volmlib.util.format.ColorFormatter;
 import net.kyori.adventure.text.minimessage.MiniMessage;
 import art.arcane.volmlib.util.scheduling.FoliaScheduler;
+import art.arcane.volmlib.util.update.BukkitUpdateService;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -167,7 +168,7 @@ public final class BukkitLanguageSwitcher implements AutoCloseable, Listener {
                 return true;
             }
             if (arguments.length < 2 || !arguments[0].equalsIgnoreCase("plugins")) {
-                message(sender, "Usage: /volmit plugins [languages|debug]");
+                message(sender, "Usage: /volmit plugins [languages|debug|updates]");
                 return true;
             }
             if (arguments[1].equalsIgnoreCase("languages")) {
@@ -191,7 +192,11 @@ public final class BukkitLanguageSwitcher implements AutoCloseable, Listener {
                 executeDebug(sender, arguments);
                 return true;
             }
-            message(sender, "Usage: /volmit plugins [languages|debug]");
+            if (arguments[1].equalsIgnoreCase("updates") && arguments.length == 2) {
+                BukkitUpdateService.command(plugin, sender, options.theme(), options.textResolver());
+                return true;
+            }
+            message(sender, "Usage: /volmit plugins [languages|debug|updates]");
             return true;
         });
     }
@@ -209,6 +214,9 @@ public final class BukkitLanguageSwitcher implements AutoCloseable, Listener {
         }
         if (arguments.length == 2) {
             ArrayList<String> tools = new ArrayList<>();
+            if (BukkitUpdateService.available(plugin.getServer(), sender)) {
+                tools.add("updates");
+            }
             if (canSelectServer(sender, selected)) {
                 tools.add("languages");
             }
@@ -268,6 +276,7 @@ public final class BukkitLanguageSwitcher implements AutoCloseable, Listener {
         values.put("server", (Function<String, CompletableFuture<String>>) locale ->
                 languages.selectDefault(locale).thenApply(ignored -> languages.defaultLocale()));
         values.put("command.claim", (Runnable) commandRegistration::claim);
+        values.put("command.revision", 1);
         return values;
     }
 
@@ -465,6 +474,10 @@ public final class BukkitLanguageSwitcher implements AutoCloseable, Listener {
 
     private void showPluginTools(CommandSender sender, List<Endpoint> endpoints) {
         ArrayList<String> entries = new ArrayList<>();
+        if (BukkitUpdateService.available(plugin.getServer(), sender)) {
+            entries.add(link(sender, "Updates", "/volmit plugins updates",
+                    "Check registered Volmit plugins for newer stable GitHub releases"));
+        }
         if (canSelectServer(sender, endpoints)) {
             entries.add(link(sender, "Languages", "/volmit plugins languages",
                     "Change the server default language for all registered Volmit plugins"));
@@ -920,7 +933,7 @@ public final class BukkitLanguageSwitcher implements AutoCloseable, Listener {
     }
 
     private void message(CommandSender sender, String text) {
-        ComponentMessenger.send(sender, ComponentText.markup(styled(text, options.theme().description())));
+        ComponentMessenger.send(sender, ComponentText.literal(text).colorIfAbsent(options.theme().description()));
     }
 
     private void message(CommandSender sender, TextKey key, MessageArgument... arguments) {

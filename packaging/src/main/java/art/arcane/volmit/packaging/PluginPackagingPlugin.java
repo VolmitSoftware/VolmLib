@@ -52,13 +52,15 @@ public class PluginPackagingPlugin implements Plugin<Project> {
         TaskProvider<VerifyNativeBoundary> nativeBoundary = project.getTasks().register(
                 "verifyNativeBoundary", VerifyNativeBoundary.class, task -> {
                     task.setGroup("verification");
-                    task.setDescription("Verifies that native server access stays in VolmLib implementations.");
+                    task.setDescription("Verifies that native server access stays in declared implementation packages.");
+                    task.getNativeImplementationPackages().set(extension.getNativeImplementationPackages());
                     task.getReport().set(project.getLayout().getBuildDirectory().file("reports/native-boundary.txt"));
                 });
         TaskProvider<VerifyNativeClassBoundary> nativeClasses = project.getTasks().register(
                 "verifyNativeClassBoundary", VerifyNativeClassBoundary.class, task -> {
                     task.setGroup("verification");
                     task.setDescription("Verifies compiled native descriptors and inferred native bindings.");
+                    task.getNativeImplementationPackages().set(extension.getNativeImplementationPackages());
                     task.getReport().set(project.getLayout().getBuildDirectory().file("reports/native-class-boundary.txt"));
                     task.dependsOn(nativeBoundary);
                 });

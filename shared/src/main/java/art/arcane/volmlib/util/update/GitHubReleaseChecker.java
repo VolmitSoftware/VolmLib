@@ -6,11 +6,16 @@ import com.google.gson.JsonParser;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.ByteArrayOutputStream;
 import java.math.BigInteger;
 import java.net.HttpURLConnection;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.DateTimeException;
+import java.time.Instant;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -21,6 +26,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.regex.Matcher;
@@ -44,6 +50,9 @@ public final class GitHubReleaseChecker implements AutoCloseable {
     private boolean closed;
     private boolean checked;
     private boolean reportedFailure;
+    private Report report = new Report(Status.DISABLED, null, "", 0L, 0L);
+    private long nextRequestNanos;
+    private int failures;
 
     public GitHubReleaseChecker(Options options) {
         this(options, new Access(endpoint(options), Duration.ofHours(1)));
@@ -84,6 +93,21 @@ public final class GitHubReleaseChecker implements AutoCloseable {
         return startCheck().copy();
     }
 
+    public synchronized Report snapshot() {
+        return report;
+    }
+
+    public synchronized CompletableFuture<Report> checkReport(boolean fresh) {
+        if (fresh && enabled && !closed && pending == null && System.nanoTime() >= nextRequestNanos) {
+            if (refresh != null) {
+                refresh.cancel(false);
+                refresh = null;
+            }
+            checked = false;
+        }
+        return check().thenApply(ignored -> snapshot());
+    }
+
     @Override
     public void close() {
         CompletableFuture<Optional<Release>> cancelled;
@@ -115,7 +139,16 @@ public final class GitHubReleaseChecker implements AutoCloseable {
                 return comparison > 0;
             }
         }
-        return false;
+        return prerelease(installed) && !prerelease(available);
+    }
+
+    private static boolean prerelease(String version) {
+        return version.trim().matches("(?i)[vV]?\\d+(?:\\.\\d+)*-(?:alpha|beta|rc|snapshot|dev)(?:[.\\-]?[0-9A-Za-z.\\-]*)?(?:\\+.*)?");
+    }
+
+    private static boolean comparable(String version) {
+        return !versionParts(version).isEmpty() && (version.trim().matches(
+                "[vV]?\\d+(?:\\.\\d+)*(?:-\\d+(?:\\.\\d+)*(?:\\.[xX])?(?:-\\d+(?:\\.\\d+)*(?:\\.[xX])?)?)?(?:\\+.*)?") || prerelease(version));
     }
 
     private static URI endpoint(Options options) {
@@ -173,6 +206,9 @@ public final class GitHubReleaseChecker implements AutoCloseable {
         cached = Optional.empty();
         checked = false;
         reportedFailure = false;
+        report = new Report(Status.DISABLED, null, "", 0L, 0L);
+        nextRequestNanos = 0L;
+        failures = 0;
         return cancelled;
     }
 
@@ -180,7 +216,7 @@ public final class GitHubReleaseChecker implements AutoCloseable {
         Optional<Release> latest = Optional.empty();
         Exception failure = null;
         try {
-            latest = fetchLatest().filter(release -> isNewer(release.tagName(), options.installedVersion()));
+            latest = fetchLatest();
         } catch (IOException | RuntimeException exception) {
             failure = exception;
         }
@@ -189,7 +225,30 @@ public final class GitHubReleaseChecker implements AutoCloseable {
                 result.complete(Optional.empty());
                 return;
             }
-            cached = latest;
+            long now = System.currentTimeMillis();
+            long delay;
+            if (failure == null) {
+                failures = 0;
+                Release release = latest.orElse(null);
+                Status status = release == null ? Status.NO_RELEASE
+                        : !comparable(release.tagName()) || !comparable(options.installedVersion()) ? Status.UNKNOWN
+                        : isNewer(release.tagName(), options.installedVersion()) ? Status.UPDATE : Status.CURRENT;
+                report = new Report(status, release, "", now, now);
+                cached = status == Status.UPDATE ? latest : Optional.empty();
+                delay = access.refreshInterval().toMillis();
+            } else {
+                failures = Math.min(7, failures + 1);
+                delay = Math.min(access.refreshInterval().toMillis(), 60_000L << (failures - 1));
+                if (failure instanceof RateLimited limited) {
+                    delay = Math.max(delay, limited.delayMillis);
+                }
+                report = new Report(Status.FAILED, report.release(), failure.getMessage(), now, report.lastSuccessMillis());
+            }
+            if (delay >= 60_000L) {
+                delay += ThreadLocalRandom.current().nextLong(Math.max(1L, delay / 10L));
+            }
+            nextRequestNanos = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(
+                    failure == null ? Math.min(60_000L, delay) : delay);
             checked = true;
             pending = null;
             request = null;
@@ -198,10 +257,10 @@ public final class GitHubReleaseChecker implements AutoCloseable {
             } else if (!reportedFailure) {
                 reportedFailure = true;
                 options.logger().log(Level.WARNING, "Could not check GitHub releases for " + options.owner() + "/"
-                        + options.repository() + "; retrying in " + access.refreshInterval().toMinutes() + " minutes.", failure);
+                        + options.repository() + "; retrying in " + Math.max(1L, delay / 1000L) + " seconds.", failure);
             }
-            refresh = executor.schedule(this::refresh, access.refreshInterval().toMillis(), TimeUnit.MILLISECONDS);
-            result.complete(latest);
+            refresh = executor.schedule(this::refresh, delay, TimeUnit.MILLISECONDS);
+            result.complete(cached);
         }
     }
 
@@ -214,6 +273,7 @@ public final class GitHubReleaseChecker implements AutoCloseable {
     }
 
     private Optional<Release> fetchLatest() throws IOException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
         HttpURLConnection connection = (HttpURLConnection) access.endpoint().toURL().openConnection();
         connection.setConnectTimeout(TIMEOUT_MILLIS);
         connection.setReadTimeout(TIMEOUT_MILLIS);
@@ -227,21 +287,78 @@ public final class GitHubReleaseChecker implements AutoCloseable {
                 return Optional.empty();
             }
             if (status != HttpURLConnection.HTTP_OK) {
+                if (status == 403 || status == 429) {
+                    throw new RateLimited(status, retryDelay(connection));
+                }
                 throw new IOException("GitHub release request returned HTTP " + status);
             }
             if (connection.getContentLengthLong() > MAXIMUM_RESPONSE_BYTES) {
                 throw new IOException("GitHub release response exceeds " + MAXIMUM_RESPONSE_BYTES + " bytes");
             }
             try (InputStream input = connection.getInputStream()) {
-                byte[] bytes = input.readNBytes(MAXIMUM_RESPONSE_BYTES + 1);
-                if (bytes.length > MAXIMUM_RESPONSE_BYTES) {
-                    throw new IOException("GitHub release response exceeds " + MAXIMUM_RESPONSE_BYTES + " bytes");
+                ByteArrayOutputStream body = new ByteArrayOutputStream();
+                byte[] buffer = new byte[8192];
+                while (true) {
+                    long remaining = TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime());
+                    if (remaining <= 0L || Thread.currentThread().isInterrupted()) {
+                        throw new IOException("GitHub release request exceeded its deadline or was cancelled");
+                    }
+                    connection.setReadTimeout((int) Math.min(TIMEOUT_MILLIS, Math.max(1L, remaining)));
+                    int count = input.read(buffer);
+                    if (count < 0) {
+                        break;
+                    }
+                    if (body.size() + count > MAXIMUM_RESPONSE_BYTES) {
+                        throw new IOException("GitHub release response exceeds " + MAXIMUM_RESPONSE_BYTES + " bytes");
+                    }
+                    body.write(buffer, 0, count);
                 }
-                return parseRelease(new String(bytes, StandardCharsets.UTF_8));
+                return parseRelease(body.toString(StandardCharsets.UTF_8));
             }
         } finally {
             connection.disconnect();
         }
+    }
+
+    private static long retryDelay(HttpURLConnection connection) {
+        long seconds = 60L;
+        String retry = connection.getHeaderField("Retry-After");
+        if (retry != null) {
+            try {
+                seconds = Math.max(seconds, Long.parseLong(retry));
+            } catch (NumberFormatException ignored) {
+                try {
+                    seconds = Math.max(seconds, Duration.between(Instant.now(),
+                            ZonedDateTime.parse(retry, DateTimeFormatter.RFC_1123_DATE_TIME).toInstant()).getSeconds() + 1L);
+                } catch (DateTimeException invalid) {
+                    seconds = 60L;
+                }
+            }
+        }
+        if ("0".equals(connection.getHeaderField("X-RateLimit-Remaining"))) {
+            try {
+                seconds = Math.max(seconds, Long.parseLong(connection.getHeaderField("X-RateLimit-Reset")) - Instant.now().getEpochSecond() + 1L);
+            } catch (NumberFormatException ignored) {
+                seconds = Math.max(seconds, 60L);
+            }
+        }
+        return Math.min(seconds, TimeUnit.DAYS.toSeconds(7)) * 1000L;
+    }
+
+    private static final class RateLimited extends IOException {
+        private final long delayMillis;
+
+        private RateLimited(int status, long delayMillis) {
+            super("GitHub rate limit or access restriction (HTTP " + status + ")");
+            this.delayMillis = delayMillis;
+        }
+    }
+
+    public enum Status {
+        DISABLED, NO_RELEASE, CURRENT, UPDATE, UNKNOWN, FAILED
+    }
+
+    public record Report(Status status, Release release, String error, long checkedMillis, long lastSuccessMillis) {
     }
 
     private Optional<Release> parseRelease(String body) throws IOException {

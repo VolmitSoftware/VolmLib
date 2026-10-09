@@ -69,7 +69,8 @@ public final class BukkitDebugDump implements AutoCloseable {
         this.options = Objects.requireNonNull(options, "options");
         String permissionRoot = plugin.getName().toLowerCase(Locale.ROOT);
         String debugPermission = permissionRoot + ".debug";
-        permission = plugin.getServer().getPluginManager().getPermission(debugPermission) == null
+        permission = options.permission() != null ? options.permission()
+                : plugin.getServer().getPluginManager().getPermission(debugPermission) == null
                 ? permissionRoot + ".debugdump" : debugPermission;
         uploader = new MclogsClient();
         provider = new ConcurrentHashMap<>();
@@ -132,7 +133,8 @@ public final class BukkitDebugDump implements AutoCloseable {
                         presentation.parentCommand(),
                         Objects.requireNonNull(theme, "theme"),
                         presentation.textResolver()
-                )
+                ),
+                options.permission()
         );
     }
 
@@ -547,14 +549,22 @@ public final class BukkitDebugDump implements AutoCloseable {
         }
     }
 
-    public record Options(BooleanSupplier uploadEnabled, DebugDumpContributor contributor, Presentation presentation) {
+    public record Options(BooleanSupplier uploadEnabled, DebugDumpContributor contributor, Presentation presentation,
+                          String permission) {
         public Options(BooleanSupplier uploadEnabled, DebugDumpContributor contributor) {
-            this(uploadEnabled, contributor, null);
+            this(uploadEnabled, contributor, null, null);
+        }
+
+        public Options(BooleanSupplier uploadEnabled, DebugDumpContributor contributor, Presentation presentation) {
+            this(uploadEnabled, contributor, presentation, null);
         }
 
         public Options {
             Objects.requireNonNull(uploadEnabled, "uploadEnabled");
             Objects.requireNonNull(contributor, "contributor");
+            if (permission != null && (permission.isBlank() || permission.chars().anyMatch(Character::isWhitespace))) {
+                throw new IllegalArgumentException("A nonblank permission node without whitespace is required");
+            }
         }
     }
 

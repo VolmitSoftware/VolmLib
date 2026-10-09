@@ -37,6 +37,63 @@ public class PluginLanguageServiceTest {
     public TemporaryFolder temporaryFolder = new TemporaryFolder();
 
     @Test
+    public void defaultWriterCanPublishCacheChangesFromAnotherThread() throws Exception {
+        Path file = temporaryFolder.getRoot().toPath().resolve("cross-thread-publication.properties");
+        AtomicReference<String> locale = new AtomicReference<>("en_US");
+        AtomicReference<LocalizationSnapshot> active = new AtomicReference<>(ENGLISH);
+        CountDownLatch writerEntered = new CountDownLatch(1);
+        CountDownLatch ownerPublished = new CountDownLatch(1);
+        LocalizationSnapshot installed = snapshot("fr_FR", "installed on owner");
+        PluginLanguageService.Options options = new PluginLanguageService.Options(file,
+                () -> List.of("en_US", "fr_FR"), locale::get, active::get, PluginLanguageServiceTest::snapshot,
+                (selected, prepared) -> {
+                    writerEntered.countDown();
+                    assertTrue(ownerPublished.await(2, TimeUnit.SECONDS));
+                }, Logger.getLogger("language-cross-thread-test"));
+        try (PluginLanguageService service = new PluginLanguageService(options)) {
+            UUID player = UUID.randomUUID();
+            service.selectPlayer(player, "fr_FR").get(2, TimeUnit.SECONDS);
+            CompletableFuture<Void> selection = service.selectDefault("fr_FR");
+            assertTrue(writerEntered.await(2, TimeUnit.SECONDS));
+            CompletableFuture<Void> owner = CompletableFuture.runAsync(() -> {
+                locale.set("fr_FR");
+                active.set(installed);
+                service.invalidate();
+                service.cache("fr_FR", installed);
+                ownerPublished.countDown();
+            });
+            owner.get(2, TimeUnit.SECONDS);
+            selection.get(2, TimeUnit.SECONDS);
+            assertSame(installed, service.snapshot());
+            assertSame(installed, service.snapshot(player));
+        } finally {
+            ownerPublished.countDown();
+        }
+    }
+
+    @Test
+    public void coordinatedWriterCanPublishCacheChangesFromAnotherThread() throws Exception {
+        Path file = temporaryFolder.getRoot().toPath().resolve("coordinated-cross-thread.properties");
+        AtomicReference<String> locale = new AtomicReference<>("en_US");
+        AtomicReference<LocalizationSnapshot> active = new AtomicReference<>(ENGLISH);
+        try (PluginLanguageService service = service(file, locale, active, PluginLanguageServiceTest::snapshot)) {
+            service.commitUpdate(() -> {
+                CompletableFuture<Void> owner = CompletableFuture.runAsync(() -> {
+                    service.invalidate();
+                    service.cache("en_US", ENGLISH);
+                });
+                try {
+                    owner.get(2, TimeUnit.SECONDS);
+                } catch (Exception failure) {
+                    throw new IOException(failure);
+                }
+                return null;
+            });
+            assertSame(ENGLISH, service.snapshot());
+        }
+    }
+
+    @Test
     public void coordinatedReloadWaitsForSelectionBeforeTakingPublicationMonitor() throws Exception {
         Path file = temporaryFolder.getRoot().toPath().resolve("coordinated.properties");
         Object publication = new Object();

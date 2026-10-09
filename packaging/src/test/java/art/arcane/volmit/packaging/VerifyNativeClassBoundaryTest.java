@@ -14,6 +14,9 @@ import javax.tools.ToolProvider;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
+import java.util.List;
+import java.util.Set;
 import java.util.jar.JarEntry;
 import java.util.jar.JarOutputStream;
 import java.util.stream.Stream;
@@ -55,7 +58,7 @@ class VerifyNativeClassBoundaryTest {
         method.visitMaxs(1, 0);
         method.visitEnd();
         writer.visitEnd();
-        assertTrue(VerifyNativeClassBoundary.nativeReferences(new ClassReader(writer.toByteArray())).isEmpty());
+        assertTrue(VerifyNativeClassBoundary.nativeReferences(new ClassReader(writer.toByteArray()), NativeImplementationPackages.DEFAULTS).isEmpty());
     }
 
     @Test
@@ -65,7 +68,48 @@ class VerifyNativeClassBoundaryTest {
                 "art/arcane/volmlib/nativelib/v26_2_R1/Adapter", null,
                 "net/minecraft/server/level/ServerLevel", null);
         writer.visitEnd();
-        assertTrue(VerifyNativeClassBoundary.nativeReferences(new ClassReader(writer.toByteArray())).isEmpty());
+        assertTrue(VerifyNativeClassBoundary.nativeReferences(new ClassReader(writer.toByteArray()), NativeImplementationPackages.DEFAULTS).isEmpty());
+    }
+
+    @Test
+    void declaredNativePackagesAllowAdaptersButRejectSiblingAndLookalikeBytecode() {
+        List<String> implementations = List.of("com.example.nativeimpl");
+        assertTrue(VerifyNativeClassBoundary.nativeReferences(nativeClass("com/example/nativeimpl/Adapter"), implementations).isEmpty());
+        assertTrue(VerifyNativeClassBoundary.nativeReferences(nativeClass("com/example/nativeimpl/v1_21_4/Adapter"), implementations).isEmpty());
+        assertEquals(Set.of("net/minecraft/server/level/ServerLevel"),
+                VerifyNativeClassBoundary.nativeReferences(nativeClass("com/example/nativeimplementation/Adapter"), implementations));
+        assertEquals(Set.of("net/minecraft/server/level/ServerLevel"),
+                VerifyNativeClassBoundary.nativeReferences(nativeClass("com/example/gameplay/Leaked"), implementations));
+    }
+
+    @Test
+    void configuredPackageReachesBothVerificationTasksWithoutAllowingAnInferredLeak() throws IOException {
+        fixture("bindTyped");
+        Files.writeString(directory.resolve("build.gradle"),
+                "pluginPackaging { nativeImplementationPackages.add('com.example.nativeimpl') }\n", StandardOpenOption.APPEND);
+        source("src/main/java/com/example/nativeimpl/Adapter.java", """
+                package com.example.nativeimpl;
+                public final class Adapter implements net.minecraft.server.packs.repository.RepositorySource {}
+                """);
+        assertEquals(TaskOutcome.SUCCESS, runner().build().task(":verifyNativeClassBoundary").getOutcome());
+        source("src/main/java/plugin/Bootstrap.java", """
+                package plugin;
+                import art.arcane.volmlib.nativelib.Access;
+                public final class Bootstrap {
+                    public void start() { Access.bind(Access::source); }
+                }
+                """);
+        BuildResult leaked = runner().buildAndFail();
+        assertEquals(TaskOutcome.SUCCESS, leaked.task(":verifyNativeBoundary").getOutcome());
+        assertEquals(TaskOutcome.FAILED, leaked.task(":verifyNativeClassBoundary").getOutcome());
+        assertTrue(leaked.getOutput().contains("plugin.Bootstrap -> net.minecraft.server.packs.repository.RepositorySource"));
+    }
+
+    private ClassReader nativeClass(String name) {
+        ClassWriter writer = new ClassWriter(0);
+        writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, name, null, "net/minecraft/server/level/ServerLevel", null);
+        writer.visitEnd();
+        return new ClassReader(writer.toByteArray());
     }
 
     private void fixture(String binding) throws IOException {

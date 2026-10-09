@@ -3,6 +3,7 @@ package art.arcane.volmlib.util.localization;
 import art.arcane.volmlib.util.director.DirectorTextResolver;
 import art.arcane.volmlib.util.director.help.DirectorMiniMenu;
 import art.arcane.volmlib.util.scheduling.FoliaScheduler;
+import art.arcane.volmlib.util.update.BukkitUpdateService;
 import net.kyori.adventure.key.Key;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.ComponentIteratorType;
@@ -45,6 +46,7 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.mockConstruction;
@@ -255,6 +257,48 @@ public class BukkitLanguageSwitcherTest {
         assertEquals(List.of("languages"), switcher.completeVolmit(player, new String[]{"plugins", ""}));
         assertEquals(List.of("en_US", "fr_FR"), switcher.completeVolmit(player, new String[]{"plugins", "languages", ""}));
         assertEquals(List.of(), switcher.completeVolmit(player, new String[]{"plugins", "languages", "fr_FR", ""}));
+    }
+
+    @Test
+    public void pluralUpdatesRoutePassesTheDirectorPresentationToTheUpdateService() {
+        try (MockedStatic<BukkitUpdateService> updates = mockStatic(BukkitUpdateService.class)) {
+            assertTrue(switcher.commandVolmit(player, new String[]{"plugins", "updates"}));
+
+            updates.verify(() -> BukkitUpdateService.command(any(Plugin.class), eq(player),
+                    eq(DirectorMiniMenu.Theme.adaptRed()), eq(DirectorTextResolver.ENGLISH)));
+            assertTrue(richMessages().isEmpty());
+        }
+    }
+
+    @Test
+    public void updateMenuAndCompletionUseThePluralRoute() {
+        try (MockedStatic<BukkitUpdateService> updates = mockStatic(BukkitUpdateService.class)) {
+            updates.when(() -> BukkitUpdateService.available(server, player)).thenReturn(true);
+
+            switcher.commandVolmit(player, new String[]{"plugins"});
+
+            assertTrue(hasRunCommand("/volmit plugins updates"));
+            assertFalse(hasRunCommand("/volmit plugins update"));
+            assertEquals(List.of("updates"),
+                    switcher.completeVolmit(player, new String[]{"plugins", "up"}));
+            assertTrue(switcher.completeVolmit(player, new String[]{"plugins", "updates", ""}).isEmpty());
+        }
+    }
+
+    @Test
+    public void invalidSharedCommandsShowUsageWithoutAMenuMarker() {
+        switcher.commandVolmit(player, new String[]{"plugins", "unknown"});
+        switcher.commandVolmit(player, new String[]{"plugins", "updates", "extra"});
+
+        List<String> messages = richMessages().stream()
+                .map(message -> PlainTextComponentSerializer.plainText()
+                        .serialize(MiniMessage.miniMessage().deserialize(message)))
+                .toList();
+        assertEquals(2, messages.size());
+        for (String message : messages) {
+            assertEquals("Usage: /volmit plugins [languages|debug|updates]", message);
+            assertFalse(message.contains("⇀"));
+        }
     }
 
     @Test

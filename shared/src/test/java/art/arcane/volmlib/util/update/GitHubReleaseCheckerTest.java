@@ -76,6 +76,81 @@ public class GitHubReleaseCheckerTest {
     }
 
     @Test
+    public void stableReleaseSupersedesRecognizedPrereleasesButNotMinecraftSuffixes() {
+        assertTrue(GitHubReleaseChecker.isNewer("2.0.0", "2.0.0-rc.1"));
+        assertTrue(GitHubReleaseChecker.isNewer("2.0.0", "2.0.0-SNAPSHOT"));
+        assertFalse(GitHubReleaseChecker.isNewer("2.0.0", "2.0.0-1.20.1-26.2"));
+        assertFalse(GitHubReleaseChecker.isNewer("2.0.0", "2.0.0+build.9"));
+    }
+
+    @Test
+    public void wildcardMinecraftSuffixUsesThePluginVersionInReports() throws Exception {
+        for (String installed : List.of("2.0.0-26.x", "2.0.0-1.20.1-26.x")) {
+            for (String available : List.of("1.0.2", "2.0.0", "2.0.1")) {
+                try (Fixture fixture = new Fixture();
+                     GitHubReleaseChecker checker = fixture.checker(installed, Duration.ofHours(1))) {
+                    fixture.body.set(release(available, false, false));
+                    checker.setEnabled(true);
+                    GitHubReleaseChecker.Status expected = available.equals("2.0.1")
+                            ? GitHubReleaseChecker.Status.UPDATE : GitHubReleaseChecker.Status.CURRENT;
+                    assertEquals(installed + " -> " + available, expected,
+                            checker.checkReport(false).get(3, TimeUnit.SECONDS).status());
+                }
+            }
+        }
+        assertTrue(GitHubReleaseChecker.isNewer("2.0.0-26.x", "2.0.0-rc.1"));
+        assertFalse(GitHubReleaseChecker.isNewer("2.0.0", "2.0.0-26.x"));
+    }
+
+    @Test
+    public void failurePreservesLastSuccessfulUpdateAndReportsStaleness() throws Exception {
+        try (Fixture fixture = new Fixture(); GitHubReleaseChecker checker = fixture.checker(Duration.ofMillis(100))) {
+            checker.setEnabled(true);
+            GitHubReleaseChecker.Report success = checker.checkReport(false).get(3, TimeUnit.SECONDS);
+            assertEquals(GitHubReleaseChecker.Status.UPDATE, success.status());
+            fixture.status.set(503);
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
+            while (checker.snapshot().status() != GitHubReleaseChecker.Status.FAILED && System.nanoTime() < deadline) {
+                Thread.sleep(10L);
+            }
+            GitHubReleaseChecker.Report failed = checker.snapshot();
+            assertEquals(GitHubReleaseChecker.Status.FAILED, failed.status());
+            assertEquals(success.release(), failed.release());
+            assertEquals(success.lastSuccessMillis(), failed.lastSuccessMillis());
+            assertTrue(checker.check().get(3, TimeUnit.SECONDS).isPresent());
+            checker.setEnabled(false);
+            assertEquals(GitHubReleaseChecker.Status.DISABLED, checker.snapshot().status());
+            assertTrue(checker.check().get().isEmpty());
+        }
+    }
+
+    @Test
+    public void explicitChecksRespectSuccessAndRateLimitCooldowns() throws Exception {
+        for (int status : List.of(200, 429)) {
+            try (Fixture fixture = new Fixture(); GitHubReleaseChecker checker = fixture.checker()) {
+                fixture.status.set(status);
+                checker.setEnabled(true);
+                GitHubReleaseChecker.Report report = checker.checkReport(true).get(3, TimeUnit.SECONDS);
+                for (int index = 0; index < 10; index++) {
+                    assertEquals(report, checker.checkReport(true).get(3, TimeUnit.SECONDS));
+                }
+                assertEquals(1, fixture.requests.get());
+                assertEquals(status == 200 ? GitHubReleaseChecker.Status.UPDATE : GitHubReleaseChecker.Status.FAILED, report.status());
+            }
+        }
+    }
+
+    @Test
+    public void unrecognizedSuffixIsUnknownRatherThanCurrentOrAnUpdate() throws Exception {
+        try (Fixture fixture = new Fixture(); GitHubReleaseChecker checker = fixture.checker()) {
+            fixture.body.set(release("3.0-custom", false, false));
+            checker.setEnabled(true);
+            assertEquals(GitHubReleaseChecker.Status.UNKNOWN, checker.checkReport(false).get(3, TimeUnit.SECONDS).status());
+            assertTrue(checker.check().get().isEmpty());
+        }
+    }
+
+    @Test
     public void disablingCompletesPendingChecksAndDiscardsTheirResultsAfterReenable() throws Exception {
         try (Fixture fixture = new Fixture()) {
             fixture.block();
@@ -236,7 +311,11 @@ public class GitHubReleaseCheckerTest {
         }
 
         private GitHubReleaseChecker checker(Duration interval) {
-            GitHubReleaseChecker.Options options = new GitHubReleaseChecker.Options("VolmitSoftware", "ShapedPortals", "2.0.0-1.20.1-26.2", logger);
+            return checker("2.0.0-1.20.1-26.2", interval);
+        }
+
+        private GitHubReleaseChecker checker(String installed, Duration interval) {
+            GitHubReleaseChecker.Options options = new GitHubReleaseChecker.Options("VolmitSoftware", "ShapedPortals", installed, logger);
             URI endpoint = URI.create("http://localhost:" + server.getAddress().getPort() + "/repos/VolmitSoftware/ShapedPortals/releases/latest");
             return new GitHubReleaseChecker(options, new GitHubReleaseChecker.Access(endpoint, interval));
         }

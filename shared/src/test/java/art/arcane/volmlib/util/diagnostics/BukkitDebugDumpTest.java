@@ -184,6 +184,30 @@ public class BukkitDebugDumpTest {
     }
 
     @Test
+    public void explicitPermissionControlsRequestsAndSharedProvider() throws Exception {
+        String permission = "shapedportals.command.debug";
+        BukkitDebugDump dumps = BukkitDebugDump.create(plugin,
+                new BukkitDebugDump.Options(() -> true, () -> () -> "Portal count: 2", null, permission));
+        assertEquals(permission, dumps.permission());
+        Map<?, ?> provider = (Map<?, ?>) services.getRegistrations(Map.class).get(0).getProvider();
+        assertEquals(permission, provider.get("permission"));
+
+        dumps.request(player, false);
+        snapshots.verifyNoInteractions();
+        assertFalse(Files.exists(directory.resolve("debug")));
+
+        when(player.hasPermission(permission)).thenReturn(true);
+        dumps.request(player, false);
+        assertEquals(1, savedReports().size());
+        verify(clients.constructed().get(0), never()).publish(anyString(), anyString(), anyString());
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void explicitPermissionRejectsWhitespace() {
+        new BukkitDebugDump.Options(() -> true, () -> () -> "", null, "invalid permission");
+    }
+
+    @Test
     public void localOnlySavesContributorAndProvidesClipboardPath() throws Exception {
         BukkitDebugDump dumps = BukkitDebugDump.create(plugin,
                 new BukkitDebugDump.Options(() -> true, () -> () -> "Portal count: 2",

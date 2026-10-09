@@ -39,6 +39,7 @@ public final class PluginLanguageService implements AutoCloseable {
     private final Set<CompletableFuture<?>> pending = ConcurrentHashMap.newKeySet();
     private final AtomicLong generation = new AtomicLong();
     private final Object commitLock = new Object();
+    private final Object publicationLock = new Object();
     private volatile boolean closed;
 
     public PluginLanguageService(Options options) {
@@ -97,16 +98,22 @@ public final class PluginLanguageService implements AutoCloseable {
             while (true) {
                 long preparedGeneration = generation.get();
                 PreparedSelection prepared = prepare(locale, result);
-                synchronized (commitLock) {
-                    requireActive(result);
-                    if (preparedGeneration != generation.get()) {
-                        continue;
+                synchronized (publicationLock) {
+                    synchronized (commitLock) {
+                        requireActive(result);
+                        if (preparedGeneration != generation.get()) {
+                            continue;
+                        }
                     }
                     options.defaultSelection().apply(prepared.locale(), prepared.snapshot());
-                    snapshots.put(prepared.locale(), prepared.snapshot());
-                    failedLoads.remove(locale);
-                    reportFallback(locale, prepared);
-                    result.complete(null);
+                    synchronized (commitLock) {
+                        if (!closed && preparedGeneration == generation.get()) {
+                            snapshots.put(prepared.locale(), prepared.snapshot());
+                            failedLoads.remove(locale);
+                        }
+                        reportFallback(locale, prepared);
+                        result.complete(null);
+                    }
                     return;
                 }
             }
@@ -120,20 +127,22 @@ public final class PluginLanguageService implements AutoCloseable {
             while (true) {
                 long preparedGeneration = generation.get();
                 PreparedSelection prepared = prepare(locale, result);
-                synchronized (commitLock) {
-                    requireActive(result);
-                    if (preparedGeneration != generation.get()) {
-                        continue;
+                synchronized (publicationLock) {
+                    synchronized (commitLock) {
+                        requireActive(result);
+                        if (preparedGeneration != generation.get()) {
+                            continue;
+                        }
+                        Map<UUID, String> next = new HashMap<>(preferences);
+                        next.put(requiredPlayer, prepared.locale());
+                        writePreferences(next);
+                        snapshots.put(prepared.locale(), prepared.snapshot());
+                        failedLoads.remove(locale);
+                        preferences.put(requiredPlayer, prepared.locale());
+                        reportFallback(locale, prepared);
+                        result.complete(null);
+                        return;
                     }
-                    Map<UUID, String> next = new HashMap<>(preferences);
-                    next.put(requiredPlayer, prepared.locale());
-                    writePreferences(next);
-                    snapshots.put(prepared.locale(), prepared.snapshot());
-                    failedLoads.remove(locale);
-                    preferences.put(requiredPlayer, prepared.locale());
-                    reportFallback(locale, prepared);
-                    result.complete(null);
-                    return;
                 }
             }
         });
@@ -142,13 +151,15 @@ public final class PluginLanguageService implements AutoCloseable {
     public CompletableFuture<Void> clearPlayer(UUID playerId) {
         UUID requiredPlayer = Objects.requireNonNull(playerId, "playerId");
         return submit(result -> {
-            synchronized (commitLock) {
-                requireOpen();
-                Map<UUID, String> next = new HashMap<>(preferences);
-                next.remove(requiredPlayer);
-                writePreferences(next);
-                preferences.remove(requiredPlayer);
-                result.complete(null);
+            synchronized (publicationLock) {
+                synchronized (commitLock) {
+                    requireOpen();
+                    Map<UUID, String> next = new HashMap<>(preferences);
+                    next.remove(requiredPlayer);
+                    writePreferences(next);
+                    preferences.remove(requiredPlayer);
+                    result.complete(null);
+                }
             }
         });
     }
@@ -179,13 +190,15 @@ public final class PluginLanguageService implements AutoCloseable {
         closed = true;
         generation.incrementAndGet();
         worker.shutdownNow();
-        synchronized (commitLock) {
-            for (CompletableFuture<?> future : pending) {
-                future.completeExceptionally(new IllegalStateException("Language service is closed"));
+        synchronized (publicationLock) {
+            synchronized (commitLock) {
+                for (CompletableFuture<?> future : pending) {
+                    future.completeExceptionally(new IllegalStateException("Language service is closed"));
+                }
+                pending.clear();
+                snapshots.clear();
+                loading.clear();
             }
-            pending.clear();
-            snapshots.clear();
-            loading.clear();
         }
     }
 
@@ -199,19 +212,21 @@ public final class PluginLanguageService implements AutoCloseable {
         CompletableFuture<Void> future = submit(result -> {
             try {
                 PreparedSelection prepared = preparePersisted(locale, result);
-                synchronized (commitLock) {
-                    if (!closed && requestedGeneration == generation.get()) {
-                        if (!locale.equals(prepared.locale())) {
-                            Map<UUID, String> next = new HashMap<>(preferences);
-                            next.replaceAll((player, selected) -> selected.equals(locale) ? prepared.locale() : selected);
-                            writePreferences(next);
-                            snapshots.put(prepared.locale(), prepared.snapshot());
-                            preferences.replaceAll((player, selected) -> selected.equals(locale) ? prepared.locale() : selected);
-                        } else {
-                            snapshots.put(prepared.locale(), prepared.snapshot());
+                synchronized (publicationLock) {
+                    synchronized (commitLock) {
+                        if (!closed && requestedGeneration == generation.get()) {
+                            if (!locale.equals(prepared.locale())) {
+                                Map<UUID, String> next = new HashMap<>(preferences);
+                                next.replaceAll((player, selected) -> selected.equals(locale) ? prepared.locale() : selected);
+                                writePreferences(next);
+                                snapshots.put(prepared.locale(), prepared.snapshot());
+                                preferences.replaceAll((player, selected) -> selected.equals(locale) ? prepared.locale() : selected);
+                            } else {
+                                snapshots.put(prepared.locale(), prepared.snapshot());
+                            }
+                            failedLoads.remove(locale);
+                            reportFallback(locale, prepared);
                         }
-                        failedLoads.remove(locale);
-                        reportFallback(locale, prepared);
                     }
                 }
             } catch (Exception exception) {
@@ -379,7 +394,7 @@ public final class PluginLanguageService implements AutoCloseable {
 
     public <T> T commitUpdate(CommitUpdate<T> update) throws IOException {
         Objects.requireNonNull(update, "update");
-        synchronized (commitLock) {
+        synchronized (publicationLock) {
             requireOpen();
             return update.apply();
         }

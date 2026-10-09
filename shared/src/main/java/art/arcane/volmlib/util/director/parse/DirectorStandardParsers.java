@@ -1,5 +1,7 @@
 package art.arcane.volmlib.util.director.parse;
 
+import java.util.UUID;
+
 public final class DirectorStandardParsers {
     private DirectorStandardParsers() {
     }
@@ -10,6 +12,7 @@ public final class DirectorStandardParsers {
         }
 
         registry.register(String.class, input -> DirectorValue.high(input));
+        registry.register(UUID.class, DirectorStandardParsers::parseUuid);
         registry.register(Boolean.class, DirectorStandardParsers::parseBoolean);
         registry.register(boolean.class, DirectorStandardParsers::parseBoolean);
         registry.register(Byte.class, DirectorStandardParsers::parseByte);
@@ -26,6 +29,18 @@ public final class DirectorStandardParsers {
         registry.register(double.class, DirectorStandardParsers::parseDouble);
         registry.register(Character.class, DirectorStandardParsers::parseCharacter);
         registry.register(char.class, DirectorStandardParsers::parseCharacter);
+    }
+
+    private static DirectorValue<UUID> parseUuid(String input) {
+        if (input == null) { return DirectorValue.invalid(null); }
+        String value = input.trim();
+        if (value.length() != 36) { return DirectorValue.invalid(null); }
+        try {
+            UUID uuid = UUID.fromString(value);
+            return uuid.toString().equalsIgnoreCase(value) ? DirectorValue.high(uuid) : DirectorValue.invalid(null);
+        } catch (IllegalArgumentException failure) {
+            return DirectorValue.invalid(null);
+        }
     }
 
     private static DirectorValue<Boolean> parseBoolean(String input) {

@@ -1,6 +1,9 @@
 package art.arcane.volmlib.util.plugin;
 
 import net.md_5.bungee.api.chat.BaseComponent;
+import net.md_5.bungee.api.ChatMessageType;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.TextColor;
 import net.md_5.bungee.api.chat.ClickEvent;
 import net.md_5.bungee.chat.ComponentSerializer;
 import org.bukkit.command.CommandSender;
@@ -17,6 +20,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.withSettings;
@@ -24,6 +28,41 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 public class ComponentMessengerTest {
+    @Test
+    public void actionBarRetainsTranslationArgumentsAndRgb() {
+        Player player = mock(Player.class);
+        Player.Spigot spigot = mock(Player.Spigot.class);
+        when(player.spigot()).thenReturn(spigot);
+        Component message = Component.translatable("chat.type.text", Component.text("Player"), Component.text("Hello"))
+                .color(TextColor.color(0x72D6C5));
+
+        ComponentMessenger.sendActionBar(player, ComponentText.component(message));
+
+        ArgumentCaptor<BaseComponent[]> components = ArgumentCaptor.forClass(BaseComponent[].class);
+        verify(spigot).sendMessage(eq(ChatMessageType.ACTION_BAR), components.capture());
+        String json = ComponentSerializer.toString(components.getValue());
+        assertTrue(json.contains("\"translate\":\"chat.type.text\""));
+        assertTrue(json.contains("Player"));
+        assertTrue(json.contains("Hello"));
+        assertTrue(json.toLowerCase(Locale.ROOT).contains("#72d6c5"));
+    }
+
+    @Test
+    public void actionBarWithoutOptionalJsonSerializerRetainsLegacyDelivery() throws ReflectiveOperationException {
+        Player player = mock(Player.class);
+        Player.Spigot spigot = mock(Player.Spigot.class);
+        when(player.spigot()).thenReturn(spigot);
+        MissingSerializerLoader loader = new MissingSerializerLoader();
+        Class<?> messenger = Class.forName(ComponentMessenger.class.getName(), true, loader);
+
+        messenger.getMethod("sendActionBarLegacy", Player.class, String.class).invoke(null, player, "&eWarning");
+
+        ArgumentCaptor<BaseComponent[]> components = ArgumentCaptor.forClass(BaseComponent[].class);
+        verify(spigot).sendMessage(eq(ChatMessageType.ACTION_BAR), components.capture());
+        assertTrue(loader.serializerRequested);
+        assertEquals("Warning", BaseComponent.toPlainText(components.getValue()));
+    }
+
     @Test
     public void paperDeliveryUsesServerRichMessageMarkup() {
         CommandSender sender = mock(CommandSender.class);
