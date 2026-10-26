@@ -23,7 +23,7 @@ public class DirectorHiddenCommandTest {
         DirectorSender sender = new TestSender();
         DirectorMiniMenu.DirectorHelpPage root = DirectorMiniMenu.resolveHelp(engine, List.of(), 1).orElseThrow();
 
-        assertEquals(1, root.totalPages());
+        assertEquals(1, DirectorMiniMenu.helpWindow(root, DirectorMiniMenu.Theme.reactBlue(), DirectorTextResolver.ENGLISH).pages());
         assertEquals("debug", root.entries().get(0).getDescriptor().getName());
         assertFalse(String.join("\n", DirectorMiniMenu.renderConsole(root, DirectorTextResolver.ENGLISH)).contains("version"));
         assertFalse(String.join("\n", DirectorMiniMenu.render(root, DirectorMiniMenu.Theme.reactBlue(), DirectorTextResolver.ENGLISH)).contains("version"));

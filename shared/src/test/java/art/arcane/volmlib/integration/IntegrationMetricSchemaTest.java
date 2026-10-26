@@ -151,6 +151,30 @@ public class IntegrationMetricSchemaTest {
     }
 
     @Test
+    public void exposesCofferRuntimeSchema() {
+        Set<String> keys = IntegrationMetricSchema.cofferKeys();
+
+        assertEquals(Set.of(
+                IntegrationMetricSchema.COFFER_ACTIVE_TRANSFERS,
+                IntegrationMetricSchema.COFFER_OPEN_SESSIONS,
+                IntegrationMetricSchema.COFFER_STORAGE_QUEUE
+        ), keys);
+        assertTrue(IntegrationMetricSchema.allKeys().containsAll(keys));
+        for (String key : keys) {
+            IntegrationMetricDescriptor descriptor = IntegrationMetricSchema.descriptor(key);
+            assertTrue(key.startsWith("coffer."));
+            assertEquals("coffer", descriptor.tags().get("plugin"));
+            assertEquals(IntegrationMetricType.INTEGER, descriptor.type());
+        }
+
+        assertEquals("transfers", IntegrationMetricSchema.descriptor(IntegrationMetricSchema.COFFER_ACTIVE_TRANSFERS).unit());
+        assertEquals("sessions", IntegrationMetricSchema.descriptor(IntegrationMetricSchema.COFFER_OPEN_SESSIONS).unit());
+        IntegrationMetricDescriptor queue = IntegrationMetricSchema.descriptor(IntegrationMetricSchema.COFFER_STORAGE_QUEUE);
+        assertEquals("operations", queue.unit());
+        assertEquals("storage", queue.tags().get("domain"));
+    }
+
+    @Test
     public void exposesEchelonStorageAndSyncSchema() {
         Set<String> keys = IntegrationMetricSchema.echelonKeys();
 

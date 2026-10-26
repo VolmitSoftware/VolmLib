@@ -91,7 +91,7 @@ public class DirectorHelpDeliveryTest {
 
         ArgumentCaptor<BaseComponent[]> components = ArgumentCaptor.forClass(BaseComponent[].class);
         verify(spigot, times(2)).sendMessage(components.capture());
-        assertEquals("\n".repeat(DirectorMiniMenu.MENU_LINE_COUNT), BaseComponent.toPlainText(components.getAllValues().get(0)));
+        assertEquals("\n".repeat(DirectorMiniMenu.CHAT_LINE_COUNT - 1), BaseComponent.toPlainText(components.getAllValues().get(0)));
         assertEquals("Your language", BaseComponent.toPlainText(components.getValue()));
         String json = ComponentSerializer.toString(components.getValue());
         assertTrue(json.contains("\"action\":\"run_command\""));

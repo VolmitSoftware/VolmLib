@@ -174,6 +174,10 @@ public final class IntegrationMetricSchema {
     public static final String SHAPEDPORTALS_REJECTED_ATTEMPTS_TOTAL = "shapedportals.rejected-attempts-total";
     public static final String SHAPEDPORTALS_CREATION_SUCCESS_PERCENT = "shapedportals.creation-success-percent";
 
+    public static final String COFFER_ACTIVE_TRANSFERS = "coffer.active-transfers";
+    public static final String COFFER_OPEN_SESSIONS = "coffer.open-sessions";
+    public static final String COFFER_STORAGE_QUEUE = "coffer.storage-queue";
+
     public static final String FOUNDATION_MODULES_ACTIVE = "foundation.modules-active";
     public static final String FOUNDATION_MODULES_AVAILABLE = "foundation.modules-available";
     public static final String FOUNDATION_PROFILES_LOADED = "foundation.profiles-loaded";
@@ -390,6 +394,14 @@ public final class IntegrationMetricSchema {
         );
     }
 
+    public static Set<String> cofferKeys() {
+        return Set.of(
+                COFFER_ACTIVE_TRANSFERS,
+                COFFER_OPEN_SESSIONS,
+                COFFER_STORAGE_QUEUE
+        );
+    }
+
     public static Set<String> byteCompanionsKeys() {
         return Set.of(
                 BYTECOMPANIONS_COMPANION_DEFINITIONS,
@@ -599,6 +611,10 @@ public final class IntegrationMetricSchema {
         putMetric(descriptors, SHAPEDPORTALS_CREATED_PORTALS_TOTAL, IntegrationMetricType.LONG, "portals", "shapedportals", "creation");
         putMetric(descriptors, SHAPEDPORTALS_REJECTED_ATTEMPTS_TOTAL, IntegrationMetricType.LONG, "attempts", "shapedportals", "creation");
         putMetric(descriptors, SHAPEDPORTALS_CREATION_SUCCESS_PERCENT, IntegrationMetricType.DOUBLE, "percent", "shapedportals", "creation");
+
+        putMetric(descriptors, COFFER_ACTIVE_TRANSFERS, IntegrationMetricType.INTEGER, "transfers", "coffer", "transfers");
+        putMetric(descriptors, COFFER_OPEN_SESSIONS, IntegrationMetricType.INTEGER, "sessions", "coffer", "sessions");
+        putMetric(descriptors, COFFER_STORAGE_QUEUE, IntegrationMetricType.INTEGER, "operations", "coffer", "storage");
 
         putMetric(descriptors, FOUNDATION_MODULES_ACTIVE, IntegrationMetricType.INTEGER, "modules", "foundation", "modules");
         putMetric(descriptors, FOUNDATION_MODULES_AVAILABLE, IntegrationMetricType.INTEGER, "modules", "foundation", "modules");

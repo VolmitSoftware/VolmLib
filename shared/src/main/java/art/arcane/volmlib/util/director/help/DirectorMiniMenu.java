@@ -11,11 +11,17 @@ import art.arcane.volmlib.util.localization.MessageArgument;
 import art.arcane.volmlib.util.localization.TextKey;
 import art.arcane.volmlib.util.plugin.ComponentMessenger;
 import art.arcane.volmlib.util.plugin.ComponentText;
+import net.kyori.adventure.text.flattener.ComponentFlattener;
+import net.kyori.adventure.text.flattener.FlattenerListener;
+import net.kyori.adventure.text.format.Style;
+import net.kyori.adventure.text.format.TextDecoration;
 import net.kyori.adventure.text.minimessage.MiniMessage;
 import org.bukkit.command.CommandSender;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.Deque;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
@@ -23,11 +29,12 @@ import java.util.Optional;
 import java.util.function.Predicate;
 
 public final class DirectorMiniMenu {
-    public static final int MENU_LINE_COUNT = 19;
-    public static final int MAX_ENTRIES_PER_PAGE = 19;
+    public static final int CHAT_LINE_COUNT = 20;
+    public static final int MAX_ENTRIES_PER_PAGE = CHAT_LINE_COUNT - 2;
 
+    private static final int CHAT_WIDTH = 320;
+    private static final int WIDE_GLYPH_WIDTH = 9;
     private static final int FOOTER_WIDTH = 75;
-    private static final int FOOTER_BUTTON_WIDTH = 10;
     private static final int FONT_SPACE_WIDTH = 4;
     private static final int HEADER_ORNAMENT_WIDTH = 28;
     private static final MiniMessage MINI_MESSAGE = MiniMessage.miniMessage();
@@ -56,20 +63,7 @@ public final class DirectorMiniMenu {
             return;
         }
 
-        List<DirectorRuntimeNode> entries = sortedChildren(page.node()).stream().filter(permitted).toList();
-        if (isPlayer(sender)) {
-            int pages = Math.max(1, (entries.size() + MAX_ENTRIES_PER_PAGE - 1) / MAX_ENTRIES_PER_PAGE);
-            int index = Math.max(0, Math.min(page.pageIndex(), pages - 1));
-            int start = index * MAX_ENTRIES_PER_PAGE;
-            DirectorHelpPage filtered = new DirectorHelpPage(page.node(),
-                    entries.subList(start, Math.min(entries.size(), start + MAX_ENTRIES_PER_PAGE)), index, pages);
-            deliver(sender, render(filtered, theme, resolver));
-            return;
-        }
-
-        for (String line : renderConsole(page.node(), entries, resolver)) {
-            deliverPlainLine(sender, line);
-        }
+        deliver(sender, page.withEntries(page.entries().stream().filter(permitted).toList()), theme, resolver);
     }
 
     public static void deliverContent(Object sender, ContentMenu menu, Theme theme, DirectorTextResolver resolver) {
@@ -101,7 +95,7 @@ public final class DirectorMiniMenu {
         }
 
         if (renderable && isPlayer(sender)) {
-            deliverRaw(sender, "\n".repeat(MENU_LINE_COUNT));
+            deliverRaw(sender, "\n".repeat(CHAT_LINE_COUNT - 1));
         }
 
         for (String line : lines) {
@@ -301,16 +295,7 @@ public final class DirectorMiniMenu {
     }
 
     private static DirectorHelpPage buildPage(DirectorRuntimeNode target, int requestedPage, int pageSize) {
-        List<DirectorRuntimeNode> entries = sortedChildren(target);
-
-        int safePageSize = Math.max(1, pageSize);
-        int totalPages = Math.max(1, (int) Math.ceil(entries.size() / (double) safePageSize));
-        int page = Math.max(0, Math.min(requestedPage, totalPages - 1));
-        int from = page * safePageSize;
-        int to = Math.min(entries.size(), from + safePageSize);
-        List<DirectorRuntimeNode> slice = from >= to ? List.of() : entries.subList(from, to);
-
-        return new DirectorHelpPage(target, List.copyOf(slice), page, totalPages);
+        return new DirectorHelpPage(target, sortedChildren(target), requestedPage, pageSize);
     }
 
     private static List<DirectorRuntimeNode> sortedChildren(DirectorRuntimeNode node) {
@@ -330,22 +315,50 @@ public final class DirectorMiniMenu {
         }
 
         DirectorTextResolver activeResolver = resolver == null ? DirectorTextResolver.ENGLISH : resolver;
-        List<String> lines = new ArrayList<>();
+        boolean backLink = page.node().getParent() != null;
+        List<String> entryLines = renderNodeLines(page, theme, activeResolver);
+        ContentPage window = helpWindow(page, entryLines);
+        List<String> lines = new ArrayList<>(window.endIndex() - window.startIndex() + 3);
         lines.add(renderHeader(page, theme));
 
-        if (page.node().getParent() != null) {
+        if (backLink) {
             lines.add(renderBackLink(page, theme, activeResolver));
         }
 
-        if (page.entries().isEmpty()) {
+        if (entryLines.isEmpty()) {
             lines.add("<" + theme.muted() + ">" + escapeText(resolve(activeResolver, DirectorHelpMessages.NO_SUBCOMMANDS)) + "</" + theme.muted() + ">");
         } else {
-            for (DirectorRuntimeNode node : page.entries()) {
-                lines.add(renderNodeLine(node, theme, activeResolver));
-            }
+            lines.addAll(entryLines.subList(window.startIndex(), window.endIndex()));
         }
 
-        lines.add(renderFooter(page, theme, activeResolver));
+        lines.add(renderPaginationBar(
+                window.hasPrevious(),
+                window.hasNext(),
+                window.page() - 1,
+                window.page() + 1,
+                page.pageCommand(window.page() - 1),
+                page.pageCommand(window.page() + 1),
+                theme,
+                activeResolver
+        ));
+        return lines;
+    }
+
+    public static ContentPage helpWindow(DirectorHelpPage page, Theme theme, DirectorTextResolver resolver) {
+        Objects.requireNonNull(page, "page");
+        DirectorTextResolver activeResolver = resolver == null ? DirectorTextResolver.ENGLISH : resolver;
+        return helpWindow(page, renderNodeLines(page, Objects.requireNonNull(theme, "theme"), activeResolver));
+    }
+
+    private static ContentPage helpWindow(DirectorHelpPage page, List<String> entryLines) {
+        return paginate(entryLines, page.pageIndex() + 1, page.pageSize(), reservedLines(page.node().getParent() != null));
+    }
+
+    private static List<String> renderNodeLines(DirectorHelpPage page, Theme theme, DirectorTextResolver resolver) {
+        List<String> lines = new ArrayList<>(page.entries().size());
+        for (DirectorRuntimeNode node : page.entries()) {
+            lines.add(renderNodeLine(node, theme, resolver));
+        }
         return lines;
     }
 
@@ -377,7 +390,7 @@ public final class DirectorMiniMenu {
             return List.of();
         }
 
-        return renderConsole(page.node(), sortedChildren(page.node()), resolver);
+        return renderConsole(page.node(), page.entries(), resolver);
     }
 
     private static List<String> renderConsole(DirectorRuntimeNode node, List<DirectorRuntimeNode> entries, DirectorTextResolver resolver) {
@@ -654,19 +667,6 @@ public final class DirectorMiniMenu {
         return visible;
     }
 
-    private static String renderFooter(DirectorHelpPage page, Theme theme, DirectorTextResolver resolver) {
-        return renderPaginationBar(
-                page.hasPrevious(),
-                page.hasNext(),
-                page.page() - 1,
-                page.page() + 1,
-                page.previousCommand(),
-                page.nextCommand(),
-                theme,
-                resolver
-        );
-    }
-
     public static String paginationBar(
             ContentPage page,
             String command,
@@ -705,6 +705,49 @@ public final class DirectorMiniMenu {
         return new ContentPage(page, totalPages, startIndex, endIndex, itemCount);
     }
 
+    public static ContentPage paginate(List<String> entries, int requestedPage, int pageSize, int reservedLines) {
+        Objects.requireNonNull(entries, "entries");
+        if (pageSize < 1) {
+            throw new IllegalArgumentException("page size must be positive");
+        }
+
+        int rowBudget = Math.max(1, CHAT_LINE_COUNT - reservedLines);
+        List<Integer> starts = new ArrayList<>();
+        starts.add(0);
+        int rows = 0;
+        int count = 0;
+        for (int index = 0; index < entries.size(); index++) {
+            int entryRows = chatRows(entries.get(index));
+            if (count > 0 && (count == pageSize || rows + entryRows > rowBudget)) {
+                starts.add(index);
+                rows = 0;
+                count = 0;
+            }
+            rows += entryRows;
+            count++;
+        }
+
+        int totalPages = starts.size();
+        int page = Math.max(1, Math.min(requestedPage, totalPages));
+        int startIndex = starts.get(page - 1);
+        int endIndex = page < totalPages ? starts.get(page) : entries.size();
+        return new ContentPage(page, totalPages, startIndex, endIndex, entries.size());
+    }
+
+    public static int chatRows(String line) {
+        if (line == null || line.trim().isEmpty()) {
+            return 0;
+        }
+
+        ChatRowCounter counter = new ChatRowCounter();
+        ComponentFlattener.basic().flatten(MINI_MESSAGE.deserialize(line), counter);
+        return counter.rows();
+    }
+
+    private static int reservedLines(boolean backLink) {
+        return backLink ? 3 : 2;
+    }
+
     private static String renderPaginationBar(
             boolean hasPrevious,
             boolean hasNext,
@@ -716,22 +759,21 @@ public final class DirectorMiniMenu {
             DirectorTextResolver resolver
     ) {
         StringBuilder line = new StringBuilder();
-        int fill = FOOTER_WIDTH;
+        String pageLabel = resolve(resolver, DirectorHelpMessages.PAGE);
+        String previousLabel = "〈 " + pageLabel + " " + previousPage;
+        String nextLabel = pageLabel + " " + nextPage + " ❭";
+        int buttonWidth = (hasPrevious ? textWidth(previousLabel) + FONT_SPACE_WIDTH : 0)
+                + (hasNext ? textWidth(nextLabel) + FONT_SPACE_WIDTH : 0);
+        int fill = Math.max(1, (FOOTER_WIDTH * FONT_SPACE_WIDTH - buttonWidth) / FONT_SPACE_WIDTH);
 
         if (hasPrevious) {
-            fill -= FOOTER_BUTTON_WIDTH;
             line.append("<hover:show_text:'")
                     .append(escapeAttr(escapeText(resolve(resolver, DirectorHelpMessages.PREVIOUS_PAGE))))
                     .append("'><click:run_command:")
                     .append(previousCommand)
-                    .append("><").append(theme.primaryLeft()).append(">〈 ")
-                    .append(escapeText(resolve(resolver, DirectorHelpMessages.PAGE))).append(" ")
-                    .append(previousPage)
+                    .append("><").append(theme.primaryLeft()).append(">")
+                    .append(escapeText(previousLabel))
                     .append("</").append(theme.primaryLeft()).append("></click></hover> ");
-        }
-
-        if (hasNext) {
-            fill -= FOOTER_BUTTON_WIDTH;
         }
 
         line.append("<font:minecraft:uniform><strikethrough><gradient:")
@@ -745,9 +787,8 @@ public final class DirectorMiniMenu {
                     .append("'><click:run_command:")
                     .append(nextCommand)
                     .append("><").append(theme.primaryRight()).append(">")
-                    .append(escapeText(resolve(resolver, DirectorHelpMessages.PAGE))).append(" ")
-                    .append(nextPage)
-                    .append(" ❭</").append(theme.primaryRight()).append("></click></hover>");
+                    .append(escapeText(nextLabel))
+                    .append("</").append(theme.primaryRight()).append("></click></hover>");
         }
 
         return line.toString();
@@ -785,22 +826,28 @@ public final class DirectorMiniMenu {
 
     private static int textWidth(String value) {
         int width = 0;
-        for (int index = 0; index < value.length(); index++) {
-            width += characterWidth(value.charAt(index));
+        int index = 0;
+        while (index < value.length()) {
+            int codePoint = value.codePointAt(index);
+            index += Character.charCount(codePoint);
+            width += glyphWidth(codePoint);
         }
         return width;
     }
 
     private static int characterWidth(char character) {
         return switch (character) {
-            case ' ', '[', ']', 'I', 't' -> 4;
-            case '!', ',', '.', ':', ';', 'i', '|' -> 2;
-            case 'l' -> 2;
-            case '\'', '`' -> 3;
-            case '"', '(', ')', '*', '<', '>', 'f', 'k', '{', '}' -> 5;
+            case '!', '\'', ',', '.', ':', ';', 'i', '|' -> 2;
+            case '`', 'l' -> 3;
+            case ' ', '"', '(', ')', '*', 'I', '[', ']', 't', '{', '}' -> 4;
+            case '<', '>', 'f', 'k' -> 5;
             case '@', '~' -> 7;
             default -> 6;
         };
+    }
+
+    private static int glyphWidth(int codePoint) {
+        return codePoint < 128 ? characterWidth((char) codePoint) : WIDE_GLYPH_WIDTH;
     }
 
     private static List<String> stripHelpTokens(List<String> args) {
@@ -975,29 +1022,26 @@ public final class DirectorMiniMenu {
         }
     }
 
-    public record DirectorHelpPage(DirectorRuntimeNode node, List<DirectorRuntimeNode> entries, int pageIndex, int totalPages) {
+    public record DirectorHelpPage(DirectorRuntimeNode node, List<DirectorRuntimeNode> entries, int pageIndex, int pageSize) {
+        public DirectorHelpPage {
+            Objects.requireNonNull(node, "node");
+            entries = List.copyOf(Objects.requireNonNull(entries, "entries"));
+            pageIndex = Math.max(0, pageIndex);
+            if (pageSize < 1) {
+                throw new IllegalArgumentException("help page size must be positive");
+            }
+        }
+
+        public DirectorHelpPage withEntries(List<DirectorRuntimeNode> visibleEntries) {
+            return new DirectorHelpPage(node, visibleEntries, pageIndex, pageSize);
+        }
+
         public String title() {
             return node.path();
         }
 
-        public int page() {
-            return pageIndex + 1;
-        }
-
-        public boolean hasPrevious() {
-            return pageIndex > 0;
-        }
-
-        public boolean hasNext() {
-            return pageIndex + 1 < totalPages;
-        }
-
-        public String previousCommand() {
-            return node.path() + " help=" + pageIndex;
-        }
-
-        public String nextCommand() {
-            return node.path() + " help=" + (pageIndex + 2);
+        public String pageCommand(int page) {
+            return node.path() + " help=" + page;
         }
 
         public String parentCommand() {
@@ -1039,7 +1083,7 @@ public final class DirectorMiniMenu {
         }
 
         public ContentPage page() {
-            return paginate(entries.size(), requestedPage, pageSize);
+            return paginate(entries, requestedPage, pageSize, reservedLines(!parentCommand.isBlank()));
         }
     }
 
@@ -1066,6 +1110,72 @@ public final class DirectorMiniMenu {
 
         public String nextCommand(String command) {
             return command + " page=" + (page + 1);
+        }
+    }
+
+    private static final class ChatRowCounter implements FlattenerListener {
+        private final Deque<Boolean> bold = new ArrayDeque<>();
+        private int rows = 1;
+        private int rowWidth;
+        private int wordWidth;
+        private boolean breakable;
+
+        @Override
+        public void pushStyle(Style style) {
+            TextDecoration.State state = style.decoration(TextDecoration.BOLD);
+            boolean inherited = !bold.isEmpty() && bold.peek();
+            bold.push(state == TextDecoration.State.NOT_SET ? inherited : state == TextDecoration.State.TRUE);
+        }
+
+        @Override
+        public void component(String text) {
+            boolean boldText = !bold.isEmpty() && bold.peek();
+            int index = 0;
+            while (index < text.length()) {
+                int codePoint = text.codePointAt(index);
+                index += Character.charCount(codePoint);
+                append(codePoint, boldText);
+            }
+        }
+
+        @Override
+        public void popStyle(Style style) {
+            bold.pop();
+        }
+
+        int rows() {
+            return rows;
+        }
+
+        private void append(int codePoint, boolean boldText) {
+            if (codePoint == '\n') {
+                startRow(0);
+                return;
+            }
+
+            int width = glyphWidth(codePoint) + (boldText ? 1 : 0);
+            if (rowWidth > 0 && rowWidth + width > CHAT_WIDTH) {
+                if (codePoint == ' ') {
+                    startRow(0);
+                    return;
+                }
+                startRow(breakable ? wordWidth : 0);
+            }
+
+            rowWidth += width;
+            if (codePoint == ' ') {
+                breakable = true;
+                wordWidth = 0;
+            } else {
+                wordWidth += width;
+            }
+        }
+
+        private void startRow(int carriedWidth) {
+            rows++;
+            rowWidth = carriedWidth;
+            wordWidth = carriedWidth;
+            breakable = false;
         }
     }
 }

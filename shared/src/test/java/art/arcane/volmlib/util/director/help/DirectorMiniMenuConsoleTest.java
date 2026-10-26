@@ -69,8 +69,8 @@ public class DirectorMiniMenuConsoleTest {
     public void listsEveryChildIgnoringPagination() {
         DirectorMiniMenu.DirectorHelpPage page = DirectorMiniMenu.resolveHelp(engine, List.of(), 2).orElseThrow();
 
-        assertEquals(2, page.entries().size());
-        assertEquals(2, page.totalPages());
+        assertEquals(4, page.entries().size());
+        assertEquals(2, DirectorMiniMenu.helpWindow(page, DirectorMiniMenu.Theme.reactBlue(), DirectorTextResolver.ENGLISH).pages());
         assertEquals(
                 List.of(
                         "--- /test ---",
@@ -201,7 +201,7 @@ public class DirectorMiniMenuConsoleTest {
         DirectorMiniMenu.deliver(sender, page, DirectorMiniMenu.Theme.reactBlue(), DirectorTextResolver.ENGLISH);
 
         List<String> expected = new ArrayList<>();
-        expected.add("\n".repeat(DirectorMiniMenu.MENU_LINE_COUNT));
+        expected.add("\n".repeat(DirectorMiniMenu.CHAT_LINE_COUNT - 1));
         expected.addAll(DirectorMiniMenu.render(page, DirectorMiniMenu.Theme.reactBlue(), DirectorTextResolver.ENGLISH));
 
         assertEquals(expected, sender.rich);

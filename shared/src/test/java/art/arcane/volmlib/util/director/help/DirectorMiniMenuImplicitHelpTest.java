@@ -1,5 +1,6 @@
 package art.arcane.volmlib.util.director.help;
 
+import art.arcane.volmlib.util.director.DirectorTextResolver;
 import art.arcane.volmlib.util.director.annotations.Director;
 import art.arcane.volmlib.util.director.annotations.Param;
 import art.arcane.volmlib.util.director.compat.DirectorEngineFactory;
@@ -98,7 +99,7 @@ public class DirectorMiniMenuImplicitHelpTest {
         DirectorMiniMenu.DirectorHelpPage page = DirectorMiniMenu.resolveHelp(engine, List.of("help=2"), 1).orElseThrow();
 
         assertEquals(1, page.pageIndex());
-        assertEquals(3, page.totalPages());
+        assertEquals(3, DirectorMiniMenu.helpWindow(page, DirectorMiniMenu.Theme.reactBlue(), DirectorTextResolver.ENGLISH).pages());
     }
 
     @Test

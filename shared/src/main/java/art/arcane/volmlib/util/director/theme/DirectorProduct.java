@@ -10,6 +10,7 @@ public enum DirectorProduct {
     WORMHOLES,
     GLOSS,
     SHAPEDPORTALS,
+    COFFER,
     BYTECOMPANIONS,
     VIGIL,
     ENFOLD,

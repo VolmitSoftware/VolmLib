@@ -92,8 +92,8 @@ public class DirectorMiniMenuVisualTest {
         assertTrue(footer.contains("<click:run_command:/test help=1>"));
         assertTrue(footer.contains("Page 3 ❭"));
         assertTrue(footer.contains("<click:run_command:/test help=3>"));
-        assertTrue(footer.contains(" ".repeat(55)));
-        assertFalse(footer.contains(" ".repeat(56)));
+        assertTrue(footer.contains(" ".repeat(49)));
+        assertFalse(footer.contains(" ".repeat(50)));
     }
 
     @Test
@@ -103,7 +103,8 @@ public class DirectorMiniMenuVisualTest {
 
         assertFalse(footer.contains("〈 Page"));
         assertTrue(footer.contains("Page 2 ❭"));
-        assertTrue(footer.contains(" ".repeat(65)));
+        assertTrue(footer.contains(" ".repeat(62)));
+        assertFalse(footer.contains(" ".repeat(63)));
     }
 
     @Test
@@ -166,8 +167,8 @@ public class DirectorMiniMenuVisualTest {
                 DirectorMiniMenu.Theme.reactBlue()
         );
 
-        assertTrue(header.contains(">[" + " ".repeat(10) + "(((</gradient>"));
-        assertTrue(header.contains(">)))" + " ".repeat(10) + "]</gradient>"));
+        assertTrue(header.contains(">[" + " ".repeat(9) + "(((</gradient>"));
+        assertTrue(header.contains(">)))" + " ".repeat(9) + "]</gradient>"));
     }
 
     @Test
@@ -205,14 +206,15 @@ public class DirectorMiniMenuVisualTest {
         assertEquals(DirectorMiniMenu.MAX_ENTRIES_PER_PAGE + 2, first.size());
         assertTrue(first.get(0).contains("/shapedportals portals"));
         assertFalse(first.get(0).contains("1/2"));
-        assertEquals("Portal 19", first.get(DirectorMiniMenu.MAX_ENTRIES_PER_PAGE));
+        assertEquals("Portal 18", first.get(DirectorMiniMenu.MAX_ENTRIES_PER_PAGE));
         assertTrue(first.get(first.size() - 1)
                 .contains("<click:run_command:/shapedportals portals page=2>"));
-        assertEquals(3, second.size());
+        assertEquals(4, second.size());
         assertTrue(second.get(0).contains("/shapedportals portals"));
         assertFalse(second.get(0).contains("2/2"));
-        assertEquals("Portal 20", second.get(1));
-        assertTrue(second.get(2).contains("<click:run_command:/shapedportals portals page=1>"));
+        assertEquals("Portal 19", second.get(1));
+        assertEquals("Portal 20", second.get(2));
+        assertTrue(second.get(3).contains("<click:run_command:/shapedportals portals page=1>"));
         assertEquals(2, clampedMenu.page().page());
         assertEquals(21, DirectorMiniMenu.renderContentConsole(firstMenu).size());
         assertEquals("Portal 20", DirectorMiniMenu.renderContentConsole(firstMenu).get(20));

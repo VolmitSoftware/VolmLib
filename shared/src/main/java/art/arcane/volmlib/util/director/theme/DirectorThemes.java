@@ -82,6 +82,15 @@ public final class DirectorThemes {
             "minecraft:block.respawn_anchor.deplete"
     );
 
+    public static final DirectorTheme COFFER = new DirectorTheme(
+            DirectorProduct.COFFER,
+            "#D99B5E",
+            "#8A603C",
+            "#F0D69B",
+            "minecraft:block.barrel.close",
+            "minecraft:block.chest.locked"
+    );
+
     public static final DirectorTheme BYTECOMPANIONS = new DirectorTheme(
             DirectorProduct.BYTECOMPANIONS,
             "#ffcc00",
@@ -173,6 +182,7 @@ public final class DirectorThemes {
             case WORMHOLES -> WORMHOLES;
             case GLOSS -> GLOSS;
             case SHAPEDPORTALS -> SHAPEDPORTALS;
+            case COFFER -> COFFER;
             case BYTECOMPANIONS -> BYTECOMPANIONS;
             case VIGIL -> VIGIL;
             case ENFOLD -> ENFOLD;

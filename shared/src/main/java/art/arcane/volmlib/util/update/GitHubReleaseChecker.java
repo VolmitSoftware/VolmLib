@@ -1,18 +1,11 @@
 package art.arcane.volmlib.util.update;
 
-import com.google.gson.JsonElement;
-import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
-
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.ByteArrayOutputStream;
 import java.math.BigInteger;
 import java.net.HttpURLConnection;
 import java.net.URI;
-import java.nio.charset.StandardCharsets;
-import java.time.Duration;
 import java.time.DateTimeException;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
@@ -21,30 +14,27 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.ThreadLocalRandom;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public final class GitHubReleaseChecker implements AutoCloseable {
-    private static final int MAXIMUM_RESPONSE_BYTES = 1024 * 1024;
     private static final int TIMEOUT_MILLIS = 10000;
+    private static final Duration MANUAL_CHECK_COOLDOWN = Duration.ofMinutes(5);
     private static final Pattern REPOSITORY_PART = Pattern.compile("[A-Za-z0-9_.-]+");
     private static final Pattern VERSION = Pattern.compile("[vV]?(\\d+(?:\\.\\d+)*)(?:[-+].*)?");
 
     private final Options options;
     private final Access access;
-    private final ScheduledExecutorService executor;
+    private final ExecutorService executor;
     private Optional<Release> cached = Optional.empty();
     private CompletableFuture<Optional<Release>> pending;
     private Future<?> request;
-    private ScheduledFuture<?> refresh;
     private long generation;
     private boolean enabled;
     private boolean closed;
@@ -52,16 +42,15 @@ public final class GitHubReleaseChecker implements AutoCloseable {
     private boolean reportedFailure;
     private Report report = new Report(Status.DISABLED, null, "", 0L, 0L);
     private long nextRequestNanos;
-    private int failures;
 
     public GitHubReleaseChecker(Options options) {
-        this(options, new Access(endpoint(options), Duration.ofHours(1)));
+        this(options, new Access(endpoint(options), MANUAL_CHECK_COOLDOWN));
     }
 
     GitHubReleaseChecker(Options options, Access access) {
         this.options = Objects.requireNonNull(options, "options");
         this.access = Objects.requireNonNull(access, "access");
-        this.executor = Executors.newSingleThreadScheduledExecutor(this::newThread);
+        this.executor = Executors.newSingleThreadExecutor(this::newThread);
     }
 
     public void setEnabled(boolean enabled) {
@@ -99,10 +88,6 @@ public final class GitHubReleaseChecker implements AutoCloseable {
 
     public synchronized CompletableFuture<Report> checkReport(boolean fresh) {
         if (fresh && enabled && !closed && pending == null && System.nanoTime() >= nextRequestNanos) {
-            if (refresh != null) {
-                refresh.cancel(false);
-                refresh = null;
-            }
             checked = false;
         }
         return check().thenApply(ignored -> snapshot());
@@ -153,7 +138,7 @@ public final class GitHubReleaseChecker implements AutoCloseable {
 
     private static URI endpoint(Options options) {
         Objects.requireNonNull(options, "options");
-        return URI.create("https://api.github.com/repos/" + options.owner() + "/" + options.repository() + "/releases/latest");
+        return URI.create("https://github.com/" + options.owner() + "/" + options.repository() + "/releases/latest");
     }
 
     private static List<BigInteger> versionParts(String version) {
@@ -178,6 +163,25 @@ public final class GitHubReleaseChecker implements AutoCloseable {
         }
     }
 
+    private static String reason(Exception failure) {
+        if (failure.getClass() == IOException.class || failure instanceof RetryLater) {
+            return failure.getMessage();
+        }
+        return failure.getClass().getSimpleName() + (failure.getMessage() == null ? "" : ": " + failure.getMessage());
+    }
+
+    static String describeDelay(long millis) {
+        long totalMinutes = Math.max(1L, (millis + 59_999L) / 60_000L);
+        long hours = totalMinutes / 60L;
+        long minutes = totalMinutes % 60L;
+        String minuteText = minutes + (minutes == 1L ? " minute" : " minutes");
+        if (hours == 0L) {
+            return minuteText;
+        }
+        String hourText = hours + (hours == 1L ? " hour" : " hours");
+        return minutes == 0L ? hourText : hourText + " " + minuteText;
+    }
+
     private Thread newThread(Runnable runnable) {
         Thread thread = new Thread(runnable, options.repository() + "-release-check");
         thread.setDaemon(true);
@@ -197,10 +201,6 @@ public final class GitHubReleaseChecker implements AutoCloseable {
             request.cancel(true);
             request = null;
         }
-        if (refresh != null) {
-            refresh.cancel(false);
-            refresh = null;
-        }
         CompletableFuture<Optional<Release>> cancelled = pending;
         pending = null;
         cached = Optional.empty();
@@ -208,7 +208,6 @@ public final class GitHubReleaseChecker implements AutoCloseable {
         reportedFailure = false;
         report = new Report(Status.DISABLED, null, "", 0L, 0L);
         nextRequestNanos = 0L;
-        failures = 0;
         return cancelled;
     }
 
@@ -226,98 +225,96 @@ public final class GitHubReleaseChecker implements AutoCloseable {
                 return;
             }
             long now = System.currentTimeMillis();
-            long delay;
+            long cooldown = access.cooldown().toMillis();
             if (failure == null) {
-                failures = 0;
                 Release release = latest.orElse(null);
                 Status status = release == null ? Status.NO_RELEASE
                         : !comparable(release.tagName()) || !comparable(options.installedVersion()) ? Status.UNKNOWN
                         : isNewer(release.tagName(), options.installedVersion()) ? Status.UPDATE : Status.CURRENT;
                 report = new Report(status, release, "", now, now);
                 cached = status == Status.UPDATE ? latest : Optional.empty();
-                delay = access.refreshInterval().toMillis();
+                reportedFailure = false;
             } else {
-                failures = Math.min(7, failures + 1);
-                delay = Math.min(access.refreshInterval().toMillis(), 60_000L << (failures - 1));
-                if (failure instanceof RateLimited limited) {
-                    delay = Math.max(delay, limited.delayMillis);
+                if (failure instanceof RetryLater retry) {
+                    cooldown = Math.max(cooldown, retry.delayMillis);
                 }
-                report = new Report(Status.FAILED, report.release(), failure.getMessage(), now, report.lastSuccessMillis());
+                report = new Report(Status.FAILED, report.release(), reason(failure), now, report.lastSuccessMillis());
+                if (!reportedFailure) {
+                    reportedFailure = true;
+                    logFailure(failure, cooldown);
+                }
             }
-            if (delay >= 60_000L) {
-                delay += ThreadLocalRandom.current().nextLong(Math.max(1L, delay / 10L));
-            }
-            nextRequestNanos = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(
-                    failure == null ? Math.min(60_000L, delay) : delay);
+            nextRequestNanos = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(cooldown);
             checked = true;
             pending = null;
             request = null;
-            if (failure == null) {
-                reportedFailure = false;
-            } else if (!reportedFailure) {
-                reportedFailure = true;
-                options.logger().log(Level.WARNING, "Could not check GitHub releases for " + options.owner() + "/"
-                        + options.repository() + "; retrying in " + Math.max(1L, delay / 1000L) + " seconds.", failure);
-            }
-            refresh = executor.schedule(this::refresh, delay, TimeUnit.MILLISECONDS);
             result.complete(cached);
         }
     }
 
-    private synchronized void refresh() {
-        refresh = null;
-        if (!closed && enabled && pending == null) {
-            checked = false;
-            startCheck();
+    private void logFailure(Exception failure, long cooldown) {
+        String message = "Could not check GitHub releases for " + options.owner() + "/" + options.repository() + ": "
+                + reason(failure) + ". /volmit plugins updates can check again in " + describeDelay(cooldown) + ".";
+        if (failure instanceof IOException) {
+            options.logger().warning(message);
+        } else {
+            options.logger().log(Level.WARNING, message, failure);
         }
     }
 
     private Optional<Release> fetchLatest() throws IOException {
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
         HttpURLConnection connection = (HttpURLConnection) access.endpoint().toURL().openConnection();
         connection.setConnectTimeout(TIMEOUT_MILLIS);
         connection.setReadTimeout(TIMEOUT_MILLIS);
         connection.setInstanceFollowRedirects(false);
-        connection.setRequestProperty("Accept", "application/vnd.github+json");
-        connection.setRequestProperty("X-GitHub-Api-Version", "2022-11-28");
+        connection.setRequestMethod("HEAD");
         connection.setRequestProperty("User-Agent", options.repository() + "-release-checker");
         try {
             int status = connection.getResponseCode();
             if (status == HttpURLConnection.HTTP_NOT_FOUND) {
                 return Optional.empty();
             }
-            if (status != HttpURLConnection.HTTP_OK) {
-                if (status == 403 || status == 429) {
-                    throw new RateLimited(status, retryDelay(connection));
-                }
-                throw new IOException("GitHub release request returned HTTP " + status);
+            if (status == 429) {
+                throw new RetryLater("GitHub rate limited the request (HTTP 429)", retryDelay(connection));
             }
-            if (connection.getContentLengthLong() > MAXIMUM_RESPONSE_BYTES) {
-                throw new IOException("GitHub release response exceeds " + MAXIMUM_RESPONSE_BYTES + " bytes");
+            if (status == HttpURLConnection.HTTP_FORBIDDEN) {
+                throw new RetryLater("GitHub refused the request (HTTP 403)", retryDelay(connection));
             }
-            try (InputStream input = connection.getInputStream()) {
-                ByteArrayOutputStream body = new ByteArrayOutputStream();
-                byte[] buffer = new byte[8192];
-                while (true) {
-                    long remaining = TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime());
-                    if (remaining <= 0L || Thread.currentThread().isInterrupted()) {
-                        throw new IOException("GitHub release request exceeded its deadline or was cancelled");
-                    }
-                    connection.setReadTimeout((int) Math.min(TIMEOUT_MILLIS, Math.max(1L, remaining)));
-                    int count = input.read(buffer);
-                    if (count < 0) {
-                        break;
-                    }
-                    if (body.size() + count > MAXIMUM_RESPONSE_BYTES) {
-                        throw new IOException("GitHub release response exceeds " + MAXIMUM_RESPONSE_BYTES + " bytes");
-                    }
-                    body.write(buffer, 0, count);
-                }
-                return parseRelease(body.toString(StandardCharsets.UTF_8));
+            if (status < 300 || status > 399) {
+                throw new IOException("GitHub release page returned HTTP " + status);
             }
+            return releaseFromRedirect(connection.getHeaderField("Location"));
         } finally {
             connection.disconnect();
         }
+    }
+
+    private Optional<Release> releaseFromRedirect(String location) throws IOException {
+        if (location == null || location.isBlank()) {
+            throw new IOException("GitHub release page redirect has no location");
+        }
+        URI target;
+        try {
+            target = access.endpoint().resolve(location.trim());
+        } catch (IllegalArgumentException invalid) {
+            throw new IOException("GitHub release page redirect has an invalid location", invalid);
+        }
+        String releasesPath = "/" + options.owner() + "/" + options.repository() + "/releases";
+        String path = target.getPath();
+        if (!"https".equalsIgnoreCase(target.getScheme()) || !"github.com".equalsIgnoreCase(target.getHost())
+                || target.getUserInfo() != null || (target.getPort() != -1 && target.getPort() != 443)
+                || path == null || !path.regionMatches(true, 0, releasesPath, 0, releasesPath.length())) {
+            throw new IOException("GitHub release page redirected outside the " + options.owner() + "/"
+                    + options.repository() + " releases");
+        }
+        String remainder = path.substring(releasesPath.length());
+        if (remainder.isEmpty() || remainder.equals("/")) {
+            return Optional.empty();
+        }
+        if (!remainder.startsWith("/tag/") || remainder.length() == "/tag/".length()) {
+            throw new IOException("GitHub release page redirect does not name a release tag");
+        }
+        return Optional.of(new Release(remainder.substring("/tag/".length()), target.toString()));
     }
 
     private static long retryDelay(HttpURLConnection connection) {
@@ -325,31 +322,24 @@ public final class GitHubReleaseChecker implements AutoCloseable {
         String retry = connection.getHeaderField("Retry-After");
         if (retry != null) {
             try {
-                seconds = Math.max(seconds, Long.parseLong(retry));
+                seconds = Math.max(seconds, Long.parseLong(retry.trim()));
             } catch (NumberFormatException ignored) {
                 try {
                     seconds = Math.max(seconds, Duration.between(Instant.now(),
-                            ZonedDateTime.parse(retry, DateTimeFormatter.RFC_1123_DATE_TIME).toInstant()).getSeconds() + 1L);
+                            ZonedDateTime.parse(retry.trim(), DateTimeFormatter.RFC_1123_DATE_TIME).toInstant()).getSeconds() + 1L);
                 } catch (DateTimeException invalid) {
                     seconds = 60L;
                 }
             }
         }
-        if ("0".equals(connection.getHeaderField("X-RateLimit-Remaining"))) {
-            try {
-                seconds = Math.max(seconds, Long.parseLong(connection.getHeaderField("X-RateLimit-Reset")) - Instant.now().getEpochSecond() + 1L);
-            } catch (NumberFormatException ignored) {
-                seconds = Math.max(seconds, 60L);
-            }
-        }
         return Math.min(seconds, TimeUnit.DAYS.toSeconds(7)) * 1000L;
     }
 
-    private static final class RateLimited extends IOException {
+    private static final class RetryLater extends IOException {
         private final long delayMillis;
 
-        private RateLimited(int status, long delayMillis) {
-            super("GitHub rate limit or access restriction (HTTP " + status + ")");
+        private RetryLater(String message, long delayMillis) {
+            super(message);
             this.delayMillis = delayMillis;
         }
     }
@@ -359,44 +349,6 @@ public final class GitHubReleaseChecker implements AutoCloseable {
     }
 
     public record Report(Status status, Release release, String error, long checkedMillis, long lastSuccessMillis) {
-    }
-
-    private Optional<Release> parseRelease(String body) throws IOException {
-        JsonElement parsed = JsonParser.parseString(body);
-        if (!parsed.isJsonObject()) {
-            throw new IOException("GitHub release response must be a JSON object");
-        }
-        JsonObject release = parsed.getAsJsonObject();
-        if (requiredBoolean(release, "draft") || requiredBoolean(release, "prerelease")) {
-            return Optional.empty();
-        }
-        String tag = requiredString(release, "tag_name");
-        String url = requiredString(release, "html_url");
-        URI releaseUrl = URI.create(url);
-        String releasePath = "/" + options.owner() + "/" + options.repository() + "/releases/tag/";
-        if (!"https".equalsIgnoreCase(releaseUrl.getScheme()) || !"github.com".equalsIgnoreCase(releaseUrl.getHost())
-                || releaseUrl.getUserInfo() != null || (releaseUrl.getPort() != -1 && releaseUrl.getPort() != 443)
-                || releaseUrl.getPath() == null || releaseUrl.getPath().length() <= releasePath.length()
-                || !releaseUrl.getPath().regionMatches(true, 0, releasePath, 0, releasePath.length())) {
-            throw new IOException("GitHub release response has an invalid release page URL");
-        }
-        return Optional.of(new Release(tag, url));
-    }
-
-    private String requiredString(JsonObject object, String name) throws IOException {
-        JsonElement value = object.get(name);
-        if (value == null || !value.isJsonPrimitive() || !value.getAsJsonPrimitive().isString() || value.getAsString().isBlank()) {
-            throw new IOException("GitHub release response is missing " + name);
-        }
-        return value.getAsString();
-    }
-
-    private boolean requiredBoolean(JsonObject object, String name) throws IOException {
-        JsonElement value = object.get(name);
-        if (value == null || !value.isJsonPrimitive() || !value.getAsJsonPrimitive().isBoolean()) {
-            throw new IOException("GitHub release response is missing " + name);
-        }
-        return value.getAsBoolean();
     }
 
     public record Options(String owner, String repository, String installedVersion, Logger logger) {
@@ -415,12 +367,12 @@ public final class GitHubReleaseChecker implements AutoCloseable {
     public record Release(String tagName, String url) {
     }
 
-    record Access(URI endpoint, Duration refreshInterval) {
+    record Access(URI endpoint, Duration cooldown) {
         Access {
             Objects.requireNonNull(endpoint, "endpoint");
-            Objects.requireNonNull(refreshInterval, "refreshInterval");
-            if (refreshInterval.toMillis() <= 0L) {
-                throw new IllegalArgumentException("Release refresh interval must be positive");
+            Objects.requireNonNull(cooldown, "cooldown");
+            if (cooldown.toMillis() <= 0L) {
+                throw new IllegalArgumentException("Manual release check cooldown must be positive");
             }
         }
     }
