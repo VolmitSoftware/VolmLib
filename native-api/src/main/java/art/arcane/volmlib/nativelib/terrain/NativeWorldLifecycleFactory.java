@@ -17,7 +17,7 @@ public interface NativeWorldLifecycleFactory {
 
         ServerShutdownBoundary createServerShutdownBoundary();
 
-        void deferPluginClassLoaderClose();
+        boolean deferPluginClassLoaderClose();
 
         void releasePluginClassLoaderClose();
     }

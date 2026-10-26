@@ -233,13 +233,16 @@ public final class NativeWorldLifecycle implements NativeWorldLifecycleFactory.C
         }
     }
 
-    public void deferPluginClassLoaderClose() {
+    public boolean deferPluginClassLoaderClose() {
         synchronized (injected) {
-            if (pluginClassLoaderTransformer == null || pluginClassLoaderCloseDeferred) {
-                return;
+            if (pluginClassLoaderTransformer == null) {
+                return false;
             }
-            policy.retainClassLoader(policy.getClass().getClassLoader());
-            pluginClassLoaderCloseDeferred = true;
+            if (!pluginClassLoaderCloseDeferred) {
+                policy.retainClassLoader(policy.getClass().getClassLoader());
+                pluginClassLoaderCloseDeferred = true;
+            }
+            return true;
         }
     }
 
