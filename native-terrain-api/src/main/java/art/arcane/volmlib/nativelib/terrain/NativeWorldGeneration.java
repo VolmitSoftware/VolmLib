@@ -13,6 +13,7 @@ import java.util.concurrent.CompletableFuture;
 public interface NativeWorldGeneration {
     <C, D, P extends StructureStartPlan, O extends StructureOwnershipRecordView<O>, R extends NativeGenerationRoute>
     void inject(World world, NativeBukkitGeneratorContext<C, D, P, O, R> context) throws NoSuchFieldException, IllegalAccessException;
+    void attachOverworldSpawners(World world) throws NoSuchFieldException, IllegalAccessException;
     Dimension dimension(World world);
     ScopeResult scope(ScopeRequest request) throws NoSuchFieldException, IllegalAccessException;
     CompletableFuture<Void> completeBootstrap(World world) throws NoSuchFieldException, IllegalAccessException;

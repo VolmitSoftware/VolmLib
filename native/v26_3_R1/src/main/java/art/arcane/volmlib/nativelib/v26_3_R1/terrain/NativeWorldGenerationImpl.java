@@ -75,6 +75,12 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.commands.data.BlockDataAccessor;
 import net.minecraft.server.level.ChunkMap;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.entity.ai.village.VillageSiege;
+import net.minecraft.world.entity.npc.CatSpawner;
+import net.minecraft.world.entity.npc.wanderingtrader.WanderingTraderSpawner;
+import net.minecraft.world.level.CustomSpawner;
+import net.minecraft.world.level.levelgen.PatrolSpawner;
+import net.minecraft.world.level.levelgen.PhantomSpawner;
 import net.minecraft.server.level.ThreadedLevelLightEngine;
 import net.minecraft.tags.TagKey;
 import net.minecraft.world.attribute.EnvironmentAttributes;
@@ -340,6 +346,19 @@ public final class NativeWorldGenerationImpl implements NativeWorldGeneration {
         }
     }
 
+
+    @Override
+    public void attachOverworldSpawners(World world) throws NoSuchFieldException, IllegalAccessException {
+        ServerLevel level = ((CraftWorld) world).getHandle();
+        Field customSpawners = ServerLevel.class.getDeclaredField("customSpawners");
+        customSpawners.setAccessible(true);
+        if (!((List<?>) customSpawners.get(level)).isEmpty()) {
+            return;
+        }
+        List<CustomSpawner> spawners = List.of(new PhantomSpawner(), new PatrolSpawner(), new CatSpawner(),
+                new VillageSiege(), new WanderingTraderSpawner(level.getDataStorage()));
+        customSpawners.set(level, spawners);
+    }
 
     @Override
     public Dimension dimension(World world) {
