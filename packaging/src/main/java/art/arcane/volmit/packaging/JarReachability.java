@@ -22,9 +22,13 @@ import java.util.Map;
 import java.util.Set;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public final class JarReachability {
     private static final String SERVICES_PREFIX = "META-INF/services/";
+    private static final Pattern NATIVE_NOISE_LIBRARY = Pattern.compile("(.+/)native/[^/]+/(?:lib)?volmlib_noise\\.(?:dll|so|dylib)");
+    private static final String NATIVE_NOISE_LOADER = "util/noise/NativeNoiseLibrary.class";
 
     private JarReachability() {
     }
@@ -102,6 +106,25 @@ public final class JarReachability {
         for (Map.Entry<String, List<String>> entry : entriesByClass.entrySet()) {
             if (!retained.contains(entry.getKey())) {
                 unused.addAll(entry.getValue());
+            }
+        }
+        return unused;
+    }
+
+    public static Set<String> unusedNativeNoise(File artifact, Set<String> unusedClasses) throws IOException {
+        Set<String> unused = new LinkedHashSet<>();
+        try (JarFile jar = new JarFile(artifact)) {
+            Enumeration<JarEntry> entries = jar.entries();
+            while (entries.hasMoreElements()) {
+                JarEntry entry = entries.nextElement();
+                Matcher library = NATIVE_NOISE_LIBRARY.matcher(entry.getName());
+                if (entry.isDirectory() || !library.matches()) {
+                    continue;
+                }
+                String loader = library.group(1) + NATIVE_NOISE_LOADER;
+                if (jar.getJarEntry(loader) == null || unusedClasses.contains(loader)) {
+                    unused.add(entry.getName());
+                }
             }
         }
         return unused;

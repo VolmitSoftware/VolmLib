@@ -157,7 +157,57 @@ class JarReachabilityTest {
                 "lib/nativelib/common/terrain/NativeAccess.class", "lib/nativelib/terrain/NativeAccess.class"), unused(entries, List.of()));
     }
 
+    @Test
+    void dropsNativeNoiseLibrariesWhenTheLoaderIsPruned() throws IOException {
+        Map<String, byte[]> entries = nativeNoise("lib/");
+        add(entries, "plugin/Main", writer("plugin/Main", "java/lang/Object"));
+        Path artifact = write(entries);
+
+        Set<String> unusedClasses = JarReachability.unusedClasses(artifact.toFile(), List.of("lib/"), List.of());
+        assertEquals(Set.of("lib/util/noise/NativeNoiseLibrary.class"), unusedClasses);
+        assertEquals(Set.of("lib/native/linux-x86_64/libvolmlib_noise.so", "lib/native/windows-x86_64/volmlib_noise.dll",
+                "lib/native/macos-aarch64/libvolmlib_noise.dylib"), JarReachability.unusedNativeNoise(artifact.toFile(), unusedClasses));
+    }
+
+    @Test
+    void keepsNativeNoiseLibrariesWhileTheLoaderIsReachable() throws IOException {
+        Map<String, byte[]> entries = nativeNoise("lib/");
+        ClassWriter consumer = writer("plugin/Main", "java/lang/Object");
+        consumer.visitField(Opcodes.ACC_PUBLIC, "noise", "Llib/util/noise/NativeNoiseLibrary;", null, null).visitEnd();
+        add(entries, "plugin/Main", consumer);
+        Path artifact = write(entries);
+
+        Set<String> unusedClasses = JarReachability.unusedClasses(artifact.toFile(), List.of("lib/"), List.of());
+        assertEquals(Set.of(), unusedClasses);
+        assertEquals(Set.of(), JarReachability.unusedNativeNoise(artifact.toFile(), unusedClasses));
+    }
+
+    @Test
+    void matchesNativeNoiseLibrariesToTheirRelocatedLoader() throws IOException {
+        Map<String, byte[]> entries = nativeNoise("plugin/libs/volmlib/");
+        entries.putAll(nativeNoise("lib/"));
+        entries.remove("lib/util/noise/NativeNoiseLibrary.class");
+        Path artifact = write(entries);
+
+        assertEquals(Set.of("lib/native/linux-x86_64/libvolmlib_noise.so", "lib/native/windows-x86_64/volmlib_noise.dll",
+                "lib/native/macos-aarch64/libvolmlib_noise.dylib"), JarReachability.unusedNativeNoise(artifact.toFile(), Set.of()));
+    }
+
+    private static Map<String, byte[]> nativeNoise(String base) {
+        Map<String, byte[]> entries = new LinkedHashMap<>();
+        addEmpty(entries, base + "util/noise/NativeNoiseLibrary");
+        for (String library : List.of("linux-x86_64/libvolmlib_noise.so", "windows-x86_64/volmlib_noise.dll",
+                "macos-aarch64/libvolmlib_noise.dylib")) {
+            entries.put(base + "native/" + library, library.getBytes(StandardCharsets.UTF_8));
+        }
+        return entries;
+    }
+
     private Set<String> unused(Map<String, byte[]> entries, List<String> keepPrefixes) throws IOException {
+        return JarReachability.unusedClasses(write(entries).toFile(), List.of("lib/"), keepPrefixes);
+    }
+
+    private Path write(Map<String, byte[]> entries) throws IOException {
         Path artifact = temporary.resolve("plugin.jar");
         try (JarOutputStream output = new JarOutputStream(Files.newOutputStream(artifact))) {
             for (Map.Entry<String, byte[]> entry : entries.entrySet()) {
@@ -166,7 +216,7 @@ class JarReachabilityTest {
                 output.closeEntry();
             }
         }
-        return JarReachability.unusedClasses(artifact.toFile(), List.of("lib/"), keepPrefixes);
+        return artifact;
     }
 
     private static void addEmpty(Map<String, byte[]> entries, String... names) {

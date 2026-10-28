@@ -24,12 +24,14 @@ public final class JarArtifactAudit {
     }
 
     public static void write(File artifact, PackagingArtifact policy, PackagingMode mode, File report, long before,
-                             Set<String> removed, JarShrinker.ShrinkResult shrink) throws IOException {
+                             Set<String> removed, Set<String> removedResources, JarShrinker.ShrinkResult shrink)
+            throws IOException {
         Audit audit = inspect(artifact, policy, mode);
         Map<String, Object> result = audit.report();
         result.put("beforeBytes", before);
         result.put("savedBytes", before - artifact.length());
         result.put("removedClasses", removed.stream().sorted().toList());
+        result.put("removedResources", removedResources.stream().sorted().toList());
         Map<String, Object> shrinkReport = new LinkedHashMap<>();
         shrinkReport.put("applied", shrink.applied());
         shrinkReport.put("reason", shrink.reason());

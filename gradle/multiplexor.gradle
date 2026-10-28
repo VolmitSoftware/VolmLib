@@ -1,5 +1,5 @@
 gradle.projectsEvaluated {
-    List<String> libraryProjects = [':shared', ':packaging', ':localization', ':web',
+    List<String> libraryProjects = [':shared', ':packaging', ':localization', ':crypto', ':web',
                                    ':native-api', ':native-terrain-api']
     List<Map<String, Object>> libraryArtifacts = libraryProjects.collect { String path ->
         Jar archive = project(path).tasks.named('jar', Jar).get()

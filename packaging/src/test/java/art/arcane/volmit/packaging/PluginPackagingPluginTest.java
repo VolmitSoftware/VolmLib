@@ -45,6 +45,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 @Execution(ExecutionMode.CONCURRENT)
 class PluginPackagingPluginTest {
     private static final long SPIGOT_CAP = 7_600_000L;
+    private static final String NATIVE_NOISE_LIBRARY = "lib/native/linux-x86_64/libvolmlib_noise.so";
 
     @TempDir
     Path directory;
@@ -257,6 +258,32 @@ class PluginPackagingPluginTest {
         String usage = Files.readString(reports.resolve("distribution-shrink-usage.txt"));
         assertTrue(usage.contains("owned.Unused"), usage);
         assertTrue(usage.contains("unused()"), usage);
+    }
+
+    @Test
+    void thinningDropsNativeNoiseLibrariesWithTheirPrunedLoader() throws IOException {
+        fixture(1_000_000, "", false);
+        nativeNoise();
+        BuildResult result = runner("jar").build();
+        assertEquals(TaskOutcome.SUCCESS, result.task(":jar").getOutcome());
+        try (ZipFile jar = new ZipFile(directory.resolve("build/libs/example.jar").toFile())) {
+            assertNull(jar.getEntry("lib/util/noise/NativeNoiseLibrary.class"));
+            assertNull(jar.getEntry(NATIVE_NOISE_LIBRARY));
+        }
+        assertEquals(List.of(NATIVE_NOISE_LIBRARY), strings(report(), "removedResources"));
+    }
+
+    @Test
+    void thinningKeepsNativeNoiseLibrariesWithTheirRetainedLoader() throws IOException {
+        fixture(1_000_000, "keepPrefixes = ['lib/Prefixed', 'lib/util/noise/']", false);
+        nativeNoise();
+        BuildResult result = runner("jar").build();
+        assertEquals(TaskOutcome.SUCCESS, result.task(":jar").getOutcome());
+        try (ZipFile jar = new ZipFile(directory.resolve("build/libs/example.jar").toFile())) {
+            assertNotNull(jar.getEntry("lib/util/noise/NativeNoiseLibrary.class"));
+            assertNotNull(jar.getEntry(NATIVE_NOISE_LIBRARY));
+        }
+        assertEquals(List.of(), strings(report(), "removedResources"));
     }
 
     @Test
@@ -677,6 +704,13 @@ class PluginPackagingPluginTest {
             new Random(7).nextBytes(noise);
             Files.write(resources.resolve("noise.bin"), noise);
         }
+    }
+
+    private void nativeNoise() throws IOException {
+        source("lib/util/noise/NativeNoiseLibrary.java", "package lib.util.noise; public final class NativeNoiseLibrary {}");
+        Path library = directory.resolve("src/main/resources").resolve(NATIVE_NOISE_LIBRARY);
+        Files.createDirectories(library.getParent());
+        Files.write(library, new byte[]{0x7f, 'E', 'L', 'F'});
     }
 
     private void source(String path, String contents) throws IOException {

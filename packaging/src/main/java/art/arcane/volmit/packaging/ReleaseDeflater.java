@@ -6,6 +6,7 @@ import com.googlecode.pngtastic.core.processing.zopfli.Zopfli;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.file.AccessDeniedException;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
@@ -82,6 +83,10 @@ final class ReleaseDeflater {
         try {
             Files.write(temporary, compressed);
             Files.move(temporary, cacheFile, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+        } catch (AccessDeniedException replaced) {
+            if (!Files.isRegularFile(cacheFile)) {
+                throw replaced;
+            }
         } finally {
             Files.deleteIfExists(temporary);
         }

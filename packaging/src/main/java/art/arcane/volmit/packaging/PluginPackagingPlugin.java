@@ -245,13 +245,16 @@ public class PluginPackagingPlugin implements Plugin<Project> {
                 }
             }
             Set<String> removed = JarReachability.unusedClasses(artifact, policy.getPrunePrefixes(), roots);
-            JarCompactor.compact(artifact, new JarCompactor.CompactionOptions(removed, policy.isStripDirectories(),
+            Set<String> removedResources = JarReachability.unusedNativeNoise(artifact, removed);
+            Set<String> removedEntries = new HashSet<>(removed);
+            removedEntries.addAll(removedResources);
+            JarCompactor.compact(artifact, new JarCompactor.CompactionOptions(removedEntries, policy.isStripDirectories(),
                     policy.isStripLocalVariables(), policy.isReleaseCompression(), libraryCache.toPath().resolve("compression")));
-            JarArtifactAudit.write(artifact, policy, mode, report, before, removed, shrink);
-            task.getLogger().lifecycle("{}: {} -> {} bytes; shrink {} ({} classes, {} tolerated warnings, {} advice classes restored); {} unused dependency classes removed",
+            JarArtifactAudit.write(artifact, policy, mode, report, before, removed, removedResources, shrink);
+            task.getLogger().lifecycle("{}: {} -> {} bytes; shrink {} ({} classes, {} tolerated warnings, {} advice classes restored); {} unused dependency classes and {} unused native libraries removed",
                     artifact.getName(), before, artifact.length(), shrink.applied() ? "applied" : shrink.reason(),
                     shrink.removedClasses(), shrink.toleratedWarnings().size(), shrink.restoredClasses().size(),
-                    removed.size());
+                    removed.size(), removedResources.size());
         } catch (IOException exception) {
             throw new GradleException("Cannot thin " + artifact, exception);
         }

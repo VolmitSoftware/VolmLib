@@ -15,4 +15,6 @@ project(':native-minecraft26_2-sources').projectDir = file('native/minecraft-com
 
 include(':localization')
 
+include(':crypto')
+
 include(':web')

@@ -77,7 +77,7 @@ class JarArtifactAuditTest {
         assertTrue(JarArtifactAudit.verify(artifact.toFile(), policy, mode).isEmpty());
         Path reportFile = directory.resolve("reports/distribution.json");
         JarArtifactAudit.write(artifact.toFile(), policy, mode, reportFile.toFile(), Files.size(artifact),
-                Set.of(), JarShrinker.ShrinkResult.skipped("modded profile", Files.size(artifact)));
+                Set.of(), Set.of(), JarShrinker.ShrinkResult.skipped("modded profile", Files.size(artifact)));
         JsonObject report = JsonParser.parseString(Files.readString(reportFile)).getAsJsonObject();
         assertTrue(report.get("maximumBytes").isJsonNull(), report.toString());
         assertTrue(report.get("effectiveMaximumBytes").isJsonNull(), report.toString());

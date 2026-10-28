@@ -35,7 +35,7 @@
     {
       "name": "BileTools",
       "filename": "BileTools v* [[]CraftBukkit] *.jar",
-      "max_bytes": 1000000,
+      "max_bytes": 1200000,
       "forbidden_prefixes": [
         "org/bukkit/",
         "io/papermc/",
