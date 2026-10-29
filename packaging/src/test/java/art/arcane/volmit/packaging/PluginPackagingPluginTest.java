@@ -11,6 +11,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.api.parallel.Execution;
 import org.junit.jupiter.api.parallel.ExecutionMode;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.NullSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.objectweb.asm.ClassReader;
@@ -44,7 +45,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 @Execution(ExecutionMode.CONCURRENT)
 class PluginPackagingPluginTest {
-    private static final long SPIGOT_CAP = 7_600_000L;
+    private static final long SPIGOT_CAP = 7_500_000L;
     private static final String NATIVE_NOISE_LIBRARY = "lib/native/linux-x86_64/libvolmlib_noise.so";
 
     @TempDir
@@ -393,10 +394,20 @@ class PluginPackagingPluginTest {
     }
 
     @Test
-    void nonModdedBudgetAboveTheSpigotCapFailsConfiguration() throws IOException {
-        fixture(8_000_000, "", false);
+    void nonModdedBudgetAtTheSpigotCapIsAccepted() throws IOException {
+        assertEquals(7_500_000L, PackagingArtifact.SPIGOT_CAP_BYTES);
+        fixture(7_500_000L, "", false);
+        BuildResult result = runner("jar").build();
+        assertEquals(TaskOutcome.SUCCESS, result.task(":verifyDistributionPackaging").getOutcome());
+        assertEquals(7_500_000L, report().get("effectiveMaximumBytes").getAsLong());
+    }
+
+    @ParameterizedTest
+    @ValueSource(longs = {7_500_001, 8_000_000})
+    void nonModdedBudgetAboveTheSpigotCapFailsConfiguration(long maximumBytes) throws IOException {
+        fixture(maximumBytes, "", false);
         BuildResult result = runner("jar").buildAndFail();
-        assertTrue(result.getOutput().contains("7600000"), result.getOutput());
+        assertTrue(result.getOutput().contains("7500000"), result.getOutput());
         assertFalse(Files.exists(directory.resolve("build/libs/example.jar")));
     }
 
@@ -405,7 +416,7 @@ class PluginPackagingPluginTest {
         fixture(SPIGOT_CAP, "", true);
         BuildResult result = runner("jar").buildAndFail();
         assertTrue(result.getOutput().contains("byte budget"), result.getOutput());
-        assertTrue(result.getOutput().contains("7600000"), result.getOutput());
+        assertTrue(result.getOutput().contains("7500000"), result.getOutput());
     }
 
     @Test
@@ -515,16 +526,73 @@ class PluginPackagingPluginTest {
     @Test
     void releaseCompressionIsAnArchiveInput() throws IOException {
         fixture(1_000_000, "", false);
-        BuildResult release = runner("jar", "-PcompactRelease=true").build();
+        omitReleaseCompression();
+        BuildResult release = runner("jar", "-PvolmitPackaging=release").build();
         assertEquals(TaskOutcome.SUCCESS, release.task(":jar").getOutcome());
         assertTrue(Files.readString(directory.resolve("build/reports/packaging/distribution.json"))
                 .contains("\"releaseCompression\": true"));
-        BuildResult cached = runner("jar", "-PcompactRelease=true").build();
+        BuildResult cached = runner("jar", "-PvolmitPackaging=release").build();
         assertEquals(TaskOutcome.UP_TO_DATE, cached.task(":jar").getOutcome());
-        BuildResult standard = runner("jar").build();
+        BuildResult standard = runner("jar", "-PvolmitPackaging=release", "-PcompactRelease=false").build();
         assertEquals(TaskOutcome.SUCCESS, standard.task(":jar").getOutcome());
         assertTrue(Files.readString(directory.resolve("build/reports/packaging/distribution.json"))
                 .contains("\"releaseCompression\": false"));
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            ",,true",
+            "release,,true",
+            "dev,,false",
+            "release,false,false",
+            "dev,true,true"
+    })
+    void sharedCompressionConventionCoversArtifactsAndManuallyRegisteredPackedTasks(
+            String mode, String compression, boolean expected) throws IOException {
+        fixture(1_000_000, "packed = true", false);
+        omitReleaseCompression();
+        Files.writeString(directory.resolve("build.gradle"), """
+
+                tasks.register('manualPackedJar', art.arcane.volmit.packaging.PackedJar)
+                tasks.register('verifyCompressionConvention') {
+                    doLast {
+                        assert tasks.named('packedJar').get().releaseCompression.get() == %s
+                        assert tasks.named('manualPackedJar').get().releaseCompression.get() == %s
+                    }
+                }
+                """.formatted(expected, expected), StandardOpenOption.APPEND);
+        List<String> arguments = new ArrayList<>(List.of("jar", "verifyCompressionConvention"));
+        if (mode != null) {
+            arguments.add("-PvolmitPackaging=" + mode);
+        }
+        if (compression != null) {
+            arguments.add("-PcompactRelease=" + compression);
+        }
+        Map<String, String> environment = new HashMap<>(System.getenv());
+        environment.remove("VOLMIT_PACKAGING");
+        BuildResult result = runner(arguments.toArray(String[]::new)).withEnvironment(environment).build();
+        assertEquals(TaskOutcome.SUCCESS, result.task(":verifyCompressionConvention").getOutcome());
+        assertEquals(expected, report().get("releaseCompression").getAsBoolean());
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void explicitArtifactCompressionOverridesTheSharedConvention(boolean compression) throws IOException {
+        fixture(1_000_000, "packed = true; releaseCompression = " + compression, false);
+        omitReleaseCompression();
+        Files.writeString(directory.resolve("build.gradle"), """
+
+                tasks.register('verifyCompressionOverride') {
+                    doLast {
+                        assert tasks.named('packedJar').get().releaseCompression.get() == %s
+                    }
+                }
+                """.formatted(compression), StandardOpenOption.APPEND);
+        BuildResult result = runner("jar", "verifyCompressionOverride",
+                "-PcompactRelease=" + !compression,
+                "-PvolmitPackaging=" + (compression ? "dev" : "release")).build();
+        assertEquals(TaskOutcome.SUCCESS, result.task(":verifyCompressionOverride").getOutcome());
+        assertEquals(compression, report().get("releaseCompression").getAsBoolean());
     }
 
     @Test
@@ -645,6 +713,12 @@ class PluginPackagingPluginTest {
     private void omitMaximumBytes() throws IOException {
         Path buildScript = directory.resolve("build.gradle");
         Files.writeString(buildScript, Files.readString(buildScript).replace("maximumBytes = 1\n", ""));
+    }
+
+    private void omitReleaseCompression() throws IOException {
+        Path buildScript = directory.resolve("build.gradle");
+        Files.writeString(buildScript, Files.readString(buildScript).replace(
+                "releaseCompression = providers.gradleProperty('compactRelease').map { it.toBoolean() }.getOrElse(false)\n", ""));
     }
 
     private void fixture(long maximumBytes, String artifactExtras, boolean oversized) throws IOException {

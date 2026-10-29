@@ -2,6 +2,10 @@ package art.arcane.volmit.packaging;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import org.apache.commons.compress.archivers.zip.Zip64Mode;
+import org.apache.commons.compress.archivers.zip.ZipArchiveEntry;
+import org.apache.commons.compress.archivers.zip.ZipArchiveOutputStream;
+import org.apache.commons.compress.archivers.zip.X000A_NTFS;
 import org.gradle.api.DefaultTask;
 import org.gradle.api.GradleException;
 import org.gradle.api.artifacts.component.ComponentIdentifier;
@@ -30,6 +34,7 @@ import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.commons.ClassRemapper;
 import org.objectweb.asm.commons.Remapper;
 import org.tukaani.xz.LZMA2Options;
+import org.tukaani.xz.XZInputStream;
 import org.tukaani.xz.XZOutputStream;
 
 import java.io.ByteArrayInputStream;
@@ -44,10 +49,12 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.HexFormat;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
@@ -70,11 +77,19 @@ public abstract class PackedJar extends DefaultTask {
     static final String PAYLOAD_ONLY_RESOURCES = "art/arcane/volmlib/native/";
     private static final long MAXIMUM_RUNTIME_BYTES = 256L * 1024 * 1024;
     private static final String PAPER_LOADER_METHOD = "(Lio/papermc/paper/plugin/loader/PluginClasspathBuilder;)V";
+    private static final List<CompressionProfile> RELEASE_PROFILES = List.of(
+            new CompressionProfile(0, 3, 1024),
+            new CompressionProfile(1, 3, 1024),
+            new CompressionProfile(2, 3, 1024),
+            new CompressionProfile(0, 4, 512));
 
     public PackedJar() {
         getMaximumBytes().convention(PackagingArtifact.SPIGOT_CAP_BYTES);
         getEntrypoints().convention(List.of());
         getJarAccessors().convention(List.of());
+        getPayloadOnlyPrefixes().convention(List.of());
+        getRequiredEntries().convention(List.of());
+        getReleaseCompression().convention(PackagingMode.releaseCompression(getProject().getProviders()));
         getNativeArtifacts().convention(Map.of());
         getNativeManifestPath().convention("META-INF/volmit/native-runtime.properties");
         getNativeResourceDirectory().convention("META-INF/volmit/native/");
@@ -93,6 +108,15 @@ public abstract class PackedJar extends DefaultTask {
 
     @Input
     public abstract ListProperty<String> getJarAccessors();
+
+    @Input
+    public abstract ListProperty<String> getPayloadOnlyPrefixes();
+
+    @Input
+    public abstract ListProperty<String> getRequiredEntries();
+
+    @Input
+    public abstract Property<Boolean> getReleaseCompression();
 
     @Input
     public abstract Property<String> getNativeManifestPath();
@@ -125,7 +149,8 @@ public abstract class PackedJar extends DefaultTask {
         PackOptions options = new PackOptions(getEntrypoints().get(), getJarAccessors().get(),
                 new NativeOptions(getNativeArtifacts().get(), getNativeManifestPath().get(), getNativeResourceDirectory().get()),
                 getMaximumBytes().getOrNull(), getProject().getGradle().getGradleUserHomeDir().toPath()
-                        .resolve("caches/volmit-packaging/compression"));
+                        .resolve("caches/volmit-packaging/compression"),
+                getPayloadOnlyPrefixes().get(), getRequiredEntries().get(), getReleaseCompression().get());
         PackResult result = writePackedJar(source, output, bootstrap, options);
         getLogger().lifecycle("{}: selected {} ({} -> {} bytes); {} bootstrap classes retained", output.getFileName(),
                 result.compressed() ? "XZ" : "ordinary jar", result.ordinaryBytes(), Files.size(output),
@@ -159,6 +184,12 @@ public abstract class PackedJar extends DefaultTask {
             embedNativeArtifacts(contents, options.natives());
         }
         byte[] ordinary = options.natives().artifacts().isEmpty() ? Files.readAllBytes(source) : writeJar(contents, false);
+        if (options.releaseCompression()) {
+            byte[] optimized = writeReleaseJar(contents, options.compressionCache());
+            if (optimized.length < ordinary.length) {
+                ordinary = optimized;
+            }
+        }
         Descriptor descriptor = descriptor(contents, options.entrypoints());
         String main = descriptor.entrypoints().get(0);
         String namespace = main + "/xz";
@@ -197,16 +228,12 @@ public abstract class PackedJar extends DefaultTask {
             throw new IOException("Packed runtime template is missing");
         }
         contents.putAll(relocated);
+        validatePayloadOnlyPrefixes(contents, options);
         byte[] payload = writeJar(contents, true);
         if (payload.length > MAXIMUM_RUNTIME_BYTES) {
             throw new IOException("Embedded runtime exceeds " + MAXIMUM_RUNTIME_BYTES + " byte limit: " + payload.length);
         }
-        ByteArrayOutputStream compressed = new ByteArrayOutputStream();
-        LZMA2Options compression = new LZMA2Options(9);
-        compression.setDictSize(Math.min(compression.getDictSize(), Math.max(4096, payload.length)));
-        try (XZOutputStream xz = new XZOutputStream(compressed, compression)) {
-            xz.write(payload);
-        }
+        byte[] compressed = compressRuntime(payload, options.releaseCompression());
         Map<String, byte[]> outer = new TreeMap<>();
         for (Map.Entry<String, byte[]> entry : contents.entrySet()) {
             if (!options.natives().artifacts().isEmpty()
@@ -216,16 +243,25 @@ public abstract class PackedJar extends DefaultTask {
             if (entry.getKey().startsWith(PAYLOAD_ONLY_RESOURCES)) {
                 continue;
             }
+            if (matchesPrefix(entry.getKey(), options.payloadOnlyPrefixes())) {
+                continue;
+            }
             if (!entry.getKey().endsWith(".class") || retained.contains(entry.getKey())) {
                 outer.put(entry.getKey(), entry.getValue());
             }
         }
         outer.putAll(relocated);
-        outer.put(PAYLOAD, compressed.toByteArray());
+        outer.put(PAYLOAD, compressed);
         String hash = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(payload));
         String metadata = "pluginName=" + descriptor.pluginName() + "\nsha256=" + hash + "\n";
         outer.put(METADATA, metadata.getBytes(StandardCharsets.UTF_8));
         byte[] packed = writeJar(outer, false);
+        if (options.releaseCompression()) {
+            byte[] optimized = writeReleaseJar(outer, options.compressionCache());
+            if (optimized.length < packed.length) {
+                packed = optimized;
+            }
+        }
         boolean compressedRuntime = packed.length < ordinary.length;
         byte[] selected = compressedRuntime ? packed : ordinary;
         if (options.maximumBytes() != null && selected.length > options.maximumBytes()) {
@@ -242,6 +278,110 @@ public abstract class PackedJar extends DefaultTask {
         Files.write(output, selected);
         return new PackResult(retained.size() + relocated.size(), descriptor.entrypoints(), compressedRuntime,
                 ordinary.length);
+    }
+
+    private static byte[] compressRuntime(byte[] payload, boolean releaseCompression) throws IOException {
+        byte[] selected = compressRuntime(payload, new LZMA2Options(9));
+        if (!releaseCompression) {
+            return selected;
+        }
+        for (CompressionProfile profile : RELEASE_PROFILES) {
+            LZMA2Options options = new LZMA2Options(9);
+            options.setNiceLen(273);
+            options.setDepthLimit(profile.depth());
+            options.setPb(profile.positionBits());
+            options.setLcLp(profile.literalBits(), 0);
+            byte[] candidate = compressRuntime(payload, options);
+            if (candidate.length < selected.length) {
+                selected = candidate;
+            }
+        }
+        verifyRuntime(payload, selected);
+        return selected;
+    }
+
+    private static byte[] compressRuntime(byte[] payload, LZMA2Options options) throws IOException {
+        options.setDictSize(Math.min(options.getDictSize(), Math.max(4096, payload.length)));
+        ByteArrayOutputStream compressed = new ByteArrayOutputStream();
+        try (XZOutputStream xz = new XZOutputStream(compressed, options)) {
+            xz.write(payload);
+        }
+        return compressed.toByteArray();
+    }
+
+    private static void verifyRuntime(byte[] payload, byte[] compressed) throws IOException {
+        try (XZInputStream input = new XZInputStream(new ByteArrayInputStream(compressed), 128 * 1024)) {
+            byte[] buffer = new byte[8192];
+            int offset = 0;
+            int length;
+            while ((length = input.read(buffer)) != -1) {
+                if (length > payload.length - offset
+                        || !Arrays.equals(payload, offset, offset + length, buffer, 0, length)) {
+                    throw new IOException("Release compression changed runtime content.");
+                }
+                offset += length;
+            }
+            if (offset != payload.length) {
+                throw new IOException("Release compression changed runtime length.");
+            }
+        }
+    }
+
+    private static byte[] writeReleaseJar(Map<String, byte[]> contents, Path compressionCache) throws IOException {
+        ReleaseDeflater deflater = new ReleaseDeflater(compressionCache);
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        try (ZipArchiveOutputStream jar = new ZipArchiveOutputStream(bytes)) {
+            jar.setUseZip64(Zip64Mode.AsNeeded);
+            jar.setCreateUnicodeExtraFields(ZipArchiveOutputStream.UnicodeExtraFieldPolicy.NEVER);
+            for (Map.Entry<String, byte[]> entry : contents.entrySet()) {
+                byte[] content = entry.getValue();
+                boolean stored = entry.getKey().equals(PAYLOAD);
+                byte[] compressed = stored ? content : deflater.compress(content);
+                CRC32 crc = new CRC32();
+                crc.update(content);
+                ZipArchiveEntry zipEntry = new ZipArchiveEntry(entry.getKey());
+                zipEntry.setTime(0L);
+                if (zipEntry.getExtraField(X000A_NTFS.HEADER_ID) != null) {
+                    zipEntry.removeExtraField(X000A_NTFS.HEADER_ID);
+                }
+                zipEntry.setMethod(stored ? ZipEntry.STORED : ZipEntry.DEFLATED);
+                zipEntry.setSize(content.length);
+                zipEntry.setCompressedSize(compressed.length);
+                zipEntry.setCrc(crc.getValue());
+                jar.addRawArchiveEntry(zipEntry, new ByteArrayInputStream(compressed));
+            }
+        }
+        return bytes.toByteArray();
+    }
+
+    private static void validatePayloadOnlyPrefixes(Map<String, byte[]> contents, PackOptions options)
+            throws IOException {
+        for (String prefix : options.payloadOnlyPrefixes()) {
+            if (!prefix.matches("(?:[A-Za-z0-9_-][A-Za-z0-9._-]*/)+") || prefix.startsWith("META-INF/")) {
+                throw new IOException("Unsafe packed payload-only prefix: " + prefix);
+            }
+            for (String name : contents.keySet()) {
+                if (!name.startsWith(prefix)) {
+                    continue;
+                }
+                String filename = name.substring(name.lastIndexOf('/') + 1).toUpperCase(Locale.ROOT);
+                if (name.endsWith(".class") || name.equals(options.natives().manifestPath())
+                        || options.requiredEntries().contains(name) || filename.startsWith("LICENSE")
+                        || filename.startsWith("LICENCE") || filename.startsWith("NOTICE")
+                        || filename.startsWith("COPYING")) {
+                    throw new IOException("Packed payload-only prefix " + prefix + " matches protected entry: " + name);
+                }
+            }
+        }
+    }
+
+    private static boolean matchesPrefix(String name, List<String> prefixes) {
+        for (String prefix : prefixes) {
+            if (name.startsWith(prefix)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static byte[] compactOrdinaryJar(byte[] ordinary, Path output, Path compressionCache) throws IOException {
@@ -611,8 +751,12 @@ public abstract class PackedJar extends DefaultTask {
     record Descriptor(String pluginName, List<String> entrypoints) {
     }
 
+    private record CompressionProfile(int positionBits, int literalBits, int depth) {
+    }
+
     record PackOptions(List<String> entrypoints, List<String> jarAccessors, NativeOptions natives, Long maximumBytes,
-                       Path compressionCache) {
+                       Path compressionCache, List<String> payloadOnlyPrefixes, List<String> requiredEntries,
+                       boolean releaseCompression) {
     }
 
     record NativeOptions(Map<String, File> artifacts, String manifestPath, String resourceDirectory) {

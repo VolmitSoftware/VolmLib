@@ -7,6 +7,8 @@ import org.gradle.api.GradleException;
 import org.gradle.api.Named;
 import org.gradle.api.file.ConfigurableFileCollection;
 import org.gradle.api.model.ObjectFactory;
+import org.gradle.api.provider.Property;
+import org.gradle.api.provider.ProviderFactory;
 
 import javax.inject.Inject;
 import java.io.File;
@@ -20,22 +22,23 @@ import java.util.List;
 import java.util.Map;
 
 public class PackagingArtifact implements Named {
-    public static final long SPIGOT_CAP_BYTES = 7_600_000L;
+    public static final long SPIGOT_CAP_BYTES = 7_500_000L;
 
     private final String name;
     private final ConfigurableFileCollection shrinkLibraries;
     private final ConfigurableFileCollection authoritativeShrinkLibraries;
+    private final Property<Boolean> releaseCompression;
     private String taskName = "shadowJar";
     private Long maximumBytes;
     private boolean modded;
     private boolean shrink = true;
     private boolean stripDirectories;
     private boolean stripLocalVariables;
-    private boolean releaseCompression;
     private boolean packed;
     private boolean intermediate;
     private List<String> packedEntrypoints = new ArrayList<>();
     private List<String> packedJarAccessors = new ArrayList<>();
+    private List<String> packedPayloadOnlyPrefixes = new ArrayList<>();
     private List<String> prunePrefixes = new ArrayList<>();
     private List<String> keepPrefixes = new ArrayList<>();
     private List<String> requiredEntries = new ArrayList<>();
@@ -46,10 +49,11 @@ public class PackagingArtifact implements Named {
     private Map<String, String> shrinkRelocations = new LinkedHashMap<>();
 
     @Inject
-    public PackagingArtifact(String name, ObjectFactory objects) {
+    public PackagingArtifact(String name, ObjectFactory objects, ProviderFactory providers) {
         this.name = name;
         this.shrinkLibraries = objects.fileCollection();
         this.authoritativeShrinkLibraries = objects.fileCollection();
+        this.releaseCompression = objects.property(Boolean.class).convention(PackagingMode.releaseCompression(providers));
     }
 
     @Override
@@ -122,11 +126,11 @@ public class PackagingArtifact implements Named {
     }
 
     public boolean isReleaseCompression() {
-        return releaseCompression;
+        return releaseCompression.get();
     }
 
     public void setReleaseCompression(boolean releaseCompression) {
-        this.releaseCompression = releaseCompression;
+        this.releaseCompression.set(releaseCompression);
     }
 
     public boolean isPacked() {
@@ -159,6 +163,14 @@ public class PackagingArtifact implements Named {
 
     public void setPackedJarAccessors(List<String> packedJarAccessors) {
         this.packedJarAccessors = List.copyOf(packedJarAccessors);
+    }
+
+    public List<String> getPackedPayloadOnlyPrefixes() {
+        return packedPayloadOnlyPrefixes;
+    }
+
+    public void setPackedPayloadOnlyPrefixes(List<String> packedPayloadOnlyPrefixes) {
+        this.packedPayloadOnlyPrefixes = List.copyOf(packedPayloadOnlyPrefixes);
     }
 
     public Long getMaximumBytes() {

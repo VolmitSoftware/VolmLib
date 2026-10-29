@@ -11,19 +11,30 @@ import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.Type;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.jar.JarEntry;
+import java.util.jar.JarFile;
 import java.util.jar.JarOutputStream;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 class JarReachabilityTest {
+    private static final String VOLMLIB = "art/arcane/volmlib/";
+    private static final List<String> NATIVE_LIBRARIES = List.of(
+            "linux-aarch64/libvolmlib_noise.so", "linux-x86_64/libvolmlib_noise.so",
+            "macos-aarch64/libvolmlib_noise.dylib", "macos-x86_64/libvolmlib_noise.dylib",
+            "windows-x86_64/volmlib_noise.dll");
+
     @TempDir
     Path temporary;
 
@@ -165,8 +176,7 @@ class JarReachabilityTest {
 
         Set<String> unusedClasses = JarReachability.unusedClasses(artifact.toFile(), List.of("lib/"), List.of());
         assertEquals(Set.of("lib/util/noise/NativeNoiseLibrary.class"), unusedClasses);
-        assertEquals(Set.of("lib/native/linux-x86_64/libvolmlib_noise.so", "lib/native/windows-x86_64/volmlib_noise.dll",
-                "lib/native/macos-aarch64/libvolmlib_noise.dylib"), JarReachability.unusedNativeNoise(artifact.toFile(), unusedClasses));
+        assertEquals(nativeLibraries("lib/"), JarReachability.unusedNativeNoise(artifact.toFile(), unusedClasses));
     }
 
     @Test
@@ -189,22 +199,105 @@ class JarReachabilityTest {
         entries.remove("lib/util/noise/NativeNoiseLibrary.class");
         Path artifact = write(entries);
 
-        assertEquals(Set.of("lib/native/linux-x86_64/libvolmlib_noise.so", "lib/native/windows-x86_64/volmlib_noise.dll",
-                "lib/native/macos-aarch64/libvolmlib_noise.dylib"), JarReachability.unusedNativeNoise(artifact.toFile(), Set.of()));
+        assertEquals(nativeLibraries("lib/"), JarReachability.unusedNativeNoise(artifact.toFile(), Set.of()));
     }
 
-    private static Map<String, byte[]> nativeNoise(String base) {
+    @Test
+    void removesOrphanedNativeNoiseLibrariesWithoutClassPruning() throws IOException {
         Map<String, byte[]> entries = new LinkedHashMap<>();
-        addEmpty(entries, base + "util/noise/NativeNoiseLibrary");
-        for (String library : List.of("linux-x86_64/libvolmlib_noise.so", "windows-x86_64/volmlib_noise.dll",
-                "macos-aarch64/libvolmlib_noise.dylib")) {
-            entries.put(base + "native/" + library, library.getBytes(StandardCharsets.UTF_8));
+        addEmpty(entries, "plugin/Main");
+        addNativeLibraries(entries, VOLMLIB);
+        entries.put(VOLMLIB + "native/LICENSE", new byte[]{1, 2, 3});
+        entries.put(VOLMLIB + "native/linux-x86_64/other.so", new byte[]{4, 5, 6});
+        entries.put("other/native/linux-x86_64/libvolmlib_noise.so", new byte[]{7, 8, 9});
+        entries.put("plugin.yml", "name: Example\nmain: plugin.Main\n".getBytes(StandardCharsets.UTF_8));
+        Path artifact = write(entries);
+
+        Set<String> removed = unusedEntries(artifact, List.of(), List.of());
+
+        Set<String> expected = nativeLibraries(VOLMLIB);
+        expected.add("other/native/linux-x86_64/libvolmlib_noise.so");
+        assertEquals(expected, removed);
+        assertCompactedEntries(artifact, entries, removed);
+    }
+
+    @Test
+    void removesNativeNoiseLibrariesWhenTheirLoaderIsPruned() throws IOException {
+        for (String prefix : List.of(VOLMLIB, "plugin/internal/volmlib/")) {
+            Map<String, byte[]> entries = new LinkedHashMap<>();
+            addEmpty(entries, "plugin/Main", prefix + "util/noise/NativeNoiseLibrary");
+            addNativeLibraries(entries, prefix);
+            Path artifact = write(entries);
+
+            Set<String> removed = unusedEntries(artifact, List.of(prefix), List.of());
+
+            Set<String> expected = nativeLibraries(prefix);
+            expected.add(prefix + "util/noise/NativeNoiseLibrary.class");
+            assertEquals(expected, removed);
+            assertCompactedEntries(artifact, entries, removed);
         }
-        return entries;
+    }
+
+    @Test
+    void retainsNativeNoiseBytesWithReachableRelocatedAndMultiReleaseLoaders() throws IOException {
+        for (String prefix : List.of(VOLMLIB, "plugin/internal/volmlib/")) {
+            for (String version : List.of("", "META-INF/versions/25/")) {
+                Map<String, byte[]> entries = new LinkedHashMap<>();
+                String owner = prefix + "util/noise/NativeNoiseLibrary";
+                add(entries, "plugin/Main", writer("plugin/Main", owner));
+                ClassWriter loader = writer(owner, "java/lang/Object");
+                loader.visitEnd();
+                entries.put(version + owner + ".class", loader.toByteArray());
+                addNativeLibraries(entries, VOLMLIB);
+                addNativeLibraries(entries, prefix);
+                Path artifact = write(entries);
+
+                Set<String> removed = unusedEntries(artifact, List.of(prefix), List.of());
+
+                Set<String> expected = prefix.equals(VOLMLIB) ? Set.of() : nativeLibraries(VOLMLIB);
+                assertEquals(expected, removed);
+                assertCompactedEntries(artifact, entries, removed);
+            }
+        }
+    }
+
+    @Test
+    void retainsNativeNoiseLibrariesWithExplicitlyKeptLoaders() throws IOException {
+        Map<String, byte[]> entries = new LinkedHashMap<>();
+        String owner = VOLMLIB + "util/noise/NativeNoiseLibrary";
+        addEmpty(entries, "plugin/Main", owner);
+        addNativeLibraries(entries, VOLMLIB);
+        Path artifact = write(entries);
+
+        Set<String> removed = unusedEntries(artifact, List.of(VOLMLIB), List.of(owner));
+
+        assertEquals(Set.of(), removed);
+        assertCompactedEntries(artifact, entries, removed);
+    }
+
+    @Test
+    void retainsNativeNoiseLibrariesWithoutClassPruning() throws IOException {
+        Map<String, byte[]> entries = new LinkedHashMap<>();
+        addEmpty(entries, "plugin/Main", VOLMLIB + "util/noise/NativeNoiseLibrary", VOLMLIB + "Unused");
+        addNativeLibraries(entries, VOLMLIB);
+        Path artifact = write(entries);
+
+        Set<String> removed = unusedEntries(artifact, List.of(), List.of());
+
+        assertEquals(Set.of(), removed);
+        assertCompactedEntries(artifact, entries, removed);
     }
 
     private Set<String> unused(Map<String, byte[]> entries, List<String> keepPrefixes) throws IOException {
         return JarReachability.unusedClasses(write(entries).toFile(), List.of("lib/"), keepPrefixes);
+    }
+
+    private static Set<String> unusedEntries(Path artifact, List<String> prunePrefixes, List<String> keepPrefixes)
+            throws IOException {
+        Set<String> unusedClasses = JarReachability.unusedClasses(artifact.toFile(), prunePrefixes, keepPrefixes);
+        Set<String> removed = new HashSet<>(unusedClasses);
+        removed.addAll(JarReachability.unusedNativeNoise(artifact.toFile(), unusedClasses));
+        return removed;
     }
 
     private Path write(Map<String, byte[]> entries) throws IOException {
@@ -217,6 +310,44 @@ class JarReachabilityTest {
             }
         }
         return artifact;
+    }
+
+    private void assertCompactedEntries(Path artifact, Map<String, byte[]> expected, Set<String> removed)
+            throws IOException {
+        JarCompactor.compact(artifact.toFile(), new JarCompactor.CompactionOptions(
+                removed, true, false, false, temporary.resolve("compression-cache")));
+        try (JarFile jar = new JarFile(artifact.toFile())) {
+            for (Map.Entry<String, byte[]> entry : expected.entrySet()) {
+                if (removed.contains(entry.getKey())) {
+                    assertNull(jar.getJarEntry(entry.getKey()), entry.getKey());
+                } else {
+                    try (InputStream input = jar.getInputStream(jar.getJarEntry(entry.getKey()))) {
+                        assertArrayEquals(entry.getValue(), input.readAllBytes(), entry.getKey());
+                    }
+                }
+            }
+        }
+    }
+
+    private static Map<String, byte[]> nativeNoise(String base) {
+        Map<String, byte[]> entries = new LinkedHashMap<>();
+        addEmpty(entries, base + "util/noise/NativeNoiseLibrary");
+        addNativeLibraries(entries, base);
+        return entries;
+    }
+
+    private static Set<String> nativeLibraries(String base) {
+        Set<String> libraries = new HashSet<>();
+        for (String name : NATIVE_LIBRARIES) {
+            libraries.add(base + "native/" + name);
+        }
+        return libraries;
+    }
+
+    private static void addNativeLibraries(Map<String, byte[]> entries, String base) {
+        for (String name : NATIVE_LIBRARIES) {
+            entries.put(base + "native/" + name, name.repeat(20).getBytes(StandardCharsets.UTF_8));
+        }
     }
 
     private static void addEmpty(Map<String, byte[]> entries, String... names) {

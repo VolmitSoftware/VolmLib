@@ -190,6 +190,9 @@ public class PluginPackagingPlugin implements Plugin<Project> {
             long packedArtifacts = project.getExtensions().getByType(PluginPackagingExtension.class).getArtifacts()
                     .stream().filter(PackagingArtifact::isPacked).count();
             String packedTaskName = packedArtifacts == 1 ? "packedJar" : "packed" + capitalize(policy.getName()) + "Jar";
+            AbstractArchiveTask archive = producer.get();
+            File selected = archive.getArchiveFile().get().getAsFile();
+            archive.getDestinationDirectory().set(project.getLayout().getBuildDirectory().dir("tmp/packaging/" + policy.getName()));
             TaskProvider<PackedJar> packed = project.getTasks().register(packedTaskName, PackedJar.class, task -> {
                 task.setGroup("build");
                 task.setDescription("Selects the smaller ordinary or embedded XZ distribution for " + policy.getName() + ".");
@@ -200,9 +203,10 @@ public class PluginPackagingPlugin implements Plugin<Project> {
                 task.getMaximumBytes().set(budget != null && mode.development() ? Long.valueOf(Long.MAX_VALUE) : budget);
                 task.getEntrypoints().set(policy.getPackedEntrypoints());
                 task.getJarAccessors().set(policy.getPackedJarAccessors());
-                task.getOutputJar().set(project.getLayout().file(producer.flatMap(AbstractArchiveTask::getArchiveFile)
-                        .map(file -> new File(file.getAsFile().getParentFile(),
-                                file.getAsFile().getName().replaceFirst("\\.jar$", "-packed.jar")))));
+                task.getPayloadOnlyPrefixes().set(policy.getPackedPayloadOnlyPrefixes());
+                task.getRequiredEntries().set(policy.getRequiredEntries());
+                task.getReleaseCompression().set(policy.isReleaseCompression());
+                task.getOutputJar().set(selected);
             });
             verify.configure(task -> task.dependsOn(packed));
             project.getTasks().matching(task -> task.getName().equals("assemble"))

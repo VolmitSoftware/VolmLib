@@ -1,6 +1,7 @@
 package art.arcane.volmit.packaging;
 
 import org.gradle.api.GradleException;
+import org.gradle.api.provider.Provider;
 import org.gradle.api.provider.ProviderFactory;
 
 import java.util.Locale;
@@ -22,6 +23,12 @@ public record PackagingMode(boolean development, String source) {
             return variable;
         }
         return RELEASE;
+    }
+
+    static Provider<Boolean> releaseCompression(ProviderFactory providers) {
+        return providers.gradleProperty("compactRelease")
+                .map(value -> Boolean.parseBoolean(value.trim()))
+                .orElse(providers.provider(() -> !resolve(providers).development()));
     }
 
     public String label() {

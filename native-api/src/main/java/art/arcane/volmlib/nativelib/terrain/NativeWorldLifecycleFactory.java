@@ -7,6 +7,8 @@ public interface NativeWorldLifecycleFactory {
     Controller create(NativeWorldLifecyclePolicy policy, String generatorClassName);
 
     interface Controller {
+        void initializeLifecycle(ClassLoader loader);
+
         boolean injectBukkit();
 
         void ensureServerLevelInjection();
@@ -17,7 +19,7 @@ public interface NativeWorldLifecycleFactory {
 
         ServerShutdownBoundary createServerShutdownBoundary();
 
-        boolean deferPluginClassLoaderClose();
+        void deferPluginClassLoaderClose();
 
         void releasePluginClassLoaderClose();
     }

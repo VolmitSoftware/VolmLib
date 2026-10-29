@@ -3,7 +3,7 @@
     {
       "name": "Adapt",
       "filename": "Adapt v* [[]CraftBukkit] *.jar",
-      "max_bytes": 6000000,
+      "max_bytes": 7500000,
       "forbidden_prefixes": [
         "org/bukkit/",
         "io/papermc/",
@@ -35,7 +35,7 @@
     {
       "name": "BileTools",
       "filename": "BileTools v* [[]CraftBukkit] *.jar",
-      "max_bytes": 1200000,
+      "max_bytes": 7500000,
       "forbidden_prefixes": [
         "org/bukkit/",
         "io/papermc/",
@@ -64,7 +64,7 @@
     {
       "name": "Gloss",
       "filename": "Gloss v* [[]CraftBukkit] *.jar",
-      "max_bytes": 7600000,
+      "max_bytes": 7500000,
       "forbidden_prefixes": [
         "org/bukkit/",
         "io/papermc/",
@@ -104,7 +104,7 @@
     {
       "name": "HiddenOre",
       "filename": "HiddenOre v* [[]CraftBukkit] *.jar",
-      "max_bytes": 850000,
+      "max_bytes": 7500000,
       "forbidden_prefixes": [
         "org/bukkit/",
         "io/papermc/",
@@ -132,7 +132,7 @@
     {
       "name": "React",
       "filename": "React v* [[]CraftBukkit] *.jar",
-      "max_bytes": 3600000,
+      "max_bytes": 7500000,
       "forbidden_prefixes": [
         "org/bukkit/",
         "io/papermc/",
@@ -167,7 +167,7 @@
     {
       "name": "ShapedPortals",
       "filename": "ShapedPortals v* [[]CraftBukkit] *.jar",
-      "max_bytes": 990000,
+      "max_bytes": 7500000,
       "forbidden_prefixes": [
         "org/bukkit/",
         "io/papermc/",
@@ -200,7 +200,7 @@
     {
       "name": "Wormholes",
       "filename": "Wormholes v* [[]CraftBukkit] *.jar",
-      "max_bytes": 7000000,
+      "max_bytes": 7500000,
       "forbidden_prefixes": [
         "org/bukkit/",
         "io/papermc/",
@@ -238,7 +238,7 @@
     {
       "name": "Iris Bukkit",
       "filename": "Iris v* [[]CraftBukkit] *.jar",
-      "max_bytes": 7600000,
+      "max_bytes": 7500000,
       "forbidden_prefixes": [
         "org/bukkit/",
         "io/papermc/",

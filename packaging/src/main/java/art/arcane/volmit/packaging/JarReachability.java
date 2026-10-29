@@ -16,6 +16,7 @@ import java.util.Deque;
 import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -28,7 +29,7 @@ import java.util.regex.Pattern;
 public final class JarReachability {
     private static final String SERVICES_PREFIX = "META-INF/services/";
     private static final Pattern NATIVE_NOISE_LIBRARY = Pattern.compile("(.+/)native/[^/]+/(?:lib)?volmlib_noise\\.(?:dll|so|dylib)");
-    private static final String NATIVE_NOISE_LOADER = "util/noise/NativeNoiseLibrary.class";
+    private static final Pattern NATIVE_NOISE_LOADER = Pattern.compile("(?:META-INF/versions/\\d+/)?(.+/)util/noise/NativeNoiseLibrary\\.class");
 
     private JarReachability() {
     }
@@ -112,19 +113,30 @@ public final class JarReachability {
     }
 
     public static Set<String> unusedNativeNoise(File artifact, Set<String> unusedClasses) throws IOException {
-        Set<String> unused = new LinkedHashSet<>();
+        Map<String, String> libraries = new LinkedHashMap<>();
+        Set<String> loaders = new HashSet<>();
         try (JarFile jar = new JarFile(artifact)) {
             Enumeration<JarEntry> entries = jar.entries();
             while (entries.hasMoreElements()) {
                 JarEntry entry = entries.nextElement();
-                Matcher library = NATIVE_NOISE_LIBRARY.matcher(entry.getName());
-                if (entry.isDirectory() || !library.matches()) {
+                if (entry.isDirectory()) {
                     continue;
                 }
-                String loader = library.group(1) + NATIVE_NOISE_LOADER;
-                if (jar.getJarEntry(loader) == null || unusedClasses.contains(loader)) {
-                    unused.add(entry.getName());
+                Matcher library = NATIVE_NOISE_LIBRARY.matcher(entry.getName());
+                if (library.matches()) {
+                    libraries.put(entry.getName(), library.group(1));
+                    continue;
                 }
+                Matcher loader = NATIVE_NOISE_LOADER.matcher(entry.getName());
+                if (loader.matches() && !unusedClasses.contains(entry.getName())) {
+                    loaders.add(loader.group(1));
+                }
+            }
+        }
+        Set<String> unused = new LinkedHashSet<>();
+        for (Map.Entry<String, String> library : libraries.entrySet()) {
+            if (!loaders.contains(library.getValue())) {
+                unused.add(library.getKey());
             }
         }
         return unused;

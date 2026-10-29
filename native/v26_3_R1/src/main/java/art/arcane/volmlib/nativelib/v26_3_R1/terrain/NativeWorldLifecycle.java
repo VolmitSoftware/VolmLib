@@ -27,6 +27,7 @@ import org.bukkit.craftbukkit.CraftServer;
 import org.bukkit.generator.ChunkGenerator;
 import org.bukkit.plugin.Plugin;
 
+import java.io.Closeable;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Field;
 import art.arcane.volmlib.nativelib.terrain.NativeWorldLifecyclePolicy;
@@ -56,6 +57,7 @@ public final class NativeWorldLifecycle implements NativeWorldLifecycleFactory.C
     private volatile ResettableClassFileTransformer serverLevelTransformer;
     private volatile ResettableClassFileTransformer registryPacketTransformer;
     private volatile ResettableClassFileTransformer pluginClassLoaderTransformer;
+    private ClassLoader protectedPluginClassLoader;
     private boolean pluginClassLoaderCloseDeferred;
     private ResettableClassFileTransformer serverStorageCloseTransformer;
     private Object trackedServerStorage;
@@ -67,16 +69,22 @@ public final class NativeWorldLifecycle implements NativeWorldLifecycleFactory.C
         this.generatorClassName = Objects.requireNonNull(generatorClassName, "generatorClassName");
     }
 
-    public boolean injectBukkit() {
+    public void initializeLifecycle(ClassLoader loader) {
+        Objects.requireNonNull(loader, "Plugin class loader");
+        if (!(loader instanceof Closeable)) {
+            throw new IllegalArgumentException("Plugin class loader is not closeable");
+        }
         synchronized (injected) {
-            if (injected.get()) {
-                return true;
+            if (protectedPluginClassLoader != null) {
+                if (protectedPluginClassLoader != loader) {
+                    throw new IllegalStateException("Lifecycle protection belongs to another plugin class loader");
+                }
+                return;
             }
             try {
                 policy.requireClassLoaderCloseDeferral();
                 installServerStorageBoundary();
-                NativeWorldLifecyclePolicies.register(policy);
-                Class<?> loaderCloseType = policy.getClass().getClassLoader().getClass()
+                Class<?> loaderCloseType = loader.getClass()
                         .getMethod("close").getDeclaringClass();
                 LifecycleInjectionListener loaderListener = new LifecycleInjectionListener();
                 pluginClassLoaderTransformer = new AgentBuilder.Default()
@@ -93,6 +101,25 @@ public final class NativeWorldLifecycle implements NativeWorldLifecycleFactory.C
                                                 .and(ElementMatchers.returns(void.class)))))
                         .installOn(policy.instrumentation());
                 loaderListener.requireInstalled();
+                protectedPluginClassLoader = loader;
+            } catch (Throwable failure) {
+                try {
+                    releasePluginClassLoaderClose();
+                } catch (Throwable cleanupFailure) {
+                    failure.addSuppressed(cleanupFailure);
+                }
+                throw new IllegalStateException("Failed to initialize Bukkit shutdown protection", failure);
+            }
+        }
+    }
+
+    public boolean injectBukkit() {
+        synchronized (injected) {
+            if (injected.get()) {
+                return true;
+            }
+            try {
+                NativeWorldLifecyclePolicies.register(policy);
                 levelStorageAccessTransformer = new AgentBuilder.Default()
                         .disableClassFormatChanges()
                         .with(AgentBuilder.RedefinitionStrategy.RETRANSFORMATION)
@@ -139,24 +166,16 @@ public final class NativeWorldLifecycle implements NativeWorldLifecycleFactory.C
             } catch (Throwable e) {
                 NativeWorldLifecyclePolicies.unregister(policy);
                 policy.reportFailure("Failed to inject Bukkit", e);
-                try {
-                    releaseServerShutdownBoundary();
-                } catch (RuntimeException cleanupFailure) {
-                    policy.reportFailure("Failed to remove the server storage shutdown boundary", cleanupFailure);
-                }
                 ResettableClassFileTransformer partialRegistryPacket = registryPacketTransformer;
                 registryPacketTransformer = null;
                 ResettableClassFileTransformer partialServerLevel = serverLevelTransformer;
                 ResettableClassFileTransformer partialStorageAccess = levelStorageAccessTransformer;
-                ResettableClassFileTransformer partialPluginClassLoader = pluginClassLoaderTransformer;
                 serverLevelTransformer = null;
                 levelStorageAccessTransformer = null;
-                pluginClassLoaderTransformer = null;
                 for (ResettableClassFileTransformer partial : new ResettableClassFileTransformer[]{
                         partialRegistryPacket,
                         partialServerLevel,
-                        partialStorageAccess,
-                        partialPluginClassLoader
+                        partialStorageAccess
                 }) {
                     if (partial == null) {
                         continue;
@@ -233,41 +252,60 @@ public final class NativeWorldLifecycle implements NativeWorldLifecycleFactory.C
         }
     }
 
-    public boolean deferPluginClassLoaderClose() {
+    public void deferPluginClassLoaderClose() {
         synchronized (injected) {
-            if (pluginClassLoaderTransformer == null) {
-                return false;
+            if (pluginClassLoaderTransformer == null || protectedPluginClassLoader == null) {
+                throw new IllegalStateException("Plugin class loader shutdown protection is unavailable");
             }
-            if (!pluginClassLoaderCloseDeferred) {
-                policy.retainClassLoader(policy.getClass().getClassLoader());
-                pluginClassLoaderCloseDeferred = true;
+            if (pluginClassLoaderCloseDeferred) {
+                return;
             }
-            return true;
+            policy.retainClassLoader(protectedPluginClassLoader);
+            pluginClassLoaderCloseDeferred = true;
         }
     }
 
     public void releasePluginClassLoaderClose() {
         ResettableClassFileTransformer transformer;
-        boolean releaseLoader;
+        ClassLoader retainedLoader;
         synchronized (injected) {
             transformer = pluginClassLoaderTransformer;
             pluginClassLoaderTransformer = null;
-            releaseLoader = pluginClassLoaderCloseDeferred;
+            retainedLoader = protectedPluginClassLoader;
             pluginClassLoaderCloseDeferred = false;
+            protectedPluginClassLoader = null;
         }
+        Throwable failure = null;
         try {
             releaseServerShutdownBoundary();
-        } finally {
-            try {
-                if (transformer != null
-                        && !transformer.reset(policy.instrumentation(), AgentBuilder.RedefinitionStrategy.RETRANSFORMATION)) {
-                    throw new IllegalStateException("Failed to remove Plugin class loader lifecycle injection");
-                }
-            } finally {
-                if (releaseLoader) {
-                    policy.releaseClassLoader(policy.getClass().getClassLoader());
-                }
+        } catch (RuntimeException | Error cleanupFailure) {
+            failure = cleanupFailure;
+        }
+        try {
+            if (transformer != null
+                    && !transformer.reset(policy.instrumentation(), AgentBuilder.RedefinitionStrategy.RETRANSFORMATION)) {
+                throw new IllegalStateException("Failed to remove Plugin class loader lifecycle injection");
             }
+        } catch (RuntimeException | Error cleanupFailure) {
+            if (failure == null) {
+                failure = cleanupFailure;
+            } else {
+                failure.addSuppressed(cleanupFailure);
+            }
+        }
+        try {
+            if (retainedLoader != null) {
+                policy.releaseClassLoader(retainedLoader);
+            }
+        } catch (RuntimeException | Error cleanupFailure) {
+            if (failure == null) {
+                failure = cleanupFailure;
+            } else {
+                failure.addSuppressed(cleanupFailure);
+            }
+        }
+        if (failure != null) {
+            throw new IllegalStateException("Failed to release Bukkit shutdown protection", failure);
         }
     }
 
@@ -316,25 +354,34 @@ public final class NativeWorldLifecycle implements NativeWorldLifecycleFactory.C
 
     private void releaseServerShutdownBoundary() {
         synchronized (injected) {
+            Throwable failure = null;
             try {
                 if (serverStorageCloseTransformer != null
                         && !serverStorageCloseTransformer.reset(policy.instrumentation(),
                         AgentBuilder.RedefinitionStrategy.RETRANSFORMATION)) {
                     throw new IllegalStateException("Failed to remove the server storage shutdown boundary");
                 }
-            } finally {
-                serverStorageCloseTransformer = null;
-                if (trackedServerStorage != null) {
-                    try {
-                        Class.forName(policy.classLoaderLifecycleBridgeName(), true, ClassLoader.getSystemClassLoader())
-                                .getMethod("releaseServerStorage", Object.class).invoke(null, trackedServerStorage);
-                    } catch (ReflectiveOperationException failure) {
-                        throw new IllegalStateException("Failed to release the server storage shutdown boundary", failure);
-                    } finally {
-                        trackedServerStorage = null;
-                        serverStorageClosed = null;
+            } catch (RuntimeException | Error cleanupFailure) {
+                failure = cleanupFailure;
+            }
+            serverStorageCloseTransformer = null;
+            if (trackedServerStorage != null) {
+                try {
+                    Class.forName(policy.classLoaderLifecycleBridgeName(), true, ClassLoader.getSystemClassLoader())
+                            .getMethod("releaseServerStorage", Object.class).invoke(null, trackedServerStorage);
+                } catch (ReflectiveOperationException | RuntimeException | Error cleanupFailure) {
+                    if (failure == null) {
+                        failure = cleanupFailure;
+                    } else {
+                        failure.addSuppressed(cleanupFailure);
                     }
+                } finally {
+                    trackedServerStorage = null;
+                    serverStorageClosed = null;
                 }
+            }
+            if (failure != null) {
+                throw new IllegalStateException("Failed to release the server storage shutdown boundary", failure);
             }
         }
     }
