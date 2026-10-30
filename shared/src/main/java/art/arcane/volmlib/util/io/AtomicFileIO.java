@@ -1,9 +1,12 @@
 package art.arcane.volmlib.util.io;
 
+import java.io.File;
 import java.io.IOException;
+import java.io.InterruptedIOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.AccessDeniedException;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -12,6 +15,9 @@ import java.nio.file.StandardOpenOption;
 import java.util.Objects;
 
 public final class AtomicFileIO {
+    private static final boolean WINDOWS = File.separatorChar == '\\';
+    private static final int MOVE_ATTEMPTS = 50;
+
     private AtomicFileIO() {
     }
 
@@ -51,15 +57,32 @@ public final class AtomicFileIO {
     public static void replace(Path source, Path target) throws IOException {
         Path requiredSource = Objects.requireNonNull(source, "source").toAbsolutePath().normalize();
         Path requiredTarget = Objects.requireNonNull(target, "target").toAbsolutePath().normalize();
+        for (int attempt = 1; ; attempt++) {
+            try {
+                move(requiredSource, requiredTarget);
+                return;
+            } catch (AccessDeniedException exception) {
+                if (!WINDOWS || attempt >= MOVE_ATTEMPTS) {
+                    throw exception;
+                }
+                try {
+                    Thread.sleep(10L);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    InterruptedIOException failure = new InterruptedIOException("Interrupted while replacing " + requiredTarget);
+                    failure.initCause(interrupted);
+                    failure.addSuppressed(exception);
+                    throw failure;
+                }
+            }
+        }
+    }
+
+    private static void move(Path source, Path target) throws IOException {
         try {
-            Files.move(
-                    requiredSource,
-                    requiredTarget,
-                    StandardCopyOption.ATOMIC_MOVE,
-                    StandardCopyOption.REPLACE_EXISTING
-            );
+            Files.move(source, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
         } catch (AtomicMoveNotSupportedException exception) {
-            Files.move(requiredSource, requiredTarget, StandardCopyOption.REPLACE_EXISTING);
+            Files.move(source, target, StandardCopyOption.REPLACE_EXISTING);
         }
     }
 }
