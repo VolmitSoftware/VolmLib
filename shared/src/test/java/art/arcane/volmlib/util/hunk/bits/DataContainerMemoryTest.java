@@ -141,6 +141,46 @@ public class DataContainerMemoryTest {
     }
 
     @Test
+    public void presentIterationVisitsScalarReadsInPositionOrder() throws Exception {
+        for (int cardinality : new int[]{0, 1, 3, 15, 16, 17, 40, 300}) {
+            for (int length : new int[]{4096, 4093, 512}) {
+                DataContainer<Integer> container = new DataContainer<>(INTEGERS, length);
+                for (int pass = 0; pass < 3; pass++) {
+                    List<Integer> expectedPositions = new ArrayList<>();
+                    List<Integer> expectedValues = new ArrayList<>();
+                    for (int position = 0; position < length; position++) {
+                        Integer value = container.get(position);
+                        if (value != null) {
+                            expectedPositions.add(position);
+                            expectedValues.add(value);
+                        }
+                    }
+                    List<Integer> positions = new ArrayList<>();
+                    List<Integer> values = new ArrayList<>();
+                    container.iteratePresent((position, value) -> {
+                        positions.add(position);
+                        values.add(value);
+                    });
+                    List<Integer> ioPositions = new ArrayList<>();
+                    container.iteratePresentIO((position, value) -> ioPositions.add(position));
+                    String label = "cardinality=" + cardinality + " length=" + length + " pass=" + pass;
+                    assertEquals(label, expectedPositions, positions);
+                    assertEquals(label, expectedValues, values);
+                    assertEquals(label, expectedPositions, ioPositions);
+                    for (int position = 0; position < length && cardinality > 0; position++) {
+                        boolean aligned = (position & 0x333) == 0;
+                        if (pass == 0 ? aligned : position % (pass + 2) == 0) {
+                            container.set(position, 1000 + position % cardinality);
+                        } else if (pass == 2 && position % 7 == 0) {
+                            container.set(position, null);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
     public void invalidPositionCopiesDoNotPartiallyOverwriteDestination() {
         DataContainer<Integer> container = new DataContainer<>(INTEGERS, 4096);
         container.set(0, 71);
