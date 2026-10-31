@@ -455,11 +455,24 @@ public class DataContainer<T> {
         read.lock();
         try {
             DataBits localData = data;
+            Palette<T> localPalette = palette;
             boolean compact = localData.getSize() != length;
-            for (int position = 0; position < localData.getSize(); position++) {
-                int id = localData.getUnchecked(position);
-                if (id > 0) {
-                    consumer.accept(compact ? expandedPosition(position) : position, palette.get(id));
+            int bits = localData.getBits();
+            int valuesPerLong = localData.valuesPerLong();
+            long mask = (1L << bits) - 1L;
+            int size = localData.getSize();
+            int words = localData.wordCount();
+            for (int word = 0; word < words; word++) {
+                long packed = localData.word(word);
+                int position = word * valuesPerLong;
+                int end = Math.min(position + valuesPerLong, size);
+                while (packed != 0L && position < end) {
+                    int id = (int) (packed & mask);
+                    if (id > 0) {
+                        consumer.accept(compact ? expandedPosition(position) : position, localPalette.get(id));
+                    }
+                    packed >>>= bits;
+                    position++;
                 }
             }
         } finally {
@@ -471,11 +484,24 @@ public class DataContainer<T> {
         read.lock();
         try {
             DataBits localData = data;
+            Palette<T> localPalette = palette;
             boolean compact = localData.getSize() != length;
-            for (int position = 0; position < localData.getSize(); position++) {
-                int id = localData.getUnchecked(position);
-                if (id > 0) {
-                    consumer.accept(compact ? expandedPosition(position) : position, palette.get(id));
+            int bits = localData.getBits();
+            int valuesPerLong = localData.valuesPerLong();
+            long mask = (1L << bits) - 1L;
+            int size = localData.getSize();
+            int words = localData.wordCount();
+            for (int word = 0; word < words; word++) {
+                long packed = localData.word(word);
+                int position = word * valuesPerLong;
+                int end = Math.min(position + valuesPerLong, size);
+                while (packed != 0L && position < end) {
+                    int id = (int) (packed & mask);
+                    if (id > 0) {
+                        consumer.accept(compact ? expandedPosition(position) : position, localPalette.get(id));
+                    }
+                    packed >>>= bits;
+                    position++;
                 }
             }
         } finally {
