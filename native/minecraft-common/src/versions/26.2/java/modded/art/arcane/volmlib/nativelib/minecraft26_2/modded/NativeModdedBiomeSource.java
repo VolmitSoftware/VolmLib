@@ -4,6 +4,10 @@ import art.arcane.volmlib.nativelib.terrain.NativeBiomeSourceAccess;
 import art.arcane.volmlib.nativelib.terrain.NativeBiomeSourcePolicy;
 import art.arcane.volmlib.nativelib.terrain.NativeModdedBiomePolicy;
 import com.mojang.datafixers.util.Pair;
+import com.mojang.serialization.Codec;
+import com.mojang.serialization.DataResult;
+import com.mojang.serialization.Decoder;
+import com.mojang.serialization.Encoder;
 import com.mojang.serialization.MapCodec;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -35,6 +39,12 @@ import java.util.stream.Stream;
 
 public final class NativeModdedBiomeSource<P extends NativeModdedBiomePolicy<Holder<Biome>, Climate.Sampler>>
         extends BiomeSource implements NativeFeatureBiomeSource {
+    public static final String STRUCTURE_STATE_TYPE = "structure_state";
+    public static final MapCodec<? extends BiomeSource> STRUCTURE_STATE_CODEC = Codec.STRING.fieldOf("generation")
+            .flatXmap(NativeModdedBiomeSource::undecodableStructureState, StructureStateBiomeSource::generationKey);
+    private static final MapCodec<BiomeSource> RUNTIME_CODEC =
+            unserializable("Runtime biome sources are serialized through their chunk generator");
+
     private final BiomeSource serializedSource;
     private final P policy;
     private final Access access;
@@ -88,7 +98,7 @@ public final class NativeModdedBiomeSource<P extends NativeModdedBiomePolicy<Hol
 
     @Override
     protected MapCodec<? extends BiomeSource> codec() {
-        throw new UnsupportedOperationException("Runtime biome sources are serialized through their chunk generator");
+        return RUNTIME_CODEC;
     }
 
     @Override
@@ -145,6 +155,14 @@ public final class NativeModdedBiomeSource<P extends NativeModdedBiomePolicy<Hol
                         (candidates, resolver) -> search(new Search(origin, searchRadius,
                                 sampleResolutionHorizontal, sampleResolutionVertical, level), candidates, resolver)));
         return found == null ? null : Pair.of(new BlockPos(found.x(), found.y(), found.z()), found.biome());
+    }
+
+    private static DataResult<StructureStateBiomeSource> undecodableStructureState(String generation) {
+        return DataResult.error(() -> "Structure state biome sources are rebuilt by their chunk generator");
+    }
+
+    private static MapCodec<BiomeSource> unserializable(String reason) {
+        return MapCodec.assumeMapUnsafe(Codec.of(Encoder.error(reason), Decoder.error(reason)));
     }
 
     private static String key(Holder<Biome> biome) {
@@ -250,7 +268,7 @@ public final class NativeModdedBiomeSource<P extends NativeModdedBiomePolicy<Hol
 
         @Override
         protected MapCodec<? extends BiomeSource> codec() {
-            throw new UnsupportedOperationException("Structure state biome sources are not serializable");
+            return STRUCTURE_STATE_CODEC;
         }
 
         @Override
@@ -269,6 +287,10 @@ public final class NativeModdedBiomeSource<P extends NativeModdedBiomePolicy<Hol
             int step = delegate.policy.horizontalSearchStep(y, searchRadius);
             return step == 1 ? super.findBiomeHorizontal(x, y, z, searchRadius, allowed, random, sampler)
                     : super.findBiomeHorizontal(x, y, z, searchRadius, step, allowed, random, false, sampler);
+        }
+
+        private DataResult<String> generationKey() {
+            return DataResult.success(delegate.policy.structureStateKey());
         }
     }
 }

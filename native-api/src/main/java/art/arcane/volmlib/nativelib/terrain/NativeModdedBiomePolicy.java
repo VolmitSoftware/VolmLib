@@ -17,6 +17,7 @@ public interface NativeModdedBiomePolicy<H, S> {
     H getVisibleSurfaceBiome(int blockX, int blockZ);
     H requiredStructureBiome(int x, int y, int z, S sampler);
     Set<String> structureBiomeKeys();
+    String structureStateKey();
     boolean isStructureReachable(Iterable<H> biomes);
     int horizontalSearchStep(int blockY, int searchRadius);
     NativeBiomeSourcePolicy.BiomeLocation<H> findClosestBiome3d(ClosestQuery<H, S> query);

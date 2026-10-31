@@ -32,6 +32,7 @@ import art.arcane.volmlib.nativelib.minecraft26_2.modded.NativeModdedCallbacks;
 import art.arcane.volmlib.nativelib.minecraft26_2.modded.NativeModdedLifecycle;
 import art.arcane.volmlib.nativelib.minecraft26_2.modded.NativeCommandRegistration;
 import art.arcane.volmlib.nativelib.minecraft26_2.modded.NativeChunkGeneratorDefinition;
+import art.arcane.volmlib.nativelib.minecraft26_2.modded.NativeModdedBiomeSource;
 
 public final class NativeFabricBootstrap {
     private NativeFabricBootstrap() {
@@ -40,6 +41,9 @@ public final class NativeFabricBootstrap {
     public static void registerGenerator(NativeChunkGeneratorDefinition definition) {
         Registry.register(BuiltInRegistries.CHUNK_GENERATOR,
                 Identifier.fromNamespaceAndPath(definition.namespace(), definition.name()), definition.codec());
+        Registry.register(BuiltInRegistries.BIOME_SOURCE,
+                Identifier.fromNamespaceAndPath(definition.namespace(), NativeModdedBiomeSource.STRUCTURE_STATE_TYPE),
+                NativeModdedBiomeSource.STRUCTURE_STATE_CODEC);
     }
 
     public static void install(NativeModdedCallbacks callbacks) {

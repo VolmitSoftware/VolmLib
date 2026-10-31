@@ -11,6 +11,7 @@ import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.biome.BiomeSource;
 import net.minecraft.world.level.chunk.ChunkGenerator;
 import net.neoforged.bus.api.EventPriority;
 import net.neoforged.bus.api.IEventBus;
@@ -36,6 +37,7 @@ import art.arcane.volmlib.nativelib.minecraft26_2.modded.NativeModdedLifecycle;
 import art.arcane.volmlib.nativelib.minecraft26_2.modded.NativeCommandRegistration;
 import art.arcane.volmlib.nativelib.minecraft26_2.modded.NativeBlockDropHooks;
 import art.arcane.volmlib.nativelib.minecraft26_2.modded.NativeChunkGeneratorDefinition;
+import art.arcane.volmlib.nativelib.minecraft26_2.modded.NativeModdedBiomeSource;
 
 public final class NativeNeoForgeBootstrap {
     private NativeNeoForgeBootstrap() {
@@ -45,6 +47,9 @@ public final class NativeNeoForgeBootstrap {
             DeferredRegister<MapCodec<? extends ChunkGenerator>> chunkGenerators = DeferredRegister.create(Registries.CHUNK_GENERATOR, definition.namespace());
             chunkGenerators.register(definition.name(), () -> definition.codec());
             chunkGenerators.register(modBus);
+            DeferredRegister<MapCodec<? extends BiomeSource>> biomeSources = DeferredRegister.create(Registries.BIOME_SOURCE, definition.namespace());
+            biomeSources.register(NativeModdedBiomeSource.STRUCTURE_STATE_TYPE, () -> NativeModdedBiomeSource.STRUCTURE_STATE_CODEC);
+            biomeSources.register(modBus);
     }
 
     public static void install(IEventBus modBus, NativeNeoForgeLoader loader, NativeModdedCallbacks callbacks) {

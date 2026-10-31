@@ -9,6 +9,7 @@ import net.minecraft.core.registries.Registries;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.packs.PackType;
+import net.minecraft.world.level.biome.BiomeSource;
 import net.minecraft.world.level.chunk.ChunkGenerator;
 import net.minecraftforge.event.AddPackFindersEvent;
 import net.minecraftforge.event.RegisterCommandsEvent;
@@ -33,6 +34,7 @@ import art.arcane.volmlib.nativelib.minecraft26_2.modded.NativeModdedCallbacks;
 import art.arcane.volmlib.nativelib.minecraft26_2.modded.NativeModdedLifecycle;
 import art.arcane.volmlib.nativelib.minecraft26_2.modded.NativeCommandRegistration;
 import art.arcane.volmlib.nativelib.minecraft26_2.modded.NativeChunkGeneratorDefinition;
+import art.arcane.volmlib.nativelib.minecraft26_2.modded.NativeModdedBiomeSource;
 
 public final class NativeForgeBootstrap {
     private NativeForgeBootstrap() {
@@ -42,6 +44,9 @@ public final class NativeForgeBootstrap {
             DeferredRegister<MapCodec<? extends ChunkGenerator>> chunkGenerators = DeferredRegister.create(Registries.CHUNK_GENERATOR, definition.namespace());
             chunkGenerators.register(definition.name(), () -> definition.codec());
             chunkGenerators.register(context.getModBusGroup());
+            DeferredRegister<MapCodec<? extends BiomeSource>> biomeSources = DeferredRegister.create(Registries.BIOME_SOURCE, definition.namespace());
+            biomeSources.register(NativeModdedBiomeSource.STRUCTURE_STATE_TYPE, () -> NativeModdedBiomeSource.STRUCTURE_STATE_CODEC);
+            biomeSources.register(context.getModBusGroup());
             DeferredRegister<MapCodec<? extends IGlobalLootModifier>> lootModifiers = DeferredRegister.create(ForgeRegistries.GLOBAL_LOOT_MODIFIER_SERIALIZERS, definition.namespace());
             lootModifiers.register(lootKey, () -> NativeForgeBlockLootModifier.CODEC);
             lootModifiers.register(context.getModBusGroup());
