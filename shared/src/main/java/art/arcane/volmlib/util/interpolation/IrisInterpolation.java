@@ -23,6 +23,8 @@ import art.arcane.volmlib.util.function.NoiseProvider;
 
 public class IrisInterpolation {
     private static final double[][] STARCAST_OFFSETS = createStarcastOffsets();
+    private static final long NEGATIVE_ZERO_BITS = Double.doubleToRawLongBits(-0D);
+    private static final double DENSE_LATTICE_LIMIT = 0x1p40;
     private static final ThreadLocal<NoiseSampleCache2D> NOISE_SAMPLE_CACHE_2D = ThreadLocal.withInitial(() -> new NoiseSampleCache2D(64));
     private static final ThreadLocal<NoiseBoundsSampleCache2D> NOISE_BOUNDS_SAMPLE_CACHE_2D = ThreadLocal.withInitial(() -> new NoiseBoundsSampleCache2D(64));
 
@@ -600,6 +602,25 @@ public class IrisInterpolation {
             NoiseBoundsSampleCache2D cache
     ) {
         double[] offsets = STARCAST_OFFSETS[checks / 3 - 1];
+        double firstColumn = Double.POSITIVE_INFINITY;
+        double lastColumn = Double.NEGATIVE_INFINITY;
+        double firstRow = Double.POSITIVE_INFINITY;
+        double lastRow = Double.NEGATIVE_INFINITY;
+        boolean signedZero = false;
+        for (int sample = 0; sample < offsets.length; sample += 2) {
+            double column = Math.floor((x + radius * offsets[sample]) / radius);
+            double row = Math.floor((z + radius * offsets[sample + 1]) / radius);
+            firstColumn = Math.min(firstColumn, column);
+            lastColumn = Math.max(lastColumn, column);
+            firstRow = Math.min(firstRow, row);
+            lastRow = Math.max(lastRow, row);
+            signedZero |= Double.doubleToRawLongBits(column) == NEGATIVE_ZERO_BITS || Double.doubleToRawLongBits(row) == NEGATIVE_ZERO_BITS;
+        }
+        if (!signedZero && denseLattice(firstColumn, lastColumn) && denseLattice(firstRow, lastRow)
+                && (lastColumn - firstColumn + 2D) * (lastRow - firstRow + 2D) <= NoiseBoundsSampleCache2D.DENSE_CAPACITY) {
+            cache.beginDense((int) (lastColumn - firstColumn + 2D));
+            return denseStarcastBounds(x, z, radius, checks, firstColumn, firstRow, cache);
+        }
         double minimum = 0D;
         double maximum = 0D;
         for (int sample = 0; sample < offsets.length; sample += 2) {
@@ -611,6 +632,46 @@ public class IrisInterpolation {
             );
             minimum += cache.interpolatedMinimum();
             maximum += cache.interpolatedMaximum();
+        }
+        return new NoiseBounds(minimum / checks, maximum / checks);
+    }
+
+    private static boolean denseLattice(double first, double last) {
+        return first >= -DENSE_LATTICE_LIMIT && last <= DENSE_LATTICE_LIMIT;
+    }
+
+    private static NoiseBounds denseStarcastBounds(
+            double x,
+            double z,
+            double radius,
+            int checks,
+            double firstColumn,
+            double firstRow,
+            NoiseBoundsSampleCache2D cache
+    ) {
+        double[] offsets = STARCAST_OFFSETS[checks / 3 - 1];
+        double minimum = 0D;
+        double maximum = 0D;
+        for (int sample = 0; sample < offsets.length; sample += 2) {
+            double px = x + radius * offsets[sample];
+            double pz = z + radius * offsets[sample + 1];
+            double fx = Math.floor(px / radius);
+            double fz = Math.floor(pz / radius);
+            double x1 = fx * radius;
+            double z1 = fz * radius;
+            double x2 = (fx + 1) * radius;
+            double z2 = (fz + 1) * radius;
+            double tx = rangeScale(0, 1, x1, x2, px);
+            double tz = rangeScale(0, 1, z1, z2, pz);
+            int column = (int) (fx - firstColumn);
+            int row = (int) (fz - firstRow);
+            double min00 = cache.denseMinimum(column, row, x1, z1);
+            double min10 = cache.denseMinimum(column + 1, row, x2, z1);
+            double min01 = cache.denseMinimum(column, row + 1, x1, z2);
+            double min11 = cache.denseMinimum(column + 1, row + 1, x2, z2);
+            minimum += blerp(min00, min10, min01, min11, tx, tz);
+            maximum += blerp(cache.denseMaximum(column, row), cache.denseMaximum(column + 1, row),
+                    cache.denseMaximum(column, row + 1), cache.denseMaximum(column + 1, row + 1), tx, tz);
         }
         return new NoiseBounds(minimum / checks, maximum / checks);
     }
