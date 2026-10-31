@@ -3,17 +3,22 @@ package art.arcane.volmlib.nativelib.common.player;
 import art.arcane.volmlib.nativelib.player.PlayerRespawnAccess;
 import art.arcane.volmlib.nativelib.player.RespawnPoint;
 import art.arcane.volmlib.nativelib.player.RespawnPolicy;
+import art.arcane.volmlib.util.scheduling.FoliaScheduler;
 import net.minecraft.core.BlockPos;
+import net.minecraft.network.DisconnectionDetails;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.PlayerSpawnFinder;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.network.ServerGamePacketListenerImpl;
 import net.minecraft.world.level.storage.LevelData;
 import net.minecraft.world.phys.Vec3;
 import org.bukkit.Location;
+import org.bukkit.Bukkit;
 import org.bukkit.World;
 import org.bukkit.craftbukkit.CraftWorld;
 import org.bukkit.craftbukkit.entity.CraftPlayer;
+import org.bukkit.craftbukkit.util.CraftChatMessage;
 import org.bukkit.entity.Player;
 
 import java.util.Objects;
@@ -21,6 +26,25 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 
 public class PlayerRespawnAccessImpl implements PlayerRespawnAccess {
+    @Override
+    public void abortRespawn(Player player, String message) {
+        if (!Bukkit.isPrimaryThread() || FoliaScheduler.isFoliaThreading(Bukkit.getServer())
+                || !("Paper".equals(Bukkit.getName()) || "Purpur".equals(Bukkit.getName()))) {
+            throw new IllegalStateException("Respawn abortion requires the Paper or Purpur server thread");
+        }
+        Objects.requireNonNull(message, "message");
+        ServerPlayer handle = ((CraftPlayer) Objects.requireNonNull(player, "player")).getHandle();
+        ServerGamePacketListenerImpl listener = Objects.requireNonNull(handle.connection, "player connection");
+        player.kickPlayer(message);
+        if (!listener.isDisconnected()) {
+            listener.connection.handleConnectionDisconnectOnNextTick = true;
+            listener.connection.disconnect(new DisconnectionDetails(CraftChatMessage.fromStringOrEmpty(message, true)));
+        }
+        if (!listener.isDisconnected()) {
+            throw new IllegalStateException("Player connection remained open during respawn abortion");
+        }
+    }
+
     @Override
     public RespawnPolicy snapshot(Player player) {
         ServerPlayer handle = ((CraftPlayer) Objects.requireNonNull(player, "player")).getHandle();

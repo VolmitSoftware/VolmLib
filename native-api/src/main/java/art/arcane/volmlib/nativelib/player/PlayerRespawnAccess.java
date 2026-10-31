@@ -9,6 +9,8 @@ import java.util.concurrent.CompletableFuture;
 
 @NativeBinding("player.PlayerRespawnAccessImpl")
 public interface PlayerRespawnAccess {
+    void abortRespawn(Player player, String message);
+
     RespawnPolicy snapshot(Player player);
 
     Optional<Location> validate(RespawnPolicy policy);
