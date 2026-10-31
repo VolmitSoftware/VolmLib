@@ -469,7 +469,7 @@ public final class NativeModdedChunkGenerator<C, P extends StructureStartPlan, O
         heightmap.setRawData(chunk, type, ModdedHeightmaps.terrainRawData(height, heightResolver));
     }
 
-    private void writeBlocks(ChunkAccess chunk, NativeModdedGeneratorPolicy.BlockBuffer blocks, int dimMinY, int height) {
+    private static void writeBlocks(ChunkAccess chunk, NativeModdedGeneratorPolicy.BlockBuffer blocks, int dimMinY, int height) {
         int chunkMinY = chunk.getMinY();
         int chunkMaxY = chunkMinY + chunk.getHeight();
         int from = Math.max(dimMinY, chunkMinY);
@@ -485,15 +485,15 @@ public final class NativeModdedChunkGenerator<C, P extends StructureStartPlan, O
                 int sectionMinY = chunk.getSectionYFromSectionIndex(sectionIndex) << 4;
                 int sectionEnd = Math.min(sectionMinY + 16, to);
                 if (collectSection(blocks, cells, dimMinY, sectionMinY, y, sectionEnd)) {
-                    section.acquire();
-                    try {
-                        if (writer.writeFresh(section)) {
-                            createBlockEntities(chunk, cells, baseX, sectionMinY, baseZ);
-                        } else {
+                    if (writer.writeFresh(section)) {
+                        createBlockEntities(chunk, cells, baseX, sectionMinY, baseZ);
+                    } else {
+                        section.acquire();
+                        try {
                             writeCells(chunk, section, cells, baseX, sectionMinY, baseZ);
+                        } finally {
+                            section.release();
                         }
-                    } finally {
-                        section.release();
                     }
                 }
                 y = sectionEnd;

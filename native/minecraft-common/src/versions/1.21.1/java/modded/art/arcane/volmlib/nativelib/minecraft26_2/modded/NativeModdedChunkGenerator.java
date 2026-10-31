@@ -472,7 +472,7 @@ public final class NativeModdedChunkGenerator<C, P extends StructureStartPlan, O
         heightmap.setRawData(chunk, type, ModdedHeightmaps.terrainRawData(height, heightResolver));
     }
 
-    private void writeBlocks(ChunkAccess chunk, NativeModdedGeneratorPolicy.BlockBuffer blocks, int dimMinY, int height) {
+    private static void writeBlocks(ChunkAccess chunk, NativeModdedGeneratorPolicy.BlockBuffer blocks, int dimMinY, int height) {
         int chunkMinY = chunk.getMinBuildHeight();
         int chunkMaxY = chunkMinY + chunk.getHeight();
         int from = Math.max(dimMinY, chunkMinY);
