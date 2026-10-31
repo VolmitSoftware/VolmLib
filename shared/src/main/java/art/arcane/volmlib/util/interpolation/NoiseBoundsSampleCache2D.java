@@ -31,6 +31,7 @@ import java.util.Arrays;
  * Both views are allocated once per cache instance.
  */
 final class NoiseBoundsSampleCache2D {
+    static final int DENSE_CAPACITY = 64;
     private final NoiseProvider minView = this::sampleMin;
     private final NoiseProvider replayMaxView = this::replayMax;
     private NoiseBoundsProvider boundProvider;
@@ -48,6 +49,11 @@ final class NoiseBoundsSampleCache2D {
     private int maximumReplayIndex;
     private double interpolatedMinimum;
     private double interpolatedMaximum;
+    private final double[] denseMinimums = new double[DENSE_CAPACITY];
+    private final double[] denseMaximums = new double[DENSE_CAPACITY];
+    private final int[] denseStamps = new int[DENSE_CAPACITY];
+    private int denseStamp;
+    private int denseWidth;
 
     public NoiseBoundsSampleCache2D(int initialCapacity) {
         int minimumCapacity = Math.max(8, initialCapacity);
@@ -120,6 +126,29 @@ final class NoiseBoundsSampleCache2D {
         return interpolatedMaximum;
     }
 
+    void beginDense(int width) {
+        denseWidth = width;
+        if (++denseStamp == 0) {
+            Arrays.fill(denseStamps, 0);
+            denseStamp = 1;
+        }
+    }
+
+    double denseMinimum(int column, int row, double sampleX, double sampleZ) {
+        int slot = row * denseWidth + column;
+        if (denseStamps[slot] != denseStamp) {
+            NoiseBounds bounds = boundProvider.noise(sampleX, sampleZ);
+            denseMinimums[slot] = bounds.min();
+            denseMaximums[slot] = bounds.max();
+            denseStamps[slot] = denseStamp;
+        }
+        return denseMinimums[slot];
+    }
+
+    double denseMaximum(int column, int row) {
+        return denseMaximums[row * denseWidth + column];
+    }
+
     private double sampleMin(double sampleX, double sampleZ) {
         long sampleXBits = Double.doubleToLongBits(sampleX);
         long sampleZBits = Double.doubleToLongBits(sampleZ);
@@ -133,7 +162,7 @@ final class NoiseBoundsSampleCache2D {
             NoiseBounds bounds = boundProvider.noise(sampleX, sampleZ);
             minimum = bounds.min();
             maximum = bounds.max();
-            insert(findSlot(sampleXBits, sampleZBits), sampleXBits, sampleZBits, minimum, maximum);
+            insert(slot, sampleXBits, sampleZBits, minimum, maximum);
         }
         if (sampledMaximumCount == sampledMaximums.length) {
             sampledMaximums = Arrays.copyOf(sampledMaximums, sampledMaximums.length << 1);
