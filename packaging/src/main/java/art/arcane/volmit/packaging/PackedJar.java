@@ -379,8 +379,9 @@ public abstract class PackedJar extends DefaultTask {
             throws IOException {
         for (String prefix : options.payloadOnlyPrefixes()) {
             String upper = prefix.toUpperCase(Locale.ROOT);
-            if (!prefix.matches("(?:[A-Za-z0-9_-][A-Za-z0-9._-]*/)+") || upper.equals("META-INF/")
-                    || upper.startsWith("META-INF/VOLMIT/") || upper.startsWith("META-INF/SERVICES/")) {
+            boolean topLevelMetadata = upper.startsWith("META-INF/") && upper.indexOf('/', "META-INF/".length()) < 0;
+            if (!prefix.matches("(?:[A-Za-z0-9_-][A-Za-z0-9._-]*/)+(?:[A-Za-z0-9_-][A-Za-z0-9._-]*)?")
+                    || topLevelMetadata || upper.startsWith("META-INF/VOLMIT/") || upper.startsWith("META-INF/SERVICES/")) {
                 throw new IOException("Unsafe packed payload-only prefix: " + prefix);
             }
             for (String name : contents.keySet()) {

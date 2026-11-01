@@ -440,6 +440,44 @@ public class PackedJarTest {
     }
 
     @Test
+    void filenamePrefixKeepsOnlyMatchingSiblingsInsideThePayload() throws Exception {
+        Map<String, byte[]> contents = simplePlugin("FilenamePrefix");
+        addCompressibleClasses(contents);
+        Map<String, byte[]> revisions = Map.of(
+                "META-INF/iris/generation-kernels/abi-1.revision", "abi=1\n".getBytes(StandardCharsets.UTF_8),
+                "META-INF/iris/generation-kernels/abi-2.revision", "abi=2\n".getBytes(StandardCharsets.UTF_8));
+        contents.putAll(revisions);
+        byte[] catalog = "kernel\tabi\n".getBytes(StandardCharsets.UTF_8);
+        contents.put("META-INF/iris/generation-kernels/catalog.tsv", catalog);
+        Path original = directory.resolve("original.jar");
+        Path packed = directory.resolve("packed.jar");
+        Files.write(original, PackedJar.writeJar(contents, false));
+        assertTrue(PackedJar.writePackedJar(original, packed, PackedJar.bootstrapClasses(), new PackedJar.PackOptions(
+                List.of(), List.of(), PackedJar.NativeOptions.empty(), PackagingArtifact.SPIGOT_CAP_BYTES, null,
+                directory.resolve("compression-cache"), List.of("META-INF/iris/generation-kernels/abi-"),
+                List.of("META-INF/iris/generation-kernels/catalog.tsv"), false)).compressed());
+
+        Map<String, byte[]> outer = PackedJar.readJar(packed);
+        Map<String, byte[]> payload = payload(outer);
+        assertArrayEquals(catalog, outer.get("META-INF/iris/generation-kernels/catalog.tsv"));
+        assertArrayEquals(catalog, payload.get("META-INF/iris/generation-kernels/catalog.tsv"));
+        for (Map.Entry<String, byte[]> revision : revisions.entrySet()) {
+            assertFalse(outer.containsKey(revision.getKey()), revision.getKey());
+            assertArrayEquals(revision.getValue(), payload.get(revision.getKey()), revision.getKey());
+        }
+        try (URLClassLoader loader = new URLClassLoader(new URL[]{packed.toUri().toURL()},
+                ClassLoader.getPlatformClassLoader())) {
+            Class.forName("test.Main", true, loader);
+            for (Map.Entry<String, byte[]> revision : revisions.entrySet()) {
+                try (InputStream input = loader.getResourceAsStream(revision.getKey())) {
+                    assertNotNull(input, revision.getKey());
+                    assertArrayEquals(revision.getValue(), input.readAllBytes(), revision.getKey());
+                }
+            }
+        }
+    }
+
+    @Test
     void rejectsPrefixesMatchingClassesAndProtectedResources() throws Exception {
         Map<String, byte[]> contents = simplePlugin("ProtectedResources");
         contents.put("licenses/LICENSE.txt", new byte[]{1});
@@ -452,7 +490,10 @@ public class PackedJarTest {
         for (String prefix : List.of("", "/", "../", "guides/../", "guides//", "/guides/", "guides",
                 "META-INF/", "meta-inf/", "META-INF/services/", "meta-inf/services/", "META-INF/volmit/",
                 "META-INF/volmit/native/", "Meta-Inf/Volmit/", "test/", "test/Main/xz/",
-                "licenses/", "notices/", "required/", "providers/", "META-INF/iris/generation-kernels/")) {
+                "licenses/", "notices/", "required/", "providers/", "META-INF/iris/generation-kernels/",
+                "META-INF/MANIFEST", "META-INF/MANIFEST.MF", "META-INF/volmit", "meta-inf/serv",
+                "META-INF/services/test", "META-INF/iris/generation-kernels/cat", "test/Ma", "licenses/LIC",
+                "required/boot", "guides/..", "guides/.hidden")) {
             Path rejected = directory.resolve("rejected.jar");
             IOException failure = assertThrows(IOException.class, () -> PackedJar.writePackedJar(original, rejected,
                     PackedJar.bootstrapClasses(), new PackedJar.PackOptions(List.of(), List.of(),
