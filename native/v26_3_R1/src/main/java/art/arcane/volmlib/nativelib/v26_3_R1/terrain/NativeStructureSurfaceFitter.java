@@ -69,35 +69,36 @@ public final class NativeStructureSurfaceFitter {
     public static SurfaceTerrainPlan prepareSurfaceStructures(
             WorldGenLevel world, BoundingBox area,
             List<NativeStructureTerrainIntegrator.TerrainTarget> targets,
-            IntBinaryOperator surfaceHeight) {
+            IntBinaryOperator surfaceHeight, SeaSurface sea) {
         return prepareSurfaceStructures(
-                world, area, targets, surfaceHeight, MAX_SURFACE_TEMPLATE_CELLS);
+                world, area, targets, surfaceHeight, sea, MAX_SURFACE_TEMPLATE_CELLS);
     }
 
     public static SurfaceTerrainPlan prepareSurfaceStructures(
             WorldGenLevel world, BoundingBox area,
             List<NativeStructureTerrainIntegrator.TerrainTarget> targets,
-            IntBinaryOperator surfaceHeight, int maximumTemplateCells) {
+            IntBinaryOperator surfaceHeight, SeaSurface sea, int maximumTemplateCells) {
         if (targets == null || targets.isEmpty()) {
             return SurfaceTerrainPlan.empty();
         }
         Objects.requireNonNull(surfaceHeight, "Surface structure terrain fitting requires an Iris height resolver");
+        Objects.requireNonNull(sea, "Surface structure terrain fitting requires a sea surface");
         List<SurfaceAnchor> anchors = collectSourceSurfaceAnchors(
                 world, area, targets, maximumTemplateCells);
         if (!anchors.isEmpty()) {
-            fitSurfaceTerrain(world, area, anchors, surfaceHeight);
+            fitSurfaceTerrain(world, area, anchors, surfaceHeight, sea);
         }
         FlattenFootprint flatten = collectFlattenFootprint(
                 world, area, targets, surfaceHeight, maximumTemplateCells);
-        Map<Long, Integer> flattenedHeights = flatten.anchors().isEmpty() && flatten.projectedSupport().isEmpty() ? Map.of()
-                : fitFlattenTerrain(world, area, flatten, surfaceHeight);
+        FlattenedSurface flattened = flatten.anchors().isEmpty() && flatten.projectedSupport().isEmpty()
+                ? FlattenedSurface.EMPTY : fitFlattenTerrain(world, area, flatten, surfaceHeight, sea);
         VacuumFootprint vacuum = collectVacuumFootprint(
                 world, area, targets, maximumTemplateCells);
         if (!vacuum.anchors().isEmpty()) {
-            fitVacuumTerrain(world, area, vacuum, surfaceHeight);
+            fitVacuumTerrain(world, area, vacuum, surfaceHeight, sea);
         }
         return SurfaceTerrainPlan.create(
-                vacuum, area, flattenedHeights);
+                vacuum, area, flattened);
     }
 
     public static void repairVacuumFoundations(
@@ -527,7 +528,7 @@ public final class NativeStructureSurfaceFitter {
 
     private static void fitSurfaceTerrain(WorldGenLevel world, BoundingBox area,
                                           List<SurfaceAnchor> anchors,
-                                          IntBinaryOperator surfaceHeight) {
+                                          IntBinaryOperator surfaceHeight, SeaSurface sea) {
         int width = area.getXSpan();
         int depth = area.getZSpan();
         int[] originalHeights = new int[width * depth];
@@ -551,7 +552,7 @@ public final class NativeStructureSurfaceFitter {
                 int column = (z - area.minZ()) * width + x - area.minX();
                 applySurfaceColumn(world, position, x, z,
                         originalHeights[column], targetHeights[column], area.minY(), area.maxY(),
-                        rigidBaseSupport[column]);
+                        rigidBaseSupport[column], sea);
             }
         }
     }
@@ -761,20 +762,21 @@ public final class NativeStructureSurfaceFitter {
         if (selected != null) {
             int targetY = originalY + Math.max(-selected.range(),
                     Math.min(selected.range(), selected.source().meetY() - originalY));
-            return new FlattenResolution(targetY, selected.range());
+            return new FlattenResolution(targetY, selected.range(), true);
         }
         if (totalWeight == 0) {
-            return new FlattenResolution(originalY, 0);
+            return new FlattenResolution(originalY, 0, false);
         }
         int targetY = blendSurfaceTarget(originalY, weightedY / (double) totalWeight,
                 maximumInfluence / (double) SURFACE_TERRAIN_INFLUENCE_SCALE);
-        return new FlattenResolution(targetY, range);
+        return new FlattenResolution(targetY, range, false);
     }
 
-    private static Map<Long, Integer> fitFlattenTerrain(
+    private static FlattenedSurface fitFlattenTerrain(
             WorldGenLevel world, BoundingBox area, FlattenFootprint footprint,
-            IntBinaryOperator surfaceHeight) {
+            IntBinaryOperator surfaceHeight, SeaSurface sea) {
         Map<Long, Integer> heights = new HashMap<>();
+        Map<Long, Integer> floodedHeights = new HashMap<>();
         BlockPos.MutableBlockPos position = new BlockPos.MutableBlockPos();
         for (int x = area.minX(); x <= area.maxX(); x++) {
             for (int z = area.minZ(); z <= area.maxZ(); z++) {
@@ -787,15 +789,20 @@ public final class NativeStructureSurfaceFitter {
                         && !world.getBlockState(position.set(x, originalY + 1, z)).getFluidState().isEmpty()) {
                     continue;
                 }
-                int targetY = Math.max(area.minY(), Math.min(area.maxY(), resolution.targetY()));
+                int floorY = resolution.footprint() || originalY < sea.topY() ? Integer.MIN_VALUE : sea.topY();
+                int targetY = Math.max(Math.max(area.minY(), floorY), Math.min(area.maxY(), resolution.targetY()));
                 int minimumY = Math.max(area.minY(), targetY - range);
                 applySurfaceColumn(world, position, x, z, originalY, targetY,
-                        minimumY, Math.min(area.maxY(), originalY + range));
+                        minimumY, Math.min(area.maxY(), originalY + range), false, sea);
                 fillFlattenFoundation(world, position, x, z, targetY, minimumY);
                 heights.put(column, targetY + 1);
+                int floodedTopY = Math.min(originalY, sea.topY());
+                if (targetY < floodedTopY) {
+                    floodedHeights.put(column, floodedTopY + 1);
+                }
             }
         }
-        return Map.copyOf(heights);
+        return new FlattenedSurface(heights, floodedHeights);
     }
 
     private static void fillFlattenFoundation(
@@ -818,7 +825,7 @@ public final class NativeStructureSurfaceFitter {
 
     private static void fitVacuumTerrain(
             WorldGenLevel world, BoundingBox area, VacuumFootprint footprint,
-            IntBinaryOperator surfaceHeight) {
+            IntBinaryOperator surfaceHeight, SeaSurface sea) {
         int width = area.getXSpan();
         int depth = area.getZSpan();
         int[] originalHeights = new int[width * depth];
@@ -854,7 +861,7 @@ public final class NativeStructureSurfaceFitter {
                 int column = (z - area.minZ()) * width + x - area.minX();
                 applySurfaceColumn(world, position, x, z,
                         originalHeights[column], targetHeights[column],
-                        area.minY(), area.maxY(), rigidBaseSupport[column]);
+                        area.minY(), area.maxY(), rigidBaseSupport[column], sea);
             }
         }
     }
@@ -987,15 +994,8 @@ public final class NativeStructureSurfaceFitter {
 
     public static void applySurfaceColumn(WorldGenLevel world, BlockPos.MutableBlockPos position,
                                    int x, int z, int originalY, int targetY,
-                                   int worldMinY, int worldMaxY) {
-        applySurfaceColumn(world, position, x, z, originalY, targetY,
-                worldMinY, worldMaxY, false);
-    }
-
-    public static void applySurfaceColumn(WorldGenLevel world, BlockPos.MutableBlockPos position,
-                                   int x, int z, int originalY, int targetY,
                                    int worldMinY, int worldMaxY,
-                                   boolean requireRigidBaseSupport) {
+                                   boolean requireRigidBaseSupport, SeaSurface sea) {
         if (targetY == originalY) {
             if (requireRigidBaseSupport) {
                 ensureRigidBaseTerrain(world, position, x, z, targetY, worldMinY);
@@ -1007,7 +1007,7 @@ public final class NativeStructureSurfaceFitter {
             BlockState clearedState = clearSurfaceDecorationAndResolveFill(
                     world, position, x, z, originalY, worldMaxY);
             for (int y = originalY; y > targetY; y--) {
-                world.setBlock(position.set(x, y, z), clearedState, 2);
+                world.setBlock(position.set(x, y, z), y <= sea.topY() ? sea.fluid() : clearedState, 2);
             }
             world.setBlock(position.set(x, targetY, z), materials.surface(), 2);
             if (requireRigidBaseSupport) {
@@ -1120,16 +1120,28 @@ public final class NativeStructureSurfaceFitter {
         return state.isSolid() && !NativeStructureVegetationClearer.isTreeBlock(state);
     }
 
+    public record SeaSurface(int topY, BlockState fluid) {
+        public static final SeaSurface NONE = new SeaSurface(Integer.MIN_VALUE, Blocks.AIR.defaultBlockState());
+
+        public SeaSurface {
+            Objects.requireNonNull(fluid, "Sea surface requires a fluid block");
+        }
+    }
+
     public record SurfaceAnchor(int minX, int maxX, int minZ, int maxZ, int meetY, int strength) {
     }
 
     public record FlattenAnchor(SurfaceAnchor source, int radius, int range) {
     }
 
-    public record FlattenResolution(int targetY, int range) {
+    public record FlattenResolution(int targetY, int range, boolean footprint) {
     }
 
     private record FlattenFootprint(List<FlattenAnchor> anchors, Map<Long, Integer> projectedSupport) {
+    }
+
+    private record FlattenedSurface(Map<Long, Integer> groundHeights, Map<Long, Integer> floodedHeights) {
+        private static final FlattenedSurface EMPTY = new FlattenedSurface(Map.of(), Map.of());
     }
 
     private record SurfaceMaterials(BlockState surface, BlockState subsurface) {
@@ -1147,14 +1159,16 @@ public final class NativeStructureSurfaceFitter {
     }
 
     public record SurfaceTerrainPlan(
-            List<Long> foundationBases, Set<Long> occupiedCells, Map<Long, Integer> flattenedHeights) {
+            List<Long> foundationBases, Set<Long> occupiedCells, Map<Long, Integer> flattenedHeights,
+            Map<Long, Integer> floodedHeights) {
         private static final SurfaceTerrainPlan EMPTY =
-                new SurfaceTerrainPlan(List.of(), Set.of(), Map.of());
+                new SurfaceTerrainPlan(List.of(), Set.of(), Map.of(), Map.of());
 
         public SurfaceTerrainPlan {
             foundationBases = List.copyOf(foundationBases);
             occupiedCells = Set.copyOf(occupiedCells);
             flattenedHeights = Map.copyOf(flattenedHeights);
+            floodedHeights = Map.copyOf(floodedHeights);
         }
 
         private static SurfaceTerrainPlan empty() {
@@ -1162,9 +1176,9 @@ public final class NativeStructureSurfaceFitter {
         }
 
         private static SurfaceTerrainPlan create(
-                VacuumFootprint vacuum, BoundingBox area, Map<Long, Integer> flattenedHeights) {
+                VacuumFootprint vacuum, BoundingBox area, FlattenedSurface flattened) {
             Set<Long> packedBases = vacuum.foundationBases();
-            if (packedBases.isEmpty() && flattenedHeights.isEmpty()) {
+            if (packedBases.isEmpty() && flattened.groundHeights().isEmpty()) {
                 return EMPTY;
             }
             List<Long> bases = new ArrayList<>(packedBases.size());
@@ -1178,7 +1192,7 @@ public final class NativeStructureSurfaceFitter {
                 columns.add(NativeStructureTemplateOccupancy.columnKey(
                         base.getX(), base.getZ()));
             }
-            if (bases.isEmpty() && flattenedHeights.isEmpty()) {
+            if (bases.isEmpty() && flattened.groundHeights().isEmpty()) {
                 return EMPTY;
             }
             bases.sort((first, second) -> {
@@ -1195,7 +1209,7 @@ public final class NativeStructureSurfaceFitter {
                 }
             }
             return new SurfaceTerrainPlan(
-                    bases, occupancy, flattenedHeights);
+                    bases, occupancy, flattened.groundHeights(), flattened.floodedHeights());
         }
 
         public void primeHeightmaps(ChunkAccess chunk) {
@@ -1205,10 +1219,15 @@ public final class NativeStructureSurfaceFitter {
             Heightmap surface = chunk.getOrCreateHeightmapUnprimed(Heightmap.Types.WORLD_SURFACE_WG);
             Heightmap floor = chunk.getOrCreateHeightmapUnprimed(Heightmap.Types.OCEAN_FLOOR_WG);
             WorldgenTerrainHeightmaps.primeTerrain(chunk,
-                    (x, z) -> flattenedHeights.getOrDefault(NativeStructureTemplateOccupancy.columnKey(x, z),
-                            surface.getFirstAvailable(x & 15, z & 15)),
+                    (x, z) -> surfaceFirstFree(surface, x, z),
                     (x, z) -> flattenedHeights.getOrDefault(NativeStructureTemplateOccupancy.columnKey(x, z),
                             floor.getFirstAvailable(x & 15, z & 15)));
+        }
+
+        private int surfaceFirstFree(Heightmap surface, int x, int z) {
+            long column = NativeStructureTemplateOccupancy.columnKey(x, z);
+            return floodedHeights.getOrDefault(column, flattenedHeights.getOrDefault(column,
+                    surface.getFirstAvailable(x & 15, z & 15)));
         }
     }
 

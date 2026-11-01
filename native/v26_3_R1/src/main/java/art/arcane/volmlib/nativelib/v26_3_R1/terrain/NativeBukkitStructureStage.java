@@ -117,6 +117,7 @@ import java.util.concurrent.CompletionException;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.IntBinaryOperator;
 import java.util.function.Predicate;
+import art.arcane.volmlib.nativelib.terrain.structure.StructureSeaSurface;
 import art.arcane.volmlib.nativelib.terrain.structure.StructureStagePolicy;
 import art.arcane.volmlib.nativelib.terrain.structure.StructureCachePolicy;
 import art.arcane.volmlib.nativelib.terrain.structure.StructurePlacementDecision;
@@ -477,7 +478,7 @@ public final class NativeBukkitStructureStage<C, D, P extends StructureStartPlan
             try {
                 surfaceTerrainPlan = NativeStructureSurfaceFitter.prepareSurfaceStructures(
                         boundedWorld, area, terrainTargets,
-                        policy.surfaceHeight(policy.current()));
+                        policy.surfaceHeight(policy.current()), resolveSeaSurface());
                 surfaceTerrainPlan.primeHeightmaps(chunk);
             } catch (Throwable error) {
                 throw NativeStructureGenerationException.failure(
@@ -629,6 +630,16 @@ public final class NativeBukkitStructureStage<C, D, P extends StructureStartPlan
         }
         throw new IllegalStateException("Configured native structure palette resolved unsupported Bukkit block data "
                 + blockData.getClass().getName() + " at " + x + "," + y + "," + z);
+    }
+
+    private NativeStructureSurfaceFitter.SeaSurface resolveSeaSurface() {
+        StructureSeaSurface sea = Objects.requireNonNull(policy.seaSurface(policy.current()),
+                "Native structure stage policy did not supply a sea surface");
+        if (sea.fluid().placementHandle() instanceof CraftBlockData craftBlockData) {
+            return new NativeStructureSurfaceFitter.SeaSurface(sea.topY(), craftBlockData.getState());
+        }
+        throw new IllegalStateException("Native structure sea surface resolved unsupported Bukkit block data "
+                + sea.fluid().placementHandle().getClass().getName() + " for " + sea.fluid().key());
     }
 
     private BoundingBox writableArea(ChunkAccess chunk) {

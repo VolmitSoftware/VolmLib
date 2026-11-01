@@ -48,6 +48,7 @@ import art.arcane.volmlib.nativelib.terrain.structure.StructureOwnershipRecordVi
 import art.arcane.volmlib.nativelib.terrain.structure.StructurePalette;
 import art.arcane.volmlib.nativelib.terrain.structure.StructurePlacementDecision;
 import art.arcane.volmlib.nativelib.terrain.structure.StructureReferencePolicy;
+import art.arcane.volmlib.nativelib.terrain.structure.StructureSeaSurface;
 import art.arcane.volmlib.nativelib.terrain.structure.StructureStartPlan;
 import art.arcane.volmlib.nativelib.terrain.structure.StructureVolumePolicy;
 import art.arcane.volmlib.util.math.RNG;
@@ -58,6 +59,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Iterator;
 import java.util.Map;
+import java.util.Objects;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
 import java.util.function.IntBinaryOperator;
@@ -428,7 +430,7 @@ public final class NativeModdedStructureStage<C, P extends StructureStartPlan, O
             try {
                 surfaceTerrainPlan = NativeStructureSurfaceFitter.prepareSurfaceStructures(
                         boundedWorld, area, terrainTargets,
-                        policy.surfaceHeight(current));
+                        policy.surfaceHeight(current), resolveSeaSurface(current));
                 surfaceTerrainPlan.primeHeightmaps(chunk);
             } catch (Throwable error) {
                 throw NativeStructureGenerationException.failure(
@@ -579,6 +581,16 @@ public final class NativeModdedStructureStage<C, P extends StructureStartPlan, O
                     + x + "," + y + "," + z);
         }
         return blockState;
+    }
+
+    private NativeStructureSurfaceFitter.SeaSurface resolveSeaSurface(C current) {
+        StructureSeaSurface sea = Objects.requireNonNull(policy.seaSurface(current),
+                "Native structure stage policy did not supply a sea surface");
+        if (sea.fluid().nativeHandle() instanceof BlockState fluid) {
+            return new NativeStructureSurfaceFitter.SeaSurface(sea.topY(), fluid);
+        }
+        throw new IllegalStateException("Native structure sea surface did not resolve a Minecraft block for "
+                + sea.fluid().key());
     }
 
     private boolean isHistoricalStructureStart(C current, WorldGenLevel world, StructureStart start) {

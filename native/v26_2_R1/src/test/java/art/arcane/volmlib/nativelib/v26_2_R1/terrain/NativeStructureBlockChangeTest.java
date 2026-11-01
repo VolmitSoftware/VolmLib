@@ -69,7 +69,7 @@ public class NativeStructureBlockChangeTest {
         NativeStructureSurfaceFitter.prepareSurfaceStructures(world, new BoundingBox(0, 0, 0, 0, 127, 0),
                 List.of(new NativeStructureTerrainIntegrator.TerrainTarget(
                         "minecraft:desert_pyramid", desertStart(), new FlattenTerrain(16))),
-                (x, z) -> ORIGINAL_SURFACE_Y);
+                (x, z) -> ORIGINAL_SURFACE_Y, NativeStructureSurfaceFitter.SeaSurface.NONE);
 
         int targetY = desertStart().getBoundingBox().minY() - 1;
         assertEquals(Blocks.GRASS_BLOCK.defaultBlockState(), blocks.get(new BlockPos(0, targetY, 0)));
