@@ -586,6 +586,9 @@ public final class NativeModdedStructureStage<C, P extends StructureStartPlan, O
     private NativeStructureSurfaceFitter.SeaSurface resolveSeaSurface(C current) {
         StructureSeaSurface sea = Objects.requireNonNull(policy.seaSurface(current),
                 "Native structure stage policy did not supply a sea surface");
+        if (sea.fluid() == null) {
+            return NativeStructureSurfaceFitter.SeaSurface.NONE;
+        }
         if (sea.fluid().nativeHandle() instanceof BlockState fluid) {
             return new NativeStructureSurfaceFitter.SeaSurface(sea.topY(), fluid);
         }

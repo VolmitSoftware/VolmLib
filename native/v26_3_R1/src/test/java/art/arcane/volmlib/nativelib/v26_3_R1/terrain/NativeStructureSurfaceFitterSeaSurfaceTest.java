@@ -40,6 +40,7 @@ import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -94,10 +95,42 @@ public class NativeStructureSurfaceFitterSeaSurfaceTest {
                 assertFalse("Air below the sea surface at " + x + "," + y, state(blocks, x, y).isAir());
             }
         }
+        for (int x = COAST.minX(); x < WRECK_MIN_X; x++) {
+            assertTrue("Dry shore below the sea surface at " + x, state(blocks, x, SEA_TOP_Y).isSolid());
+        }
         assertEquals(Blocks.WATER.defaultBlockState(), state(blocks, WRECK_MIN_X, SEA_TOP_Y));
         assertTrue(state(blocks, WRECK_MIN_X, SEA_TOP_Y + 1).isAir());
-        assertTrue(state(blocks, WRECK_MIN_X - 1, SEA_TOP_Y).isSolid());
         assertTrue(state(blocks, WRECK_MIN_X - 1, SEA_TOP_Y + 1).isAir());
+    }
+
+    @Test
+    public void cutBelowTheSeaSurfaceKeepsTheColumnFluid() {
+        Map<Long, BlockState> blocks = new HashMap<>();
+        for (int y = 0; y <= 60; y++) {
+            blocks.put(BlockPos.asLong(0, y, 0), Blocks.STONE.defaultBlockState());
+        }
+        for (int y = 61; y <= 70; y++) {
+            blocks.put(BlockPos.asLong(0, y, 0), Blocks.WATER.defaultBlockState());
+        }
+        NativeStructureSurfaceFitter.SeaSurface lavaSea =
+                new NativeStructureSurfaceFitter.SeaSurface(SEA_TOP_Y, Blocks.LAVA.defaultBlockState());
+
+        NativeStructureSurfaceFitter.applySurfaceColumn(world(blocks), new BlockPos.MutableBlockPos(),
+                0, 0, 60, 56, 0, 127, false, lavaSea);
+
+        for (int y = 57; y <= 70; y++) {
+            assertEquals("Column water at y " + y, Blocks.WATER.defaultBlockState(), state(blocks, 0, y));
+        }
+        assertTrue(state(blocks, 0, 56).isSolid());
+    }
+
+    @Test
+    public void seaSurfaceRequiresAFluidBlock() {
+        assertThrows(IllegalStateException.class,
+                () -> new NativeStructureSurfaceFitter.SeaSurface(SEA_TOP_Y, Blocks.STONE.defaultBlockState()));
+        assertThrows(IllegalStateException.class,
+                () -> new NativeStructureSurfaceFitter.SeaSurface(SEA_TOP_Y, Blocks.AIR.defaultBlockState()));
+        assertEquals(Integer.MIN_VALUE, NativeStructureSurfaceFitter.SeaSurface.NONE.topY());
     }
 
     @Test

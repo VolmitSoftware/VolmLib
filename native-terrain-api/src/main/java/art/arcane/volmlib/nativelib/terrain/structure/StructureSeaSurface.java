@@ -2,10 +2,12 @@ package art.arcane.volmlib.nativelib.terrain.structure;
 
 import art.arcane.volmlib.nativelib.terrain.NativeBlockState;
 
-import java.util.Objects;
-
 public record StructureSeaSurface(int topY, NativeBlockState fluid) {
+    public static final StructureSeaSurface NONE = new StructureSeaSurface(Integer.MIN_VALUE, null);
+
     public StructureSeaSurface {
-        Objects.requireNonNull(fluid, "Structure sea surface requires a fluid block");
+        if (fluid == null && topY != Integer.MIN_VALUE) {
+            throw new IllegalStateException("Structure sea surface at Y " + topY + " requires a fluid block");
+        }
     }
 }

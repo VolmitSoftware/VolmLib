@@ -1007,7 +1007,8 @@ public final class NativeStructureSurfaceFitter {
             BlockState clearedState = clearSurfaceDecorationAndResolveFill(
                     world, position, x, z, originalY, worldMaxY);
             for (int y = originalY; y > targetY; y--) {
-                world.setBlock(position.set(x, y, z), y <= sea.topY() ? sea.fluid() : clearedState, 2);
+                world.setBlock(position.set(x, y, z),
+                        y <= sea.topY() && clearedState.getFluidState().isEmpty() ? sea.fluid() : clearedState, 2);
             }
             world.setBlock(position.set(x, targetY, z), materials.surface(), 2);
             if (requireRigidBaseSupport) {
@@ -1125,6 +1126,9 @@ public final class NativeStructureSurfaceFitter {
 
         public SeaSurface {
             Objects.requireNonNull(fluid, "Sea surface requires a fluid block");
+            if (topY != Integer.MIN_VALUE && fluid.getFluidState().isEmpty()) {
+                throw new IllegalStateException("Sea surface at Y " + topY + " requires a fluid block, got " + fluid);
+            }
         }
     }
 

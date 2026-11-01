@@ -635,6 +635,9 @@ public final class NativeBukkitStructureStage<C, D, P extends StructureStartPlan
     private NativeStructureSurfaceFitter.SeaSurface resolveSeaSurface() {
         StructureSeaSurface sea = Objects.requireNonNull(policy.seaSurface(policy.current()),
                 "Native structure stage policy did not supply a sea surface");
+        if (sea.fluid() == null) {
+            return NativeStructureSurfaceFitter.SeaSurface.NONE;
+        }
         if (sea.fluid().placementHandle() instanceof CraftBlockData craftBlockData) {
             return new NativeStructureSurfaceFitter.SeaSurface(sea.topY(), craftBlockData.getState());
         }
