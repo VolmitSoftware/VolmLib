@@ -111,6 +111,7 @@ public final class ShrinkRules {
         lines.add("-printconfiguration " + quote(request.report("configuration")));
         lines.addAll(SHARED_KEEPS);
         lines.addAll(archiveKeeps(request.artifact()));
+        lines.addAll(ApiSurface.keeps(request.artifact()));
         for (Map.Entry<String, Set<String>> binding : NativeProviderBindings.providers(request.artifact()).entrySet()) {
             String capability = binding.getKey().replace('/', '.');
             lines.add("-keep interface " + capability + " { *; }");
@@ -140,6 +141,7 @@ public final class ShrinkRules {
         Set<String> classes = new LinkedHashSet<>();
         Set<String> bundled = new HashSet<>();
         List<String> mentions = new ArrayList<>();
+        Set<ReflectiveMembers.Member> reflective = new LinkedHashSet<>();
         try (JarFile jar = new JarFile(artifact)) {
             Enumeration<JarEntry> entries = jar.entries();
             while (entries.hasMoreElements()) {
@@ -151,7 +153,9 @@ public final class ShrinkRules {
                     if (!entry.getName().startsWith("META-INF/")) {
                         bundled.add(className(entry.getName()));
                     }
-                    collectStringConstants(jar, entry, mentions);
+                    ClassReader reader = classReader(jar, entry);
+                    collectStringConstants(reader, mentions);
+                    ReflectiveMembers.collect(reader, reflective);
                 } else if (!entry.getName().startsWith("META-INF/MANIFEST") && entry.getSize() <= TEXT_RESOURCE_LIMIT) {
                     collectTokens(read(jar, entry), mentions);
                 }
@@ -184,14 +188,21 @@ public final class ShrinkRules {
         for (String name : classes) {
             rules.add(keepAll(name));
         }
+        for (ReflectiveMembers.Member member : reflective) {
+            if (bundled.contains(member.owner())) {
+                rules.add(member.rule());
+            }
+        }
         return rules;
     }
 
-    private static void collectStringConstants(JarFile jar, JarEntry entry, List<String> mentions) throws IOException {
-        ClassReader reader;
+    private static ClassReader classReader(JarFile jar, JarEntry entry) throws IOException {
         try (InputStream input = jar.getInputStream(entry)) {
-            reader = new ClassReader(input);
+            return new ClassReader(input);
         }
+    }
+
+    private static void collectStringConstants(ClassReader reader, List<String> mentions) {
         char[] buffer = new char[reader.getMaxStringLength()];
         for (int index = 1; index < reader.getItemCount(); index++) {
             int offset = reader.getItem(index);

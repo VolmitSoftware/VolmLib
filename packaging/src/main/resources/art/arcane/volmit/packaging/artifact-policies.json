@@ -191,7 +191,7 @@
       ],
       "shrink_keep": [
         "-keep class com.volmit.shapedportals.metrics.** { *; }",
-        "-keep class com.volmit.shapedportals.portal.PortalStore** { *; }",
+        "-keep class com.volmit.shapedportals.portal.PortalRegistry$PortalStore { *; }",
         "-keep class com.volmit.shapedportals.portal.PortalRecord** { *; }",
         "-keepclassmembers class com.volmit.shapedportals.portal.** { <fields>; }"
       ],

@@ -688,6 +688,7 @@ class PluginPackagingPluginTest {
         arguments.add("--stacktrace");
         arguments.add("--no-configuration-cache");
         arguments.add("--max-workers=1");
+        arguments.add("--no-watch-fs");
         return GradleRunner.create().withProjectDir(projectDirectory.toFile()).withPluginClasspath()
                 .withArguments(arguments);
     }

@@ -180,6 +180,7 @@ class VerifyLoggingPolicyTest {
         arguments.add("--stacktrace");
         arguments.add("--no-configuration-cache");
         arguments.add("--max-workers=1");
+        arguments.add("--no-watch-fs");
         return GradleRunner.create().withProjectDir(directory.toFile()).withPluginClasspath().withArguments(arguments);
     }
 

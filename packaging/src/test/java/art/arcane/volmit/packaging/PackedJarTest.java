@@ -94,7 +94,7 @@ public class PackedJarTest {
         Files.writeString(descriptor, "name: Fixture\nmain: test.Main\n");
         Files.writeString(guide, "Guide contents\n");
         GradleRunner runner = GradleRunner.create().withProjectDir(directory.toFile()).withPluginClasspath()
-                .withArguments("packedJar", "--max-workers=1", "--stacktrace");
+                .withArguments("packedJar", "--max-workers=1", "--stacktrace", "--no-watch-fs");
         runner.build();
         assertArrayEquals(Files.readAllBytes(directory.resolve("build/tmp/packaging/distribution/packed-fixture.jar")),
                 Files.readAllBytes(directory.resolve("build/libs/packed-fixture.jar")));
@@ -131,7 +131,7 @@ public class PackedJarTest {
         assertEquals(TaskOutcome.UP_TO_DATE, runner.build().task(":packedJar").getOutcome());
         byte[] ordinary = Files.readAllBytes(directory.resolve("build/tmp/packaging/distribution/packed-fixture.jar"));
         long filteredBytes = Files.size(directory.resolve("build/libs/packed-fixture.jar"));
-        runner.withArguments("packedJar", "-PpackedRelease=true", "--max-workers=1", "--stacktrace");
+        runner.withArguments("packedJar", "-PpackedRelease=true", "--max-workers=1", "--stacktrace", "--no-watch-fs");
         BuildResult releaseBuild = runner.build();
         assertEquals(TaskOutcome.UP_TO_DATE, releaseBuild.task(":jar").getOutcome());
         assertEquals(TaskOutcome.SUCCESS, releaseBuild.task(":packedJar").getOutcome());
@@ -142,7 +142,7 @@ public class PackedJarTest {
         assertEquals(TaskOutcome.UP_TO_DATE, runner.build().task(":packedJar").getOutcome());
         long intermediateBudget = (ordinaryBytes + selectedBytes) / 2;
         Files.writeString(buildScript, build.replace("maximumBytes = 7500000", "maximumBytes = " + intermediateBudget));
-        runner.withArguments("verifyPluginJars", "--max-workers=1", "--stacktrace").build();
+        runner.withArguments("verifyPluginJars", "--max-workers=1", "--stacktrace", "--no-watch-fs").build();
         assertTrue(Files.size(directory.resolve("build/libs/packed-fixture.jar")) <= intermediateBudget);
         Files.writeString(buildScript, build.replace("maximumBytes = 7500000", "maximumBytes = " + (selectedBytes - 1)));
         assertTrue(runner.buildAndFail().getOutput().contains("Selected jar exceeds"));

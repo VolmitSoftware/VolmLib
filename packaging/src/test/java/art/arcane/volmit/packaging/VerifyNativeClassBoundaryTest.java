@@ -163,6 +163,6 @@ class VerifyNativeClassBoundaryTest {
 
     private GradleRunner runner() {
         return GradleRunner.create().withProjectDir(directory.toFile()).withPluginClasspath()
-                .withArguments("verifyNativeClassBoundary", "--stacktrace", "--max-workers=1");
+                .withArguments("verifyNativeClassBoundary", "--stacktrace", "--max-workers=1", "--no-watch-fs");
     }
 }
