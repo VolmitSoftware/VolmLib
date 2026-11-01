@@ -17,10 +17,14 @@ import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.phys.Vec3;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 public final class NativePlayerEffects {
+    private static final Map<String, SoundCategory> SOUND_CATEGORIES = soundCategories();
+
     private NativePlayerEffects() {
     }
 
@@ -55,6 +59,10 @@ public final class NativePlayerEffects {
         return sound.map(Sound::new).orElse(null);
     }
 
+    public static SoundCategory soundCategory(String name) {
+        return SOUND_CATEGORIES.get(name);
+    }
+
     public static Particle particle(String key) {
         Identifier identifier = Identifier.tryParse(key);
         ParticleType<?> type = identifier == null ? null : BuiltInRegistries.PARTICLE_TYPE.getValue(identifier);
@@ -81,7 +89,7 @@ public final class NativePlayerEffects {
     }
 
     public static void sound(NativeProtocolPlayer player, Sound sound, SoundEmission emission) {
-        player.player().connection.send(new ClientboundSoundPacket(sound.type, SoundSource.MASTER,
+        player.player().connection.send(new ClientboundSoundPacket(sound.type, emission.category().source,
                 emission.x(), emission.y(), emission.z(), emission.volume(), emission.pitch(), emission.seed()));
     }
 
@@ -91,10 +99,19 @@ public final class NativePlayerEffects {
                 emission.altZ(), emission.extra());
     }
 
+    private static Map<String, SoundCategory> soundCategories() {
+        SoundSource[] sources = SoundSource.values();
+        Map<String, SoundCategory> categories = new HashMap<>(sources.length * 2);
+        for (SoundSource source : sources) {
+            categories.put(source.getName(), new SoundCategory(source));
+        }
+        return Map.copyOf(categories);
+    }
+
     public record Direction(double x, double z) {
     }
 
-    public record SoundEmission(double x, double y, double z, float volume, float pitch, long seed) {
+    public record SoundEmission(SoundCategory category, double x, double y, double z, float volume, float pitch, long seed) {
     }
 
     public record ParticleEmission(double x, double y, double z, int count,
@@ -107,6 +124,11 @@ public final class NativePlayerEffects {
     public static final class Sound {
         private final Holder<SoundEvent> type;
         private Sound(Holder<SoundEvent> type) { this.type = type; }
+    }
+
+    public static final class SoundCategory {
+        private final SoundSource source;
+        private SoundCategory(SoundSource source) { this.source = source; }
     }
 
     public static final class Particle {
