@@ -62,6 +62,7 @@ public final class NativeBlockFaces {
 
     private static BlockState keepSupportedSides(BlockState state, Map<String, BooleanProperty> allowed, Neighbors neighbors) {
         boolean vine = state.is(Blocks.VINE);
+        boolean ceiling = sturdy(neighbors, Direction.UP);
         boolean side = false;
         BlockState kept = state;
         for (Direction f : SIDES) {
@@ -69,7 +70,7 @@ public final class NativeBlockFaces {
             if (property == null || !state.getValue(property)) {
                 continue;
             }
-            if (sturdy(neighbors, f) || vine && vineAboveCarries(neighbors, property)) {
+            if (sturdy(neighbors, f) || vine && (ceiling || vineAboveCarries(neighbors, property))) {
                 side = true;
             } else {
                 kept = kept.setValue(property, Boolean.FALSE);
@@ -80,7 +81,7 @@ public final class NativeBlockFaces {
         }
         BooleanProperty up = allowed.get("up");
         if (up != null) {
-            kept = kept.setValue(up, sturdy(neighbors, Direction.UP));
+            kept = kept.setValue(up, ceiling);
         }
         BooleanProperty down = allowed.get("down");
         if (down != null && kept.getValue(down) && !sturdy(neighbors, Direction.DOWN)) {
