@@ -30,6 +30,7 @@ public class PackagingArtifact implements Named {
     private final Property<Boolean> releaseCompression;
     private String taskName = "shadowJar";
     private Long maximumBytes;
+    private Integer packedMaximumBootstrapClasses;
     private boolean modded;
     private boolean shrink = true;
     private boolean stripDirectories;
@@ -171,6 +172,18 @@ public class PackagingArtifact implements Named {
 
     public void setPackedPayloadOnlyPrefixes(List<String> packedPayloadOnlyPrefixes) {
         this.packedPayloadOnlyPrefixes = List.copyOf(packedPayloadOnlyPrefixes);
+    }
+
+    public Integer getPackedMaximumBootstrapClasses() {
+        return packedMaximumBootstrapClasses;
+    }
+
+    public void setPackedMaximumBootstrapClasses(int packedMaximumBootstrapClasses) {
+        if (packedMaximumBootstrapClasses < 1) {
+            throw new GradleException("Packed bootstrap class budget for " + name + " must be at least 1: "
+                    + packedMaximumBootstrapClasses);
+        }
+        this.packedMaximumBootstrapClasses = packedMaximumBootstrapClasses;
     }
 
     public Long getMaximumBytes() {

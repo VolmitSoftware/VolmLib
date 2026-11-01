@@ -201,6 +201,9 @@ public class PluginPackagingPlugin implements Plugin<Project> {
                 task.getMaximumBytes().unsetConvention();
                 Long budget = policy.getEffectiveMaximumBytes();
                 task.getMaximumBytes().set(budget != null && mode.development() ? Long.valueOf(Long.MAX_VALUE) : budget);
+                if (!mode.development()) {
+                    task.getMaximumBootstrapClasses().set(policy.getPackedMaximumBootstrapClasses());
+                }
                 task.getEntrypoints().set(policy.getPackedEntrypoints());
                 task.getJarAccessors().set(policy.getPackedJarAccessors());
                 task.getPayloadOnlyPrefixes().set(policy.getPackedPayloadOnlyPrefixes());
