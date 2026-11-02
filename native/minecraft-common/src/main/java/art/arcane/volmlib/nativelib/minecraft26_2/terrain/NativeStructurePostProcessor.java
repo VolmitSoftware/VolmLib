@@ -2,6 +2,7 @@ package art.arcane.volmlib.nativelib.minecraft26_2.terrain;
 
 import art.arcane.volmlib.nativelib.terrain.structure.StructurePlacementDecision;
 import art.arcane.volmlib.nativelib.terrain.structure.StructureStiltSettings;
+import art.arcane.volmlib.nativelib.terrain.structure.StructureWater;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.StructureManager;
 import net.minecraft.world.level.WorldGenLevel;
@@ -35,7 +36,8 @@ public final class NativeStructurePostProcessor {
 
     public static void prepareTerrain(WorldGenLevel world, BoundingBox area,
                                       List<NativeStructureTerrainIntegrator.TerrainTarget> targets,
-                                      NativeStructureTerrainIntegrator.PaletteBlockResolver paletteBlockResolver) {
+                                      NativeStructureTerrainIntegrator.PaletteBlockResolver paletteBlockResolver,
+                                      StructureWater water) {
         if (targets == null || targets.isEmpty()) {
             return;
         }
@@ -43,7 +45,7 @@ public final class NativeStructurePostProcessor {
                 NativeStructureTerrainIntegrator.captureSourceTerrain(world, area, targets);
         for (NativeStructureTerrainIntegrator.TerrainTarget target : targets) {
             NativeStructureTerrainIntegrator.integrateTerrain(world, area, target.structureId(), target.start(),
-                    target.terrain(), paletteBlockResolver, sourceTerrain);
+                    target.terrain(), paletteBlockResolver, sourceTerrain, water);
         }
         for (NativeStructureTerrainIntegrator.TerrainTarget target : targets) {
             if (NativeStructureTerrainIntegrator.clearsLegacyTemplateAir(

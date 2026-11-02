@@ -4,6 +4,7 @@ public interface StructureStartPlan {
     String structureKey();
     JigsawSettings jigsaw();
     boolean underground();
+    boolean allowWater();
     boolean replacesSource();
     StructureTerrainSettings terrain();
     int chunkX();

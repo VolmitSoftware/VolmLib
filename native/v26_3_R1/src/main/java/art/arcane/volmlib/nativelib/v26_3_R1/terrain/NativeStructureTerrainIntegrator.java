@@ -10,7 +10,10 @@ import art.arcane.volmlib.util.structure.StructureCarveEnvelope;
 import art.arcane.volmlib.util.structure.StructureCarvingFootprint;
 import art.arcane.volmlib.nativelib.terrain.structure.StructurePalette;
 import art.arcane.volmlib.util.structure.StructureCarveShape;
+import art.arcane.volmlib.nativelib.terrain.structure.StructureStagePolicy;
 import art.arcane.volmlib.nativelib.terrain.structure.StructureTerrainSettings;
+import art.arcane.volmlib.nativelib.terrain.structure.StructureWater;
+import art.arcane.volmlib.nativelib.terrain.structure.StructureWaterRules;
 import art.arcane.volmlib.util.structure.StructureTerrainMode;
 import art.arcane.volmlib.util.noise.CNG;
 import art.arcane.volmlib.util.math.RNG;
@@ -102,17 +105,18 @@ public final class NativeStructureTerrainIntegrator {
 
     public static void integrateTerrain(WorldGenLevel world, BoundingBox area, String structureId,
                                  StructureStart start, StructureTerrainSettings configuredTerrain,
-                                 NativeStructureTerrainIntegrator.PaletteBlockResolver paletteBlockResolver) {
+                                 NativeStructureTerrainIntegrator.PaletteBlockResolver paletteBlockResolver,
+                                 StructureWater water) {
         SourceTerrainSnapshot sourceTerrain = requiresSourceTerrainFill(start, configuredTerrain)
                 ? captureSourceTerrain(world, area, start, configuredTerrain) : null;
         integrateTerrain(world, area, structureId, start, configuredTerrain,
-                paletteBlockResolver, sourceTerrain);
+                paletteBlockResolver, sourceTerrain, water);
     }
 
     public static void integrateTerrain(WorldGenLevel world, BoundingBox area, String structureId,
                                  StructureStart start, StructureTerrainSettings configuredTerrain,
                                  NativeStructureTerrainIntegrator.PaletteBlockResolver paletteBlockResolver,
-                                 SourceTerrainSnapshot sourceTerrain) {
+                                 SourceTerrainSnapshot sourceTerrain, StructureWater water) {
         StructureTerrainSettings terrain = configuredTerrain == null
                 ? StructureTerrainSettings.SOURCE
                 : configuredTerrain;
@@ -138,10 +142,10 @@ public final class NativeStructureTerrainIntegrator {
         StructureCarveShape shape = mode == StructureTerrainMode.BORE
                 ? StructureCarveShape.BOX : terrain.resolvedShape();
         if (shape == StructureCarveShape.BOX) {
-            carvePieceBoxes(world, area, start, terrain);
+            carvePieceBoxes(world, area, start, terrain, water);
             return;
         }
-        carveOrganicColumns(world, area, organicCarve(
+        carveOrganicColumns(world, area, water, organicCarve(
                 carveFootprint(start, Math.max(0, terrain.getHorizontalPadding()),
                         () -> world.getLevel().getStructureTemplateManager()),
                 terrain, shape, carveNoiseIdentity(world, structureId, start)));
@@ -518,6 +522,14 @@ public final class NativeStructureTerrainIntegrator {
                 ? state : null;
     }
 
+    public static List<StructureStagePolicy.Footprint> pieceFootprints(StructureStart start) {
+        List<StructureStagePolicy.Footprint> footprints = new ArrayList<>(start.getPieces().size());
+        for (BoundingBox bounds : contentPieceBounds(start)) {
+            footprints.add(new StructureStagePolicy.Footprint(bounds.minX(), bounds.minZ(), bounds.maxX(), bounds.maxZ()));
+        }
+        return List.copyOf(footprints);
+    }
+
     public static List<BoundingBox> contentPieceBounds(StructureStart start) {
         List<BoundingBox> bounds = new ArrayList<>(start.getPieces().size());
         for (StructurePiece piece : start.getPieces()) {
@@ -659,7 +671,8 @@ public final class NativeStructureTerrainIntegrator {
                 lobe, terrain.resolvedLobeFrequency(), lobeStrength);
     }
 
-    public static void carveOrganicColumns(WorldGenLevel world, BoundingBox area, OrganicCarve carve) {
+    public static void carveOrganicColumns(WorldGenLevel world, BoundingBox area, StructureWater water,
+                                           OrganicCarve carve) {
         StructureCarvingFootprint footprint = carve.footprint();
         int minX = Math.max(area.minX(), footprint.minX());
         int maxX = Math.min(area.maxX(), footprint.maxX());
@@ -668,6 +681,7 @@ public final class NativeStructureTerrainIntegrator {
         if (minX > maxX || minZ > maxZ) {
             return;
         }
+        StructureWaterRules.Carve kept = StructureWaterRules.carve(water, minX, minZ, maxX, maxZ);
         boolean eroded = carve.blob() != null;
         BlockState air = Blocks.AIR.defaultBlockState();
         BlockPos.MutableBlockPos position = new BlockPos.MutableBlockPos();
@@ -715,6 +729,9 @@ public final class NativeStructureTerrainIntegrator {
                                 carve.shape(), distanceSquared, noise, carve.strength())) {
                             continue;
                         }
+                    }
+                    if (kept.keeps(x, y, z)) {
+                        continue;
                     }
                     world.setBlock(position.set(x, y, z), air, 2);
                 }
@@ -917,18 +934,24 @@ public final class NativeStructureTerrainIntegrator {
     }
 
     private static void carvePieceBoxes(WorldGenLevel world, BoundingBox area, StructureStart start,
-                                        StructureTerrainSettings terrain) {
+                                        StructureTerrainSettings terrain, StructureWater water) {
         BlockState air = Blocks.AIR.defaultBlockState();
         BlockPos.MutableBlockPos position = new BlockPos.MutableBlockPos();
+        StructureWaterRules.Carve kept = null;
         for (BoundingBox bounds : contentPieceBounds(start)) {
             BoundingBox carve = paddedPieceArea(area, bounds, terrain);
             if (carve == null) {
                 continue;
             }
+            if (kept == null) {
+                kept = StructureWaterRules.carve(water, area.minX(), area.minZ(), area.maxX(), area.maxZ());
+            }
             for (int x = carve.minX(); x <= carve.maxX(); x++) {
                 for (int z = carve.minZ(); z <= carve.maxZ(); z++) {
                     for (int y = carve.minY(); y <= carve.maxY(); y++) {
-                        world.setBlock(position.set(x, y, z), air, 2);
+                        if (!kept.keeps(x, y, z)) {
+                            world.setBlock(position.set(x, y, z), air, 2);
+                        }
                     }
                 }
             }

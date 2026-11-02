@@ -49,6 +49,7 @@ import art.arcane.volmlib.nativelib.terrain.structure.StructurePalette;
 import art.arcane.volmlib.nativelib.terrain.structure.StructurePlacementDecision;
 import art.arcane.volmlib.nativelib.terrain.structure.StructureReferencePolicy;
 import art.arcane.volmlib.nativelib.terrain.structure.StructureSeaSurface;
+import art.arcane.volmlib.nativelib.terrain.structure.StructureWaterRules;
 import art.arcane.volmlib.nativelib.terrain.structure.StructureStartPlan;
 import art.arcane.volmlib.nativelib.terrain.structure.StructureVolumePolicy;
 import art.arcane.volmlib.util.math.RNG;
@@ -268,7 +269,9 @@ public final class NativeModdedStructureStage<C, P extends StructureStartPlan, O
                         "resolution", null, chunkPos.x(), chunkPos.z());
             }
             BoundingBox footprint = start.getBoundingBox();
-            if (!policy.allowsFootprint(current, new Footprint(footprint.minX(), footprint.minZ(), footprint.maxX(), footprint.maxZ()))) {
+            if (!policy.allowsFootprint(current, new Footprint(footprint.minX(), footprint.minZ(), footprint.maxX(), footprint.maxZ()))
+                    || !StructureWaterRules.admitsStart(configuredStarts.get(structure), policy.water(current),
+                            NativeStructureTerrainIntegrator.pieceFootprints(start))) {
                 chunk.setStartForStructure(structure, StructureStart.INVALID_START);
                 if (configuredStarts.containsKey(structure)) {
                     policy.structurePolicy(current).discard(structureId, chunkPos.x(), chunkPos.z());
@@ -439,7 +442,9 @@ public final class NativeModdedStructureStage<C, P extends StructureStartPlan, O
             }
             try {
                 NativeStructurePostProcessor.prepareTerrain(
-                        boundedWorld, area, terrainTargets, this::resolvePaletteBlock);
+                        boundedWorld, area, terrainTargets, this::resolvePaletteBlock,
+                        Objects.requireNonNull(policy.water(current),
+                                "Native structure stage policy did not supply structure water"));
             } catch (Throwable error) {
                 throw NativeStructureGenerationException.failure(
                         "terrain preparation", nativeStructureBatchContext(placementGroups),
