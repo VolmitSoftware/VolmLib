@@ -112,7 +112,9 @@ public final class BukkitLanguageSwitcher implements AutoCloseable, Listener {
                 requiredTheme,
                 current.textResolver(),
                 current.editor(),
-                current.editorFeedback()
+                current.editorFeedback(),
+                current.updateAction(),
+                current.displayNames()
         );
         editor.updateTheme(requiredTheme);
     }
@@ -134,6 +136,9 @@ public final class BukkitLanguageSwitcher implements AutoCloseable, Listener {
             }
             if (canSelectServer(sender, selected)) {
                 candidates.add("server");
+                if (options.updateAction() != null) {
+                    candidates.add("update");
+                }
             }
         } else if (arguments.length == 2) {
             if (arguments[0].equalsIgnoreCase("self") && canSelectSelf(sender, selected)) {
@@ -321,6 +326,18 @@ public final class BukkitLanguageSwitcher implements AutoCloseable, Listener {
             }
             return true;
         }
+        if (arguments[0].equalsIgnoreCase("update") && options.updateAction() != null) {
+            if (arguments.length > 1) {
+                message(sender, BukkitLanguageMessages.UPDATE_USAGE,
+                        MessageArgument.untrusted("command", options.command()));
+                return true;
+            }
+            if (!allowed(sender, "server", selected)) {
+                return true;
+            }
+            runUpdate(sender);
+            return true;
+        }
         String scope = arguments[0].toLowerCase(Locale.ROOT);
         if ((!scope.equals("self") && !scope.equals("server")) || arguments.length > 2) {
             message(sender, BukkitLanguageMessages.SELECTION_USAGE,
@@ -422,7 +439,7 @@ public final class BukkitLanguageSwitcher implements AutoCloseable, Listener {
         }
         for (int index = page.startIndex(); index < page.endIndex(); index++) {
             String locale = locales.get(index);
-            String name = VolmitLocales.displayName(locale).orElse(locale);
+            String name = options.displayName(locale);
             lines.add(languageLink(sender, locale, name, locale.equalsIgnoreCase(current),
                     base + " " + locale));
         }
@@ -833,6 +850,72 @@ public final class BukkitLanguageSwitcher implements AutoCloseable, Listener {
         }
     }
 
+    private void runUpdate(CommandSender sender) {
+        message(sender, BukkitLanguageMessages.UPDATE_CHECKING,
+                MessageArgument.untrusted("plugin", plugin.getName()));
+        CompletableFuture<LanguageUpstreamSync.SyncReport> pending;
+        try {
+            pending = Objects.requireNonNull(options.updateAction().update(), "Language update result");
+        } catch (RuntimeException failure) {
+            plugin.getLogger().log(Level.SEVERE, "Unable to start the language update for " + plugin.getName(), failure);
+            message(sender, BukkitLanguageMessages.UPDATE_FAILED,
+                    MessageArgument.untrusted("plugin", plugin.getName()),
+                    MessageArgument.untrusted("reason", describe(failure)));
+            return;
+        }
+        pending.whenComplete((report, failure) -> reply(sender, () -> updateFeedback(sender, report, failure)));
+    }
+
+    private void updateFeedback(CommandSender sender, LanguageUpstreamSync.SyncReport report, Throwable failure) {
+        String name = plugin.getName();
+        if (failure != null || report == null) {
+            if (failure != null) {
+                plugin.getLogger().log(Level.SEVERE, "Language update failed for " + name, failure);
+            }
+            message(sender, BukkitLanguageMessages.UPDATE_FAILED,
+                    MessageArgument.untrusted("plugin", name),
+                    MessageArgument.untrusted("reason", failure == null ? "no report" : describe(failure)));
+            return;
+        }
+        if (report.failure().isPresent()) {
+            message(sender, BukkitLanguageMessages.UPDATE_FAILED,
+                    MessageArgument.untrusted("plugin", name),
+                    MessageArgument.untrusted("reason", report.failure().get()));
+            return;
+        }
+        if (report.coolingDown()) {
+            message(sender, BukkitLanguageMessages.UPDATE_COOLDOWN,
+                    MessageArgument.untrusted("plugin", name),
+                    MessageArgument.untrusted("remaining", report.cooldownRemaining()));
+            return;
+        }
+        List<String> changed = report.changedLocales();
+        for (String locale : changed) {
+            LanguageCatalogMerge.MergeResult result = report.merged().get(locale);
+            message(sender, BukkitLanguageMessages.UPDATE_APPLIED,
+                    MessageArgument.untrusted("plugin", name),
+                    MessageArgument.untrusted("locale", locale),
+                    MessageArgument.untrusted("added", String.valueOf(result.added().size())),
+                    MessageArgument.untrusted("updated", String.valueOf(result.updated().size() + result.removed().size())),
+                    MessageArgument.untrusted("kept", String.valueOf(result.kept().size())));
+        }
+        for (Map.Entry<String, String> entry : report.failures().entrySet()) {
+            message(sender, BukkitLanguageMessages.UPDATE_LOCALE_FAILED,
+                    MessageArgument.untrusted("plugin", name),
+                    MessageArgument.untrusted("locale", entry.getKey()),
+                    MessageArgument.untrusted("reason", entry.getValue()));
+        }
+        if (changed.isEmpty() && report.failures().isEmpty()) {
+            message(sender, BukkitLanguageMessages.UPDATE_UNCHANGED,
+                    MessageArgument.untrusted("plugin", name));
+        }
+    }
+
+    private static String describe(Throwable failure) {
+        String message = failure.getMessage();
+        return message == null || message.isBlank() ? failure.getClass().getSimpleName() : message;
+    }
+
     private void reply(CommandSender sender, Runnable message) {
         if (closed || !plugin.isEnabled()) {
             return;
@@ -1109,10 +1192,17 @@ public final class BukkitLanguageSwitcher implements AutoCloseable, Listener {
 
     public record Options(String command, String adminPermission, DirectorMiniMenu.Theme theme,
                           DirectorTextResolver textResolver, PluginLanguageEditor.Options editor,
-                          LanguageEditFeedback editorFeedback) {
-        public Options(String command, String adminPermission, DirectorMiniMenu.Theme theme,
-                       DirectorTextResolver textResolver, PluginLanguageEditor.Options editor) {
-            this(command, adminPermission, theme, textResolver, editor, null);
+                          LanguageEditFeedback editorFeedback, LanguageUpdateAction updateAction,
+                          LocaleDisplayNames displayNames) {
+        public String displayName(String locale) {
+            String requiredLocale = Objects.requireNonNull(locale, "locale");
+            if (displayNames != null) {
+                String name = displayNames.displayName(requiredLocale);
+                if (name != null && !name.isBlank()) {
+                    return name;
+                }
+            }
+            return VolmitLocales.displayName(requiredLocale).orElse(requiredLocale);
         }
 
         public Options {
@@ -1129,6 +1219,16 @@ public final class BukkitLanguageSwitcher implements AutoCloseable, Listener {
     @FunctionalInterface
     public interface LanguageEditFeedback {
         ComponentText saved(CommandSender sender, LanguageEditChange change);
+    }
+
+    @FunctionalInterface
+    public interface LanguageUpdateAction {
+        CompletableFuture<LanguageUpstreamSync.SyncReport> update();
+    }
+
+    @FunctionalInterface
+    public interface LocaleDisplayNames {
+        String displayName(String locale);
     }
 
     public record LanguageEditChange(String locale, String key, String before, String after) {

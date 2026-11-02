@@ -74,6 +74,22 @@ public final class BukkitLanguageMessages {
             "language.selection.server-selected", "{plugin}: server language is now {locale}.");
     public static final TextKey SERVER_DEFAULT_SELECTED = TextKey.of(
             "language.selection.server-default-selected", "{plugin}: your language now uses the server default.");
+    public static final TextKey UPDATE_USAGE = TextKey.of(
+            "language.usage.update", "Usage: /{command} language update");
+    public static final TextKey UPDATE_CHECKING = TextKey.of(
+            "language.update.checking", "{plugin}: checking the language repository for changes...");
+    public static final TextKey UPDATE_UNCHANGED = TextKey.of(
+            "language.update.unchanged", "{plugin}: installed languages already match the repository.");
+    public static final TextKey UPDATE_APPLIED = TextKey.of(
+            "language.update.applied",
+            "{plugin}: updated {locale} ({added} added, {updated} changed, {kept} local edits kept).");
+    public static final TextKey UPDATE_COOLDOWN = TextKey.of(
+            "language.update.cooldown",
+            "{plugin}: the language repository was checked recently; try again in {remaining}.");
+    public static final TextKey UPDATE_LOCALE_FAILED = TextKey.of(
+            "language.update.locale-failed", "{plugin}: {locale} was not updated: {reason}");
+    public static final TextKey UPDATE_FAILED = TextKey.of(
+            "language.update.failed", "{plugin}: language update failed: {reason}");
     public static final TextKey EDITOR_TITLE = TextKey.of("language.editor.title", "{plugin} › {section}");
     public static final TextKey EDITOR_LANGUAGES = TextKey.of(
             "language.editor.section.languages", "Languages");
@@ -184,6 +200,13 @@ public final class BukkitLanguageMessages {
             PERSONAL_SELECTED,
             SERVER_SELECTED,
             SERVER_DEFAULT_SELECTED,
+            UPDATE_USAGE,
+            UPDATE_CHECKING,
+            UPDATE_UNCHANGED,
+            UPDATE_APPLIED,
+            UPDATE_COOLDOWN,
+            UPDATE_LOCALE_FAILED,
+            UPDATE_FAILED,
             EDITOR_TITLE,
             EDITOR_LANGUAGES,
             EDITOR_SEARCH,

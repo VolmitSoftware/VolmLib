@@ -165,7 +165,8 @@ public final class BukkitUpdateService implements Listener, AutoCloseable {
                     "url", release == null ? "" : release.url(),
                     "error", result.error() == null ? "" : result.error(),
                     "checked", Long.toString(result.checkedMillis()),
-                    "lastSuccess", Long.toString(result.lastSuccessMillis()));
+                    "lastSuccess", Long.toString(result.lastSuccessMillis()),
+                    "nextCheck", Long.toString(checker.nextCheckDelayMillis()));
         });
     }
 
@@ -271,6 +272,35 @@ public final class BukkitUpdateService implements Listener, AutoCloseable {
         DirectorMiniMenu.deliverContent(sender, menu, theme, resolver);
     }
 
+    private static String cooldownNote(Map<String, String> values) {
+        long nextCheck = parseMillis(values.get("nextCheck"));
+        if (nextCheck <= 0L) {
+            return "";
+        }
+        long checked = parseMillis(values.get("checked"));
+        String age = checked <= 0L ? "" : "last checked " + describeAge(System.currentTimeMillis() - checked) + " ago; ";
+        return "; " + age + "next check in " + GitHubReleaseChecker.describeDelay(nextCheck);
+    }
+
+    private static String describeAge(long millis) {
+        long seconds = Math.max(0L, millis / 1000L);
+        if (seconds < 60L) {
+            return seconds + (seconds == 1L ? " second" : " seconds");
+        }
+        return GitHubReleaseChecker.describeDelay(millis);
+    }
+
+    private static long parseMillis(String value) {
+        if (value == null || value.isBlank()) {
+            return 0L;
+        }
+        try {
+            return Long.parseLong(value.trim());
+        } catch (NumberFormatException invalid) {
+            return 0L;
+        }
+    }
+
     private static ComponentText reportEntry(Result result, String status, boolean player,
                                             DirectorMiniMenu.Theme theme) {
         Map<String, String> values = result.values();
@@ -284,16 +314,17 @@ public final class BukkitUpdateService implements Listener, AutoCloseable {
         };
         String latest = values.getOrDefault("version", "");
         boolean failed = "FAILED".equals(status);
+        String cooldown = "DISABLED".equals(status) ? "" : cooldownNote(values);
         String text = " " + result.endpoint().values().get("installed")
                 + (latest.isEmpty() || "DISABLED".equals(status) ? "" : " -> " + latest + (failed ? " (cached)" : ""))
-                + ": " + label;
+                + ": " + label + cooldown;
         ComponentText message = ComponentText.markup("<" + theme.muted() + ">  ⇀ </" + theme.muted() + ">"
                 + "<gradient:" + theme.primaryLeft() + ":" + theme.primaryRight() + ">"
                 + DirectorMiniMenu.escapeText(result.endpoint().name()) + "</gradient>");
         String details = "Installed: " + result.endpoint().values().get("installed")
                 + (latest.isEmpty() || "DISABLED".equals(status) ? "" : "\n"
                 + (failed ? "Cached release: " : "Latest release: ") + latest)
-                + "\n" + label;
+                + "\n" + label + (cooldown.isEmpty() ? "" : "\n" + cooldown.substring(2));
         message = player ? message.hover(ComponentText.literal(details))
                 : message.append(ComponentText.literal(text).colorIfAbsent(theme.description()));
         String url = values.getOrDefault("url", "");

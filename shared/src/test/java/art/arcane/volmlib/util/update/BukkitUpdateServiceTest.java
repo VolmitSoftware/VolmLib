@@ -169,6 +169,7 @@ public class BukkitUpdateServiceTest {
         Fixture third = fixture("Wormholes");
         third.enabled.set(false);
         third.service.reconfigure();
+        when(second.checker.nextCheckDelayMillis()).thenReturn(240_000L);
         BukkitUpdateService.command(first.plugin, (CommandSender) player, art.arcane.volmlib.util.director.help.DirectorMiniMenu.Theme.reactBlue(), art.arcane.volmlib.util.director.DirectorTextResolver.ENGLISH);
         first.response.completeExceptionally(new IllegalStateException("network"));
         second.response.complete(update("ShapedPortals"));
@@ -191,6 +192,9 @@ public class BukkitUpdateServiceTest {
         assertTrue(markup.contains("Latest release: 2.0"));
         assertTrue(markup.contains("check failed;"));
         assertTrue(markup.contains("https://github.com/VolmitSoftware/ShapedPortals/releases/tag/2.0"));
+        assertTrue(markup.contains("last checked"));
+        assertTrue(markup.contains("next check in 4 minutes"));
+        assertFalse(output.contains("next check in"));
         verify(first.checker).checkReport(true);
         verify(second.checker).checkReport(true);
         verify(third.checker, never()).checkReport(anyBoolean());

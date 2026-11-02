@@ -571,7 +571,7 @@ final class BukkitLanguageEditor implements AutoCloseable, Listener {
             if (view.locale() == null) {
                 String locale = locales.get(index);
                 boolean active = locale.equalsIgnoreCase(options.languages().defaultLocale());
-                entry = localeItem(player, locale, VolmitLocales.displayName(locale).orElse(locale), active);
+                entry = localeItem(player, locale, options.switcher().displayName(locale), active);
             } else if (view.group() == null && view.filter().isEmpty()) {
                 String group = groups.get(index);
                 entry = categoryItem(player, group, groupName(group),
