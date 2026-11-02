@@ -131,6 +131,28 @@ public class GitHubReleaseCheckerTest {
     }
 
     @Test
+    public void nextCheckDelayReflectsTheCooldown() throws Exception {
+        try (Fixture fixture = new Fixture(); GitHubReleaseChecker checker = fixture.checker()) {
+            assertEquals(0L, checker.nextCheckDelayMillis());
+            checker.setEnabled(true);
+            checker.checkReport(true).get(3, TimeUnit.SECONDS);
+            long delay = checker.nextCheckDelayMillis();
+            assertTrue(delay > 0L && delay <= Duration.ofHours(1).toMillis());
+            for (int index = 0; index < 5; index++) {
+                checker.checkReport(true).get(3, TimeUnit.SECONDS);
+            }
+            assertEquals(1, fixture.requests.get());
+            assertTrue(checker.nextCheckDelayMillis() > 0L);
+        }
+        try (Fixture fixture = new Fixture(); GitHubReleaseChecker checker = fixture.checker(Duration.ofMillis(20))) {
+            checker.setEnabled(true);
+            checker.checkReport(true).get(3, TimeUnit.SECONDS);
+            Thread.sleep(60L);
+            assertEquals(0L, checker.nextCheckDelayMillis());
+        }
+    }
+
+    @Test
     public void manualChecksWaitForTheCooldownAndRateLimits() throws Exception {
         for (int status : List.of(302, 429)) {
             try (Fixture fixture = new Fixture(); GitHubReleaseChecker checker = fixture.checker()) {

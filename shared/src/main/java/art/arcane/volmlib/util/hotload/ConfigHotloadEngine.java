@@ -50,7 +50,7 @@ public class ConfigHotloadEngine {
     public static final long DEFAULT_FULL_WATCH_SCAN_WINDOW_MS = 5_000L;
     public static final long DEFAULT_SIGNATURE_SCAN_WINDOW_MS = 2_500L;
     public static final long DEFAULT_HOTLOAD_COOLDOWN_MS = 3_000L;
-    private static final long MAX_RECONCILIATION_FILE_BYTES = 2L * 1024L * 1024L;
+    private static final long MAX_RECONCILIATION_FILE_BYTES = 3L * 1024L * 1024L;
     private static final long RECONCILIATION_BYTE_BUDGET = 8L * 1024L * 1024L;
     private static final long RECONCILIATION_TIME_BUDGET_NANOS = TimeUnit.MILLISECONDS.toNanos(10L);
     static final int RECONCILIATION_FILE_BUDGET = 32;
@@ -71,6 +71,7 @@ public class ConfigHotloadEngine {
     private final Map<String, String> knownSignatures = new ConcurrentHashMap<>();
     private final Map<String, String> knownContents = new ConcurrentHashMap<>();
     private final Map<String, String> handledNullContentSignatures = new ConcurrentHashMap<>();
+    private final Map<String, FileState> rejectedApplies = new ConcurrentHashMap<>();
     private final Map<String, FileState> pendingStates = new HashMap<>();
     private final Map<String, Long> pendingSinceNanos = new HashMap<>();
     private final Map<String, StableContentSnapshot> queuedTouchedSnapshots = new HashMap<>();
@@ -227,6 +228,12 @@ public class ConfigHotloadEngine {
         }
     }
 
+    public void retrySnapshot(StableContentSnapshot snapshot) {
+        processSnapshotChange(snapshot, ignored -> {
+            throw new RetryLaterException();
+        }, null);
+    }
+
     private boolean processSnapshotChangeLocked(StableContentSnapshot snapshot,
                                                 Function<StableContentSnapshot, Boolean> applyChange,
                                                 Consumer<ContentDelta> onApplied) {
@@ -256,6 +263,16 @@ public class ConfigHotloadEngine {
         boolean applied;
         try {
             applied = Boolean.TRUE.equals(applyChange.apply(snapshot));
+        } catch (RetryLaterException deferred) {
+            FileState afterDeferral = state(file);
+            synchronized (watcherStateLock) {
+                if (snapshot.selfWriteRevision() == selfWriteRevision(file)) {
+                    knownSignatures.put(path, snapshot.signature());
+                    queueRetryLocked(snapshot, afterDeferral);
+                    recordApplyCompletionLocked();
+                }
+            }
+            return false;
         } catch (RuntimeException failure) {
             FileState afterFailure = state(file);
             synchronized (watcherStateLock) {
@@ -274,6 +291,7 @@ public class ConfigHotloadEngine {
             }
             if (applied) {
                 updateKnownSnapshot(file, snapshot.signature(), now);
+                rejectedApplies.clear();
             } else {
                 recordRejectedSnapshot(path, snapshot);
             }
@@ -315,6 +333,7 @@ public class ConfigHotloadEngine {
         knownSignatures.clear();
         knownContents.clear();
         handledNullContentSignatures.clear();
+        rejectedApplies.clear();
         pendingStates.clear();
         pendingSinceNanos.clear();
         queuedTouchedSnapshots.clear();
@@ -368,6 +387,7 @@ public class ConfigHotloadEngine {
         knownSignatures.clear();
         knownContents.clear();
         handledNullContentSignatures.clear();
+        rejectedApplies.clear();
         pendingStates.clear();
         pendingSinceNanos.clear();
         queuedTouchedSnapshots.clear();
@@ -469,7 +489,9 @@ public class ConfigHotloadEngine {
                 if (currentState.missing() && now - pendingSince < hotloadCooldownNanos) {
                     stillPending.put(path, currentState);
                 } else {
-                    stable.add(new StableContentSnapshot(file, currentState.signature(), currentState.content(), selfWriteRevision(file)));
+                    if (!alreadyRejected(path, currentState)) {
+                        stable.add(new StableContentSnapshot(file, currentState.signature(), currentState.content(), selfWriteRevision(file)));
+                    }
                     pendingSinceNanos.remove(path);
                 }
             } else {
@@ -745,6 +767,7 @@ public class ConfigHotloadEngine {
     private void updateKnownSnapshot(File file, String signature, String normalizedContent) {
         String path = file.getAbsolutePath();
         knownSignatures.put(path, signature);
+        rejectedApplies.remove(path);
         if (normalizedContent == null) {
             knownContents.remove(path);
             handledNullContentSignatures.put(path, signature);
@@ -773,7 +796,8 @@ public class ConfigHotloadEngine {
         String path = snapshot.file().getAbsolutePath();
         if (snapshot.matches(after)) {
             if (!applied) {
-                queuedTouchedSnapshots.put(path, snapshot);
+                rejectedApplies.put(path, new FileState(snapshot.signature(), snapshot.normalizedContent()));
+                queuedTouchedSnapshots.remove(path);
             }
             return;
         }
@@ -781,6 +805,22 @@ public class ConfigHotloadEngine {
         queuedTouchedSnapshots.remove(path);
         pendingStates.put(path, after);
         pendingSinceNanos.put(path, clock.getAsLong());
+    }
+
+    private void queueRetryLocked(StableContentSnapshot snapshot, FileState after) {
+        String path = snapshot.file().getAbsolutePath();
+        rejectedApplies.remove(path);
+        if (snapshot.matches(after)) {
+            queuedTouchedSnapshots.put(path, snapshot);
+            return;
+        }
+        queuedTouchedSnapshots.remove(path);
+        pendingStates.put(path, after);
+        pendingSinceNanos.put(path, clock.getAsLong());
+    }
+
+    private boolean alreadyRejected(String path, FileState state) {
+        return state.equals(rejectedApplies.get(path));
     }
 
     private void recordApplyCompletionLocked() {
@@ -1038,6 +1078,12 @@ public class ConfigHotloadEngine {
     private record FileState(String signature, String content) {
         private boolean missing() {
             return "missing".equals(signature);
+        }
+    }
+
+    public static final class RetryLaterException extends RuntimeException {
+        public RetryLaterException() {
+            super(null, null, false, false);
         }
     }
 

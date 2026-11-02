@@ -570,8 +570,33 @@ public class ConfigHotloadEngineTest {
     }
 
     @Test(timeout = 8_000L)
-    public void failedSnapshotApplyRetriesWithoutAnotherFilesystemEvent() throws Exception {
-        File directory = temporaryFolder.newFolder("snapshot-retry-managed");
+    public void rejectedFileIsNotRetriedUntilItChanges() throws Exception {
+        File directory = temporaryFolder.newFolder("snapshot-reject-once-managed");
+        File file = new File(directory, "feature.toml");
+        Files.writeString(file.toPath(), "value = 1\n", StandardCharsets.UTF_8);
+        ConfigHotloadEngine engine = createEngine(() -> knownConfigFiles(directory));
+
+        try {
+            engine.configure(100L, 250L, List.of(file), List.of());
+            Files.writeString(file.toPath(), "value = 2\n", StandardCharsets.UTF_8);
+            ConfigHotloadEngine.StableContentSnapshot first = awaitTouchedSnapshot(engine, file);
+            assertEquals("value = 2", first.normalizedContent());
+            assertFalse(engine.processSnapshotChange(first, ignored -> false, null));
+            assertNoFurtherSnapshots(engine);
+
+            Files.writeString(file.toPath(), "value = 3\n", StandardCharsets.UTF_8);
+            ConfigHotloadEngine.StableContentSnapshot second = awaitTouchedSnapshot(engine, file);
+            assertEquals("value = 3", second.normalizedContent());
+            assertFalse(engine.processSnapshotChange(second, ignored -> false, null));
+            assertNoFurtherSnapshots(engine);
+        } finally {
+            engine.clear();
+        }
+    }
+
+    @Test(timeout = 8_000L)
+    public void throwingApplyIsNotRetriedUntilItChanges() throws Exception {
+        File directory = temporaryFolder.newFolder("snapshot-throw-once-managed");
         File file = new File(directory, "feature.toml");
         Files.writeString(file.toPath(), "value = 1\n", StandardCharsets.UTF_8);
         ConfigHotloadEngine engine = createEngine(() -> knownConfigFiles(directory));
@@ -580,9 +605,106 @@ public class ConfigHotloadEngineTest {
             engine.configure(100L, 250L, List.of(file), List.of());
             Files.writeString(file.toPath(), "value = 2\n", StandardCharsets.UTF_8);
             ConfigHotloadEngine.StableContentSnapshot snapshot = awaitTouchedSnapshot(engine, file);
+            assertThrows(IllegalStateException.class, () -> engine.processSnapshotChange(snapshot, ignored -> {
+                throw new IllegalStateException("apply failed");
+            }, null));
+            assertNoFurtherSnapshots(engine);
+        } finally {
+            engine.clear();
+        }
+    }
 
-            assertFalse(engine.processSnapshotChange(snapshot, ignored -> false, null));
-            assertTrue(engine.pollTouchedSnapshots().isEmpty());
+    @Test(timeout = 8_000L)
+    public void snapshotDetectedDuringRejectionIsNotEmitted() throws Exception {
+        File directory = temporaryFolder.newFolder("snapshot-reject-race-managed");
+        File file = new File(directory, "feature.toml");
+        Files.writeString(file.toPath(), "value = 1\n", StandardCharsets.UTF_8);
+        ConfigHotloadEngine engine = createEngine(() -> knownConfigFiles(directory));
+
+        try {
+            engine.configure(100L, 250L, List.of(file), List.of());
+            Files.writeString(file.toPath(), "value = 2\n", StandardCharsets.UTF_8);
+            ConfigHotloadEngine.StableContentSnapshot snapshot = awaitTouchedSnapshot(engine, file);
+            assertFalse(engine.processSnapshotChange(snapshot, ignored -> {
+                for (int poll = 0; poll < 40; poll++) {
+                    advanceVirtualClock();
+                    engine.pollTouchedSnapshots();
+                }
+                return false;
+            }, null));
+            assertNoFurtherSnapshots(engine);
+        } finally {
+            engine.clear();
+        }
+    }
+
+    @Test(timeout = 8_000L)
+    public void appliedFileGivesRejectedFilesAnotherAttempt() throws Exception {
+        File directory = temporaryFolder.newFolder("snapshot-reject-sibling-managed");
+        File rejected = new File(directory, "feature.toml");
+        File sibling = new File(directory, "base.toml");
+        Files.writeString(rejected.toPath(), "value = 1\n", StandardCharsets.UTF_8);
+        Files.writeString(sibling.toPath(), "value = 1\n", StandardCharsets.UTF_8);
+        ConfigHotloadEngine engine = createEngine(() -> knownConfigFiles(directory));
+
+        try {
+            engine.configure(100L, 250L, List.of(rejected, sibling), List.of());
+            Files.writeString(rejected.toPath(), "value = 2\n", StandardCharsets.UTF_8);
+            ConfigHotloadEngine.StableContentSnapshot first = awaitTouchedSnapshot(engine, rejected);
+            assertFalse(engine.processSnapshotChange(first, ignored -> false, null));
+            assertNoFurtherSnapshots(engine);
+
+            Files.writeString(sibling.toPath(), "value = 2\n", StandardCharsets.UTF_8);
+            ConfigHotloadEngine.StableContentSnapshot fixed = awaitTouchedSnapshot(engine, sibling);
+            assertTrue(engine.processSnapshotChange(fixed, ignored -> true, null));
+
+            ConfigHotloadEngine.StableContentSnapshot retried = awaitTouchedSnapshot(engine, rejected);
+            assertEquals("value = 2", retried.normalizedContent());
+            assertTrue(engine.processSnapshotChange(retried, ignored -> true, null));
+            assertNoFurtherSnapshots(engine);
+        } finally {
+            engine.clear();
+        }
+    }
+
+    @Test(timeout = 8_000L)
+    public void retryLaterKeepsRetryingUntilApplied() throws Exception {
+        File directory = temporaryFolder.newFolder("snapshot-retry-later-managed");
+        File file = new File(directory, "feature.toml");
+        Files.writeString(file.toPath(), "value = 1\n", StandardCharsets.UTF_8);
+        ConfigHotloadEngine engine = createEngine(() -> knownConfigFiles(directory));
+
+        try {
+            engine.configure(100L, 250L, List.of(file), List.of());
+            Files.writeString(file.toPath(), "value = 2\n", StandardCharsets.UTF_8);
+            for (int attempt = 0; attempt < 6; attempt++) {
+                ConfigHotloadEngine.StableContentSnapshot snapshot = awaitTouchedSnapshot(engine, file);
+                assertEquals("value = 2", snapshot.normalizedContent());
+                assertFalse(engine.processSnapshotChange(snapshot, ignored -> {
+                    throw new ConfigHotloadEngine.RetryLaterException();
+                }, null));
+            }
+
+            ConfigHotloadEngine.StableContentSnapshot snapshot = awaitTouchedSnapshot(engine, file);
+            assertTrue(engine.processSnapshotChange(snapshot, ignored -> true, null));
+            assertNoFurtherSnapshots(engine);
+        } finally {
+            engine.clear();
+        }
+    }
+
+    @Test(timeout = 8_000L)
+    public void retrySnapshotReemitsAFileThatWasNotAttempted() throws Exception {
+        File directory = temporaryFolder.newFolder("snapshot-retry-call-managed");
+        File file = new File(directory, "feature.toml");
+        Files.writeString(file.toPath(), "value = 1\n", StandardCharsets.UTF_8);
+        ConfigHotloadEngine engine = createEngine(() -> knownConfigFiles(directory));
+
+        try {
+            engine.configure(100L, 250L, List.of(file), List.of());
+            Files.writeString(file.toPath(), "value = 2\n", StandardCharsets.UTF_8);
+            ConfigHotloadEngine.StableContentSnapshot snapshot = awaitTouchedSnapshot(engine, file);
+            engine.retrySnapshot(snapshot);
 
             ConfigHotloadEngine.StableContentSnapshot retry = awaitTouchedSnapshot(engine, file);
             assertEquals(snapshot.signature(), retry.signature());
@@ -592,32 +714,10 @@ public class ConfigHotloadEngineTest {
         }
     }
 
-    @Test(timeout = 8_000L)
-    public void throwingSnapshotApplyRetriesWithoutAnotherFilesystemEvent() throws Exception {
-        File directory = temporaryFolder.newFolder("snapshot-throw-retry-managed");
-        File file = new File(directory, "feature.toml");
-        Files.writeString(file.toPath(), "value = 1\n", StandardCharsets.UTF_8);
-        ConfigHotloadEngine engine = createEngine(() -> knownConfigFiles(directory));
-
-        try {
-            engine.configure(100L, 250L, List.of(file), List.of());
-            Files.writeString(file.toPath(), "value = 2\n", StandardCharsets.UTF_8);
-            ConfigHotloadEngine.StableContentSnapshot snapshot = awaitTouchedSnapshot(engine, file);
-
-            try {
-                engine.processSnapshotChange(snapshot, ignored -> {
-                    throw new IllegalStateException("apply failed");
-                }, null);
-                throw new AssertionError("expected apply failure");
-            } catch (IllegalStateException expected) {
-                assertEquals("apply failed", expected.getMessage());
-            }
-
-            ConfigHotloadEngine.StableContentSnapshot retry = awaitTouchedSnapshot(engine, file);
-            assertEquals(snapshot.signature(), retry.signature());
-            assertEquals(snapshot.normalizedContent(), retry.normalizedContent());
-        } finally {
-            engine.clear();
+    private void assertNoFurtherSnapshots(ConfigHotloadEngine engine) {
+        for (int poll = 0; poll < 40; poll++) {
+            advanceVirtualClock();
+            assertTrue(engine.pollTouchedSnapshots().isEmpty());
         }
     }
 

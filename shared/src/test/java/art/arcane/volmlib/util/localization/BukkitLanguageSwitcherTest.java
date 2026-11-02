@@ -35,6 +35,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
 import java.util.function.Predicate;
@@ -602,8 +603,103 @@ public class BukkitLanguageSwitcherTest {
         assertTrue(rendered.contains("<click:run_command:'/adapt language server fr_FR'>"));
     }
 
+    @Test
+    public void updateSubcommandIsAbsentWithoutAnAction() {
+        when(player.hasPermission("adapt.admin")).thenReturn(true);
+
+        switcher.command(player, new String[]{"update"});
+
+        assertFalse(switcher.complete(player, new String[]{"up"}).contains("update"));
+        assertTrue(String.join("\n", richMessages()).contains("Usage: /adapt language self"));
+    }
+
+    @Test
+    public void updateSubcommandRequiresServerPermissionAndReportsResults() {
+        AtomicReference<CompletableFuture<LanguageUpstreamSync.SyncReport>> pending = new AtomicReference<>();
+        BukkitLanguageSwitcher updating = register("Iris", "iris", languageService(),
+                DirectorTextResolver.ENGLISH, () -> pending.get(), locale -> null);
+
+        updating.command(player, new String[]{"update"});
+        assertTrue(String.join("\n", richMessages()).contains("permission to change the server language for Iris"));
+        assertFalse(updating.complete(player, new String[]{"up"}).contains("update"));
+        clearInvocations(player);
+
+        when(player.hasPermission("iris.admin")).thenReturn(true);
+        assertEquals(List.of("update"), updating.complete(player, new String[]{"up"}));
+        updating.command(player, new String[]{"update", "extra"});
+        assertTrue(String.join("\n", richMessages()).contains("Usage: /iris language update"));
+        clearInvocations(player);
+
+        LanguageCatalogMerge.MergeResult result = new LanguageCatalogMerge.MergeResult("", List.of("menu.title"),
+                List.of("farewell"), List.of("greeting"), List.of(), true);
+        pending.set(CompletableFuture.completedFuture(new LanguageUpstreamSync.SyncReport(
+                Optional.of("30cea6163bc3a0e790d3aeb6816e79a67cac615f"), false,
+                Map.of("fr_FR", result), Map.of("de_DE", "HTTP 404"), Optional.empty(), 1L, 0L)));
+        updating.command(player, new String[]{"update"});
+        String rendered = String.join("\n", richMessages());
+        assertTrue(rendered.contains("Iris: checking the language repository"));
+        assertTrue(rendered.contains("updated fr_FR (1 added, 1 changed, 1 local edits kept)"));
+        assertTrue(rendered.contains("de_DE was not updated: HTTP 404"));
+        assertFalse(rendered.contains("already match"));
+        clearInvocations(player);
+
+        pending.set(CompletableFuture.completedFuture(new LanguageUpstreamSync.SyncReport(
+                Optional.empty(), true, Map.of(), Map.of(), Optional.empty(), 1L, 0L)));
+        updating.command(player, new String[]{"update"});
+        assertTrue(String.join("\n", richMessages()).contains("installed languages already match the repository"));
+        clearInvocations(player);
+
+        pending.set(CompletableFuture.completedFuture(new LanguageUpstreamSync.SyncReport(
+                Optional.empty(), true, Map.of(), Map.of(), Optional.empty(), 1L, 272_000L)));
+        updating.command(player, new String[]{"update"});
+        assertTrue(String.join("\n", richMessages()).contains("was checked recently; try again in 4m 32s"));
+        clearInvocations(player);
+
+        pending.set(CompletableFuture.completedFuture(LanguageUpstreamSync.SyncReport.failed("HTTP 500", 1L)));
+        updating.command(player, new String[]{"update"});
+        assertTrue(String.join("\n", richMessages()).contains("language update failed: HTTP 500"));
+        clearInvocations(player);
+
+        CompletableFuture<LanguageUpstreamSync.SyncReport> broken = new CompletableFuture<>();
+        broken.completeExceptionally(new IllegalStateException("worker died"));
+        pending.set(broken);
+        updating.command(player, new String[]{"update"});
+        assertTrue(String.join("\n", richMessages()).contains("language update failed: worker died"));
+    }
+
+    @Test
+    public void pickerUsesPluginDisplayNamesForCustomLocales() {
+        PluginLanguageService service = languageService();
+        when(service.availableLocales()).thenReturn(List.of("en_US", "fr_FR", "pirate"));
+        BukkitLanguageSwitcher named = register("Gloss", "gloss", service, DirectorTextResolver.ENGLISH,
+                null, locale -> locale.equals("pirate") ? "Pirate Speak" : null);
+
+        named.command(player, new String[]{"self"});
+
+        String rendered = String.join("\n", richMessages());
+        assertTrue(rendered.contains("Pirate Speak"));
+        assertTrue(rendered.contains("French (France)"));
+        assertTrue(hasRunCommand("/gloss language self pirate"));
+    }
+
     private BukkitLanguageSwitcher register(String name, String command, PluginLanguageService service) {
         return register(name, command, service, DirectorTextResolver.ENGLISH);
+    }
+
+    private BukkitLanguageSwitcher register(String name, String command, PluginLanguageService service,
+                                              DirectorTextResolver resolver,
+                                              BukkitLanguageSwitcher.LanguageUpdateAction updateAction,
+                                              BukkitLanguageSwitcher.LocaleDisplayNames displayNames) {
+        when(player.hasPermission(name.toLowerCase(Locale.ROOT) + ".language.self")).thenReturn(true);
+        Plugin plugin = mock(Plugin.class);
+        when(plugin.getName()).thenReturn(name);
+        when(plugin.getServer()).thenReturn(server);
+        when(plugin.isEnabled()).thenReturn(true);
+        when(plugin.getLogger()).thenReturn(Logger.getLogger(name));
+        return BukkitLanguageSwitcher.register(plugin, service, new BukkitLanguageSwitcher.Options(
+                command, command + ".admin", DirectorMiniMenu.Theme.adaptRed(), resolver,
+                new PluginLanguageEditor.Options(locale -> mock(LocalizationSnapshot.class), edit -> mock(LocalizationSnapshot.class)),
+                null, updateAction, displayNames));
     }
 
     private BukkitLanguageSwitcher register(String name, String command, PluginLanguageService service,
@@ -616,7 +712,8 @@ public class BukkitLanguageSwitcherTest {
         when(plugin.getLogger()).thenReturn(Logger.getLogger(name));
         return BukkitLanguageSwitcher.register(plugin, service, new BukkitLanguageSwitcher.Options(
                 command, command + ".admin", DirectorMiniMenu.Theme.adaptRed(), resolver,
-                new PluginLanguageEditor.Options(locale -> mock(LocalizationSnapshot.class), edit -> mock(LocalizationSnapshot.class))));
+                new PluginLanguageEditor.Options(locale -> mock(LocalizationSnapshot.class), edit -> mock(LocalizationSnapshot.class)),
+                null, null, null));
     }
 
     private void registerDebug(String name, String version, String permission,

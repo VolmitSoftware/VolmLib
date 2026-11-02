@@ -80,12 +80,12 @@ public class LanguageFileEditorTest {
 
     @Test
     public void oversizedFilesAndUtf8OutputAreRejected() throws IOException {
-        Path file = existing("x".repeat(2 * 1024 * 1024 + 1));
+        Path file = existing("x".repeat(3 * 1024 * 1024 + 1));
         assertThrows(IOException.class, () -> LanguageFileEditor.update(file,
                 content -> new LanguageFileEditor.Prepared<>("new", true)));
         Files.writeString(file, "original");
         assertThrows(IOException.class, () -> LanguageFileEditor.update(file,
-                content -> new LanguageFileEditor.Prepared<>("é".repeat(1024 * 1024 + 1), true)));
+                content -> new LanguageFileEditor.Prepared<>("é".repeat(3 * 512 * 1024 + 1), true)));
         assertThrows(IOException.class, () -> LanguageFileEditor.update(file,
                 content -> new LanguageFileEditor.Prepared<>("\uD800", true)));
         assertEquals("original", Files.readString(file));

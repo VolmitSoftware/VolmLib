@@ -40,7 +40,7 @@ public final class TomlLanguageEditor {
         return serialize(updated, leadingCommentBlock(source));
     }
 
-    private static JsonObject parse(String raw) throws IOException {
+    static JsonObject parse(String raw) throws IOException {
         JsonElement parsed = TomlCodec.toJsonElement(Objects.requireNonNullElse(raw, ""));
         if (parsed == null || !parsed.isJsonObject()) {
             throw new IOException("Language file is not a TOML table");
@@ -48,7 +48,7 @@ public final class TomlLanguageEditor {
         return parsed.getAsJsonObject();
     }
 
-    private static EditResult serialize(Map<String, JsonElement> values, String leadingComments) throws IOException {
+    static EditResult serialize(Map<String, JsonElement> values, String leadingComments) throws IOException {
         JsonObject updated = new JsonObject();
         values.forEach(updated::add);
         String serialized = TomlLanguageWriter.renderJson(updated, List.of());
@@ -60,7 +60,7 @@ public final class TomlLanguageEditor {
         return new EditResult(content, updated.size() == 0);
     }
 
-    private static String leadingCommentBlock(String source) {
+    static String leadingCommentBlock(String source) {
         String normalized = source.replace("\r\n", "\n").replace('\r', '\n');
         String[] lines = normalized.split("\n", -1);
         StringBuilder comments = new StringBuilder();
