@@ -9,6 +9,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.TreeMap;
 import java.util.regex.Pattern;
 
 public final class TomlLanguageWriter {
@@ -69,7 +70,7 @@ public final class TomlLanguageWriter {
         }
         PluralValue plural = (PluralValue) value;
         JsonObject forms = new JsonObject();
-        for (Map.Entry<String, String> form : plural.forms().entrySet()) {
+        for (Map.Entry<String, String> form : new TreeMap<>(plural.forms()).entrySet()) {
             forms.addProperty(form.getKey(), form.getValue());
         }
         return forms;

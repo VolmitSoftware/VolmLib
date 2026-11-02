@@ -21,7 +21,9 @@ public final class BukkitLanguageSwitcherOptionsTest {
                 DirectorMiniMenu.Theme.adaptRed(),
                 DirectorTextResolver.ENGLISH,
                 editor,
-                feedback
+                feedback,
+                null,
+                null
         );
         BukkitLanguageSwitcher.LanguageEditChange change = new BukkitLanguageSwitcher.LanguageEditChange(
                 "en_US", "rift.gui.setting_saved", "old", "new");
@@ -38,7 +40,10 @@ public final class BukkitLanguageSwitcherOptionsTest {
                 "adapt.configurator",
                 DirectorMiniMenu.Theme.adaptRed(),
                 DirectorTextResolver.ENGLISH,
-                editor
+                editor,
+                null,
+                null,
+                null
         );
 
         assertNull(options.editorFeedback());

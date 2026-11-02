@@ -12,6 +12,21 @@ import static org.junit.Assert.assertTrue;
 
 public class TomlLanguageWriterTest {
     @Test
+    public void pluralFormsRenderInTheSameOrderForAnyInputOrder() {
+        LinkedHashMap<String, String> otherFirst = new LinkedHashMap<>();
+        otherFirst.put("other", "{count} blocks");
+        otherFirst.put("one", "{count} block");
+        LinkedHashMap<String, String> oneFirst = new LinkedHashMap<>();
+        oneFirst.put("one", "{count} block");
+        oneFirst.put("other", "{count} blocks");
+
+        String rendered = TomlLanguageWriter.render(Map.of("portal.blocks", new PluralValue(otherFirst)), List.of());
+
+        assertEquals("[portal.blocks]\none = \"{count} block\"\nother = \"{count} blocks\"\n", rendered);
+        assertEquals(TomlLanguageWriter.render(Map.of("portal.blocks", new PluralValue(oneFirst)), List.of()), rendered);
+    }
+
+    @Test
     public void roundTripsGroupedTextLinesPluralsAndCollidingParents() throws Exception {
         MessageCatalog catalog = MessageCatalog.of("en_US",
                 TextKey.of("command.help.web", "Editor"),

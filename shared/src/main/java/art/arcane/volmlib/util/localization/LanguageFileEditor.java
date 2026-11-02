@@ -18,7 +18,7 @@ import java.util.Arrays;
 import java.util.Objects;
 
 public final class LanguageFileEditor {
-    private static final int MAXIMUM_BYTES = 2 * 1024 * 1024;
+    private static final int MAXIMUM_BYTES = 3 * 1024 * 1024;
 
     private LanguageFileEditor() {
     }
@@ -70,14 +70,14 @@ public final class LanguageFileEditor {
             throw new IOException("Language path is not a regular file: " + path.getFileName());
         }
         if (Files.size(path) > MAXIMUM_BYTES) {
-            throw new IOException("Language file exceeds the 2 MiB safety limit");
+            throw new IOException("Language file exceeds the 3 MiB safety limit");
         }
         byte[] bytes;
         try (InputStream stream = Files.newInputStream(path, LinkOption.NOFOLLOW_LINKS)) {
             bytes = stream.readNBytes(MAXIMUM_BYTES + 1);
         }
         if (bytes.length > MAXIMUM_BYTES) {
-            throw new IOException("Language file exceeds the 2 MiB safety limit");
+            throw new IOException("Language file exceeds the 3 MiB safety limit");
         }
         return new FileSource(true, bytes);
     }
@@ -100,7 +100,7 @@ public final class LanguageFileEditor {
                     .onUnmappableCharacter(CodingErrorAction.REPORT)
                     .encode(CharBuffer.wrap(content));
             if (encoded.remaining() > MAXIMUM_BYTES) {
-                throw new IOException("Language file exceeds the 2 MiB safety limit");
+                throw new IOException("Language file exceeds the 3 MiB safety limit");
             }
         } catch (CharacterCodingException exception) {
             throw new IOException("Language edit cannot be encoded as UTF-8", exception);

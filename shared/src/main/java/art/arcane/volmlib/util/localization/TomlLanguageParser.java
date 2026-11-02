@@ -43,10 +43,14 @@ public final class TomlLanguageParser {
     }
 
     public static Map<String, MessageValue> parseValidValues(String raw, MessageCatalog catalog) throws IOException {
+        Objects.requireNonNull(catalog, "catalog");
+        return validValues(parseRoot(raw).getAsJsonObject(), catalog);
+    }
+
+    static Map<String, MessageValue> validValues(JsonObject parsed, MessageCatalog catalog) {
         MessageCatalog requiredCatalog = Objects.requireNonNull(catalog, "catalog");
-        JsonElement parsed = parseRoot(raw);
         LocaleOverlay.Builder candidate = LocaleOverlay.builder(requiredCatalog.englishLocale());
-        Map<String, JsonElement> flattened = flattenedValues(parsed.getAsJsonObject());
+        Map<String, JsonElement> flattened = flattenedValues(parsed);
         for (MessageKey definition : requiredCatalog.keys()) {
             JsonElement value = flattened.get(definition.id());
             if (value == null && definition instanceof PluralKey) {

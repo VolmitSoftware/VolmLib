@@ -51,6 +51,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.HexFormat;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -76,6 +77,7 @@ public abstract class PackedJar extends DefaultTask {
     static final String METADATA = "META-INF/volmit/runtime.properties";
     static final String PAYLOAD_ONLY_RESOURCES = "art/arcane/volmlib/native/";
     private static final long MAXIMUM_RUNTIME_BYTES = 256L * 1024 * 1024;
+    private static final int REPORTED_BOOTSTRAP_CLASSES = 10;
     private static final String PAPER_LOADER_METHOD = "(Lio/papermc/paper/plugin/loader/PluginClasspathBuilder;)V";
     private static final List<CompressionProfile> RELEASE_PROFILES = List.of(
             new CompressionProfile(0, 3, 1024),
@@ -102,6 +104,10 @@ public abstract class PackedJar extends DefaultTask {
     @Input
     @Optional
     public abstract Property<Long> getMaximumBytes();
+
+    @Input
+    @Optional
+    public abstract Property<Integer> getMaximumBootstrapClasses();
 
     @Input
     public abstract ListProperty<String> getEntrypoints();
@@ -148,13 +154,14 @@ public abstract class PackedJar extends DefaultTask {
         Map<String, byte[]> bootstrap = bootstrapClasses();
         PackOptions options = new PackOptions(getEntrypoints().get(), getJarAccessors().get(),
                 new NativeOptions(getNativeArtifacts().get(), getNativeManifestPath().get(), getNativeResourceDirectory().get()),
-                getMaximumBytes().getOrNull(), getProject().getGradle().getGradleUserHomeDir().toPath()
-                        .resolve("caches/volmit-packaging/compression"),
+                getMaximumBytes().getOrNull(), getMaximumBootstrapClasses().getOrNull(),
+                getProject().getGradle().getGradleUserHomeDir().toPath().resolve("caches/volmit-packaging/compression"),
                 getPayloadOnlyPrefixes().get(), getRequiredEntries().get(), getReleaseCompression().get());
         PackResult result = writePackedJar(source, output, bootstrap, options);
-        getLogger().lifecycle("{}: selected {} ({} -> {} bytes); {} bootstrap classes retained", output.getFileName(),
-                result.compressed() ? "XZ" : "ordinary jar", result.ordinaryBytes(), Files.size(output),
-                result.compressed() ? result.bootstrapClasses() : 0);
+        getLogger().lifecycle("{}: selected {} ({} -> {} bytes); {} bootstrap classes ({} bytes) retained",
+                output.getFileName(), result.compressed() ? "XZ" : "ordinary jar", result.ordinaryBytes(),
+                Files.size(output), result.compressed() ? result.bootstrapClasses() : 0,
+                result.compressed() ? result.bootstrapBytes() : 0L);
     }
 
     static Map<String, byte[]> bootstrapClasses() throws IOException {
@@ -227,6 +234,20 @@ public abstract class PackedJar extends DefaultTask {
         if (!relocated.containsKey(runtime + ".class")) {
             throw new IOException("Packed runtime template is missing");
         }
+        int bootstrapClasses = retained.size() + relocated.size();
+        if (options.maximumBootstrapClasses() != null && bootstrapClasses > options.maximumBootstrapClasses()) {
+            throw new IOException("Packed bootstrap keeps " + bootstrapClasses + " classes, above the "
+                    + options.maximumBootstrapClasses() + " class budget (" + relocated.size()
+                    + " packed runtime classes); largest retained application classes: "
+                    + largestClasses(contents, retained));
+        }
+        long bootstrapBytes = 0;
+        for (String name : retained) {
+            bootstrapBytes += contents.get(name).length;
+        }
+        for (byte[] bytes : relocated.values()) {
+            bootstrapBytes += bytes.length;
+        }
         contents.putAll(relocated);
         validatePayloadOnlyPrefixes(contents, options);
         byte[] payload = writeJar(contents, true);
@@ -276,7 +297,7 @@ public abstract class PackedJar extends DefaultTask {
         }
         Files.createDirectories(output.toAbsolutePath().getParent());
         Files.write(output, selected);
-        return new PackResult(retained.size() + relocated.size(), descriptor.entrypoints(), compressedRuntime,
+        return new PackResult(bootstrapClasses, bootstrapBytes, descriptor.entrypoints(), compressedRuntime,
                 ordinary.length);
     }
 
@@ -357,7 +378,10 @@ public abstract class PackedJar extends DefaultTask {
     private static void validatePayloadOnlyPrefixes(Map<String, byte[]> contents, PackOptions options)
             throws IOException {
         for (String prefix : options.payloadOnlyPrefixes()) {
-            if (!prefix.matches("(?:[A-Za-z0-9_-][A-Za-z0-9._-]*/)+") || prefix.startsWith("META-INF/")) {
+            String upper = prefix.toUpperCase(Locale.ROOT);
+            boolean topLevelMetadata = upper.startsWith("META-INF/") && upper.indexOf('/', "META-INF/".length()) < 0;
+            if (!prefix.matches("(?:[A-Za-z0-9_-][A-Za-z0-9._-]*/)+(?:[A-Za-z0-9_-][A-Za-z0-9._-]*)?")
+                    || topLevelMetadata || upper.startsWith("META-INF/VOLMIT/") || upper.startsWith("META-INF/SERVICES/")) {
                 throw new IOException("Unsafe packed payload-only prefix: " + prefix);
             }
             for (String name : contents.keySet()) {
@@ -373,6 +397,17 @@ public abstract class PackedJar extends DefaultTask {
                 }
             }
         }
+    }
+
+    private static String largestClasses(Map<String, byte[]> contents, Set<String> names) {
+        List<String> sorted = new ArrayList<>(names);
+        sorted.sort(Comparator.<String>comparingInt(name -> contents.get(name).length).reversed()
+                .thenComparing(Comparator.naturalOrder()));
+        List<String> largest = new ArrayList<>(Math.min(sorted.size(), REPORTED_BOOTSTRAP_CLASSES));
+        for (String name : sorted.subList(0, Math.min(sorted.size(), REPORTED_BOOTSTRAP_CLASSES))) {
+            largest.add(name + " (" + contents.get(name).length + " bytes)");
+        }
+        return String.join(", ", largest);
     }
 
     private static boolean matchesPrefix(String name, List<String> prefixes) {
@@ -755,8 +790,8 @@ public abstract class PackedJar extends DefaultTask {
     }
 
     record PackOptions(List<String> entrypoints, List<String> jarAccessors, NativeOptions natives, Long maximumBytes,
-                       Path compressionCache, List<String> payloadOnlyPrefixes, List<String> requiredEntries,
-                       boolean releaseCompression) {
+                       Integer maximumBootstrapClasses, Path compressionCache, List<String> payloadOnlyPrefixes,
+                       List<String> requiredEntries, boolean releaseCompression) {
     }
 
     record NativeOptions(Map<String, File> artifacts, String manifestPath, String resourceDirectory) {
@@ -765,6 +800,7 @@ public abstract class PackedJar extends DefaultTask {
         }
     }
 
-    record PackResult(int bootstrapClasses, List<String> entrypoints, boolean compressed, long ordinaryBytes) {
+    record PackResult(int bootstrapClasses, long bootstrapBytes, List<String> entrypoints, boolean compressed,
+                      long ordinaryBytes) {
     }
 }

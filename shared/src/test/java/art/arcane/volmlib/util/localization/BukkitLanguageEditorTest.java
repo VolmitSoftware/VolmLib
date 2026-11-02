@@ -326,7 +326,10 @@ public class BukkitLanguageEditorTest {
                 "test.language.admin",
                 DirectorMiniMenu.Theme.adaptRed(),
                 DirectorTextResolver.ENGLISH,
-                editorOptions
+                editorOptions,
+                null,
+                null,
+                null
         );
         BukkitLanguageEditor editor = new BukkitLanguageEditor(
                 plugin,
@@ -475,7 +478,7 @@ public class BukkitLanguageEditorTest {
         };
         BukkitLanguageSwitcher.Options switcher = new BukkitLanguageSwitcher.Options(
                 "test", "test.language.admin", DirectorMiniMenu.Theme.adaptRed(), resolver,
-                new PluginLanguageEditor.Options(locale -> snapshot, edit -> snapshot));
+                new PluginLanguageEditor.Options(locale -> snapshot, edit -> snapshot), null, null, null);
         BukkitLanguageEditor editor = new BukkitLanguageEditor(mock(Plugin.class),
                 new BukkitLanguageEditor.Options(languages, switcher, ignored -> {
                 }, BukkitLanguageEditorPresentation.standard()));
@@ -502,7 +505,7 @@ public class BukkitLanguageEditorTest {
         PluginLanguageService languages = mock(PluginLanguageService.class);
         BukkitLanguageSwitcher.Options switcher = new BukkitLanguageSwitcher.Options(
                 "test", "test.language.admin", DirectorMiniMenu.Theme.adaptRed(),
-                DirectorTextResolver.ENGLISH, new PluginLanguageEditor.Options(locale -> null, edit -> null));
+                DirectorTextResolver.ENGLISH, new PluginLanguageEditor.Options(locale -> null, edit -> null), null, null, null);
         BukkitLanguageEditor editor = new BukkitLanguageEditor(plugin, new BukkitLanguageEditor.Options(
                 languages, switcher, ignored -> {
                 }, new BukkitLanguageEditorPresentation(BukkitLanguageEditorPresentation.Layout.FOUR_ROWS,
@@ -592,7 +595,10 @@ public class BukkitLanguageEditorTest {
                 "test.language.admin",
                 DirectorMiniMenu.Theme.adaptRed(),
                 DirectorTextResolver.ENGLISH,
-                new PluginLanguageEditor.Options(locale -> null, edit -> null)
+                new PluginLanguageEditor.Options(locale -> null, edit -> null),
+                null,
+                null,
+                null
         );
         BukkitLanguageEditor editor = new BukkitLanguageEditor(
                 plugin,
@@ -716,7 +722,10 @@ public class BukkitLanguageEditorTest {
                 "test.language.admin",
                 DirectorMiniMenu.Theme.adaptRed(),
                 DirectorTextResolver.ENGLISH,
-                new PluginLanguageEditor.Options(locale -> null, edit -> null)
+                new PluginLanguageEditor.Options(locale -> null, edit -> null),
+                null,
+                null,
+                null
         );
         return new BukkitLanguageEditor(
                 plugin,

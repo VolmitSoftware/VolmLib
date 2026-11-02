@@ -17,6 +17,7 @@ import java.lang.reflect.Field;
 import java.net.URL;
 import java.net.URLClassLoader;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileSystemException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.IdentityHashMap;
@@ -49,7 +50,9 @@ public class NativeWorldLifecycleTest {
 
     @BeforeClass
     public static void installBridge() throws Exception {
-        bridgePath = Files.createTempFile("native-lifecycle-bridge", ".jar");
+        Path directory = Path.of("build", "tmp", "native-lifecycle");
+        Files.createDirectories(directory);
+        bridgePath = Files.createTempFile(directory, "native-lifecycle-bridge", ".jar");
         String resource = CloseBridge.class.getName().replace('.', '/') + ".class";
         try (JarOutputStream output = new JarOutputStream(Files.newOutputStream(bridgePath));
              InputStream input = CloseBridge.class.getClassLoader().getResourceAsStream(resource)) {
@@ -65,7 +68,11 @@ public class NativeWorldLifecycleTest {
     @AfterClass
     public static void removeBridgeArchive() throws Exception {
         bridgeArchive.close();
-        Files.delete(bridgePath);
+        try {
+            Files.delete(bridgePath);
+        } catch (FileSystemException stillOpen) {
+            bridgePath.toFile().deleteOnExit();
+        }
     }
 
     @Test

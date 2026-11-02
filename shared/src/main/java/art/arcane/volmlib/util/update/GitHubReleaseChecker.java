@@ -86,6 +86,13 @@ public final class GitHubReleaseChecker implements AutoCloseable {
         return report;
     }
 
+    public synchronized long nextCheckDelayMillis() {
+        if (!enabled || closed) {
+            return 0L;
+        }
+        return Math.max(0L, TimeUnit.NANOSECONDS.toMillis(nextRequestNanos - System.nanoTime()));
+    }
+
     public synchronized CompletableFuture<Report> checkReport(boolean fresh) {
         if (fresh && enabled && !closed && pending == null && System.nanoTime() >= nextRequestNanos) {
             checked = false;

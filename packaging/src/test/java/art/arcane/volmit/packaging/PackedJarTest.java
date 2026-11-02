@@ -1,6 +1,8 @@
 package art.arcane.volmit.packaging;
 
+import org.gradle.api.GradleException;
 import org.junit.jupiter.api.Test;
+import org.gradle.testfixtures.ProjectBuilder;
 import org.gradle.testkit.runner.BuildResult;
 import org.gradle.testkit.runner.GradleRunner;
 import org.gradle.testkit.runner.TaskOutcome;
@@ -33,6 +35,7 @@ import java.util.Properties;
 import java.util.Random;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.regex.Pattern;
 import java.util.stream.Stream;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
@@ -95,14 +98,18 @@ public class PackedJarTest {
         Files.writeString(guide, "Guide contents\n");
         GradleRunner runner = GradleRunner.create().withProjectDir(directory.toFile()).withPluginClasspath()
                 .withArguments("packedJar", "--max-workers=1", "--stacktrace", "--no-watch-fs");
-        runner.build();
+        String ordinaryOutput = runner.build().getOutput();
+        assertTrue(ordinaryOutput.contains("selected ordinary jar"), ordinaryOutput);
+        assertTrue(ordinaryOutput.contains("; 0 bootstrap classes (0 bytes) retained"), ordinaryOutput);
         assertArrayEquals(Files.readAllBytes(directory.resolve("build/tmp/packaging/distribution/packed-fixture.jar")),
                 Files.readAllBytes(directory.resolve("build/libs/packed-fixture.jar")));
         try (Stream<Path> libraries = Files.list(directory.resolve("build/libs"))) {
             assertEquals(List.of("packed-fixture.jar"), libraries.map(path -> path.getFileName().toString()).toList());
         }
         Files.writeString(java, sources);
-        runner.build();
+        String packedOutput = runner.build().getOutput();
+        assertTrue(Pattern.compile("packed-fixture\\.jar: selected XZ \\(\\d+ -> \\d+ bytes\\); [1-9]\\d* bootstrap classes "
+                + "\\([1-9]\\d* bytes\\) retained").matcher(packedOutput).find(), packedOutput);
         Map<String, byte[]> outer = PackedJar.readJar(directory.resolve("build/libs/packed-fixture.jar"));
         assertTrue(outer.containsKey("test/Main/xz/PackedRuntime.class"));
         assertTrue(outer.containsKey("test/Main/xz/decoder/XZInputStream.class"));
@@ -152,6 +159,13 @@ public class PackedJarTest {
         Files.writeString(buildScript, build.replace("maximumBytes = 7500000", "modded = true; maximumBytes = 1"));
         runner.build();
         assertEquals(selectedBytes, Files.size(directory.resolve("build/libs/packed-fixture.jar")));
+        Files.writeString(buildScript, build.replace("packed = true", "packed = true; packedMaximumBootstrapClasses = 1"));
+        runner.withArguments("packedJar", "--max-workers=1", "--stacktrace", "--no-watch-fs");
+        String budgetFailure = runner.buildAndFail().getOutput();
+        assertTrue(budgetFailure.contains("classes, above the 1 class budget"), budgetFailure);
+        assertTrue(budgetFailure.contains("largest retained application classes: test/Main.class ("), budgetFailure);
+        runner.withArguments("packedJar", "-PvolmitPackaging=dev", "--max-workers=1", "--stacktrace", "--no-watch-fs");
+        assertEquals(TaskOutcome.SUCCESS, runner.build().task(":packedJar").getOutcome());
     }
 
     @Test
@@ -168,10 +182,10 @@ public class PackedJarTest {
         Path cached = directory.resolve("cached.jar");
         Path cache = directory.resolve("compression-cache");
         PackedJar.PackOptions standardOptions = new PackedJar.PackOptions(List.of(), List.of(),
-                PackedJar.NativeOptions.empty(), PackagingArtifact.SPIGOT_CAP_BYTES, cache,
+                PackedJar.NativeOptions.empty(), PackagingArtifact.SPIGOT_CAP_BYTES, null, cache,
                 List.of(), List.of(), false);
         PackedJar.PackOptions releaseOptions = new PackedJar.PackOptions(List.of(), List.of(),
-                PackedJar.NativeOptions.empty(), PackagingArtifact.SPIGOT_CAP_BYTES, cache,
+                PackedJar.NativeOptions.empty(), PackagingArtifact.SPIGOT_CAP_BYTES, null, cache,
                 List.of(), List.of(), true);
 
         assertTrue(PackedJar.writePackedJar(source, standard, bootstrap, standardOptions).compressed());
@@ -229,7 +243,7 @@ public class PackedJarTest {
 
         PackedJar.writePackedJar(original, packed, PackedJar.bootstrapClasses(),
                 new PackedJar.PackOptions(List.of(), List.of(), PackedJar.NativeOptions.empty(),
-                        PackagingArtifact.SPIGOT_CAP_BYTES, directory.resolve("compression-cache"), List.of(), List.of(), false));
+                        PackagingArtifact.SPIGOT_CAP_BYTES, null, directory.resolve("compression-cache"), List.of(), List.of(), false));
 
         assertArrayEquals(originalBytes, Files.readAllBytes(original));
         Map<String, byte[]> outer = PackedJar.readJar(packed);
@@ -284,7 +298,7 @@ public class PackedJarTest {
 
         Map<String, byte[]> bootstrap = PackedJar.bootstrapClasses();
         PackedJar.PackOptions options = new PackedJar.PackOptions(List.of(), List.of(),
-                PackedJar.NativeOptions.empty(), PackagingArtifact.SPIGOT_CAP_BYTES, directory.resolve("fallback-cache"),
+                PackedJar.NativeOptions.empty(), PackagingArtifact.SPIGOT_CAP_BYTES, null, directory.resolve("fallback-cache"),
                 List.of(), List.of(), false);
         Path standardPacked = directory.resolve("standard-packed.jar");
         Path compactPacked = directory.resolve("compact-packed.jar");
@@ -311,7 +325,7 @@ public class PackedJarTest {
             Path rejected = directory.resolve(source.getFileName() + "-rejected.jar");
             IOException failure = assertThrows(IOException.class, () -> PackedJar.writePackedJar(source, rejected,
                     bootstrap, new PackedJar.PackOptions(List.of(), List.of(),
-                            PackedJar.NativeOptions.empty(), rejectedBudget, directory.resolve("compression-cache"),
+                            PackedJar.NativeOptions.empty(), rejectedBudget, null, directory.resolve("compression-cache"),
                             List.of(), List.of(), false)));
             assertTrue(failure.getMessage().contains("Selected jar exceeds " + rejectedBudget));
             assertFalse(Files.exists(rejected));
@@ -336,7 +350,7 @@ public class PackedJarTest {
                 List.of(), List.of(), new PackedJar.NativeOptions(
                         Map.of("native-common", common.toFile(), "native-v26_2_R1", version.toFile()),
                         "META-INF/iris/native-runtime.properties", "META-INF/iris/native/"),
-                PackagingArtifact.SPIGOT_CAP_BYTES, directory.resolve("compression-cache"), List.of(), List.of(), false));
+                PackagingArtifact.SPIGOT_CAP_BYTES, null, directory.resolve("compression-cache"), List.of(), List.of(), false));
 
         Map<String, byte[]> outer = PackedJar.readJar(packed);
         Map<String, byte[]> payload = payload(outer);
@@ -361,7 +375,7 @@ public class PackedJarTest {
         Files.write(original, PackedJar.writeJar(contents, false));
 
         assertTrue(PackedJar.writePackedJar(original, packed, PackedJar.bootstrapClasses(), new PackedJar.PackOptions(
-                List.of(), List.of(), PackedJar.NativeOptions.empty(), PackagingArtifact.SPIGOT_CAP_BYTES,
+                List.of(), List.of(), PackedJar.NativeOptions.empty(), PackagingArtifact.SPIGOT_CAP_BYTES, null,
                 directory.resolve("compression-cache"), List.of(), List.of(), false)).compressed());
 
         Map<String, byte[]> outer = PackedJar.readJar(packed);
@@ -378,19 +392,21 @@ public class PackedJarTest {
         new Random(71L).nextBytes(library);
         Map<String, byte[]> resources = Map.of(
                 "linux/x64/org/lwjgl/libfixture.so", library,
-                "iris-language-guides/reference.md", "Language reference\n".getBytes(StandardCharsets.UTF_8));
+                "iris-language-guides/reference.md", "Language reference\n".getBytes(StandardCharsets.UTF_8),
+                "META-INF/iris/generation-kernels/abi-1.revision", "abi=1\n".getBytes(StandardCharsets.UTF_8),
+                "META-INF/iris/generation-kernels/catalog.tsv", "kernel\tabi\n".getBytes(StandardCharsets.UTF_8));
         contents.putAll(resources);
         contents.put("META-INF/services/test.Service", "test.Main\n".getBytes(StandardCharsets.UTF_8));
         contents.put("META-INF/iris/native-runtime.properties", "modules=\n".getBytes(StandardCharsets.UTF_8));
-        contents.put("META-INF/iris/generation-kernels/catalog.tsv", "kernel\tabi\n".getBytes(StandardCharsets.UTF_8));
         contents.put("META-INF/LICENSE", "License contents\n".getBytes(StandardCharsets.UTF_8));
         contents.put("iris-language-source.properties", "revision=example\n".getBytes(StandardCharsets.UTF_8));
         Path original = directory.resolve("original.jar");
         Path packed = directory.resolve("packed.jar");
         Files.write(original, PackedJar.writeJar(contents, false));
         assertTrue(PackedJar.writePackedJar(original, packed, PackedJar.bootstrapClasses(), new PackedJar.PackOptions(
-                List.of(), List.of(), PackedJar.NativeOptions.empty(), PackagingArtifact.SPIGOT_CAP_BYTES,
-                directory.resolve("compression-cache"), List.of("linux/x64/org/lwjgl/", "iris-language-guides/"),
+                List.of(), List.of(), PackedJar.NativeOptions.empty(), PackagingArtifact.SPIGOT_CAP_BYTES, null,
+                directory.resolve("compression-cache"), List.of("linux/x64/org/lwjgl/", "iris-language-guides/",
+                        "META-INF/iris/generation-kernels/"),
                 List.of("iris-language-source.properties"), true)).compressed());
 
         Map<String, byte[]> outer = PackedJar.readJar(packed);
@@ -424,26 +440,135 @@ public class PackedJarTest {
     }
 
     @Test
+    void filenamePrefixKeepsOnlyMatchingSiblingsInsideThePayload() throws Exception {
+        Map<String, byte[]> contents = simplePlugin("FilenamePrefix");
+        addCompressibleClasses(contents);
+        Map<String, byte[]> revisions = Map.of(
+                "META-INF/iris/generation-kernels/abi-1.revision", "abi=1\n".getBytes(StandardCharsets.UTF_8),
+                "META-INF/iris/generation-kernels/abi-2.revision", "abi=2\n".getBytes(StandardCharsets.UTF_8));
+        contents.putAll(revisions);
+        byte[] catalog = "kernel\tabi\n".getBytes(StandardCharsets.UTF_8);
+        contents.put("META-INF/iris/generation-kernels/catalog.tsv", catalog);
+        Path original = directory.resolve("original.jar");
+        Path packed = directory.resolve("packed.jar");
+        Files.write(original, PackedJar.writeJar(contents, false));
+        assertTrue(PackedJar.writePackedJar(original, packed, PackedJar.bootstrapClasses(), new PackedJar.PackOptions(
+                List.of(), List.of(), PackedJar.NativeOptions.empty(), PackagingArtifact.SPIGOT_CAP_BYTES, null,
+                directory.resolve("compression-cache"), List.of("META-INF/iris/generation-kernels/abi-"),
+                List.of("META-INF/iris/generation-kernels/catalog.tsv"), false)).compressed());
+
+        Map<String, byte[]> outer = PackedJar.readJar(packed);
+        Map<String, byte[]> payload = payload(outer);
+        assertArrayEquals(catalog, outer.get("META-INF/iris/generation-kernels/catalog.tsv"));
+        assertArrayEquals(catalog, payload.get("META-INF/iris/generation-kernels/catalog.tsv"));
+        for (Map.Entry<String, byte[]> revision : revisions.entrySet()) {
+            assertFalse(outer.containsKey(revision.getKey()), revision.getKey());
+            assertArrayEquals(revision.getValue(), payload.get(revision.getKey()), revision.getKey());
+        }
+        try (URLClassLoader loader = new URLClassLoader(new URL[]{packed.toUri().toURL()},
+                ClassLoader.getPlatformClassLoader())) {
+            Class.forName("test.Main", true, loader);
+            for (Map.Entry<String, byte[]> revision : revisions.entrySet()) {
+                try (InputStream input = loader.getResourceAsStream(revision.getKey())) {
+                    assertNotNull(input, revision.getKey());
+                    assertArrayEquals(revision.getValue(), input.readAllBytes(), revision.getKey());
+                }
+            }
+        }
+    }
+
+    @Test
     void rejectsPrefixesMatchingClassesAndProtectedResources() throws Exception {
         Map<String, byte[]> contents = simplePlugin("ProtectedResources");
         contents.put("licenses/LICENSE.txt", new byte[]{1});
         contents.put("notices/NOTICE.txt", new byte[]{2});
         contents.put("required/bootstrap.bin", new byte[]{3});
         contents.put("providers/native.properties", new byte[]{4});
+        contents.put("META-INF/iris/generation-kernels/catalog.tsv", new byte[]{5});
         Path original = directory.resolve("original.jar");
         Files.write(original, PackedJar.writeJar(contents, false));
         for (String prefix : List.of("", "/", "../", "guides/../", "guides//", "/guides/", "guides",
-                "META-INF/", "META-INF/services/", "META-INF/iris/generation-kernels/", "test/", "test/Main/xz/",
-                "licenses/", "notices/", "required/", "providers/")) {
+                "META-INF/", "meta-inf/", "META-INF/services/", "meta-inf/services/", "META-INF/volmit/",
+                "META-INF/volmit/native/", "Meta-Inf/Volmit/", "test/", "test/Main/xz/",
+                "licenses/", "notices/", "required/", "providers/", "META-INF/iris/generation-kernels/",
+                "META-INF/MANIFEST", "META-INF/MANIFEST.MF", "META-INF/volmit", "meta-inf/serv",
+                "META-INF/services/test", "META-INF/iris/generation-kernels/cat", "test/Ma", "licenses/LIC",
+                "required/boot", "guides/..", "guides/.hidden")) {
             Path rejected = directory.resolve("rejected.jar");
             IOException failure = assertThrows(IOException.class, () -> PackedJar.writePackedJar(original, rejected,
                     PackedJar.bootstrapClasses(), new PackedJar.PackOptions(List.of(), List.of(),
                             new PackedJar.NativeOptions(Map.of(), "providers/native.properties", "providers/jars/"),
-                            PackagingArtifact.SPIGOT_CAP_BYTES, directory.resolve("compression-cache"),
-                            List.of(prefix), List.of("required/bootstrap.bin"), false)), prefix);
+                            PackagingArtifact.SPIGOT_CAP_BYTES, null, directory.resolve("compression-cache"),
+                            List.of(prefix), List.of("required/bootstrap.bin",
+                            "META-INF/iris/generation-kernels/catalog.tsv"), false)), prefix);
             assertTrue(failure.getMessage().contains("prefix"), prefix);
             assertFalse(Files.exists(rejected), prefix);
         }
+        Path rejected = directory.resolve("rejected.jar");
+        IOException required = assertThrows(IOException.class, () -> PackedJar.writePackedJar(original, rejected,
+                PackedJar.bootstrapClasses(), new PackedJar.PackOptions(List.of(), List.of(),
+                        PackedJar.NativeOptions.empty(), PackagingArtifact.SPIGOT_CAP_BYTES, null,
+                        directory.resolve("compression-cache"), List.of("META-INF/iris/generation-kernels/"),
+                        List.of("META-INF/iris/generation-kernels/catalog.tsv"), false)));
+        assertTrue(required.getMessage().contains(
+                "matches protected entry: META-INF/iris/generation-kernels/catalog.tsv"), required.getMessage());
+        assertFalse(Files.exists(rejected));
+    }
+
+    @Test
+    void bootstrapClassBudgetRejectsLargerOuterBootstrapAndNamesLargestRetainedClasses() throws Exception {
+        Map<String, byte[]> contents = simplePlugin("BootstrapBudget");
+        addCompressibleClasses(contents);
+        contents.put("test/Main.class", emptyClass("test/Main", "test/Base"));
+        contents.put("test/Base.class", constantClass("test/Base", sharedConstant()));
+        Path original = directory.resolve("original.jar");
+        Files.write(original, PackedJar.writeJar(contents, false));
+        Map<String, byte[]> bootstrap = PackedJar.bootstrapClasses();
+        Path measured = directory.resolve("measured.jar");
+        PackedJar.PackResult result = PackedJar.writePackedJar(original, measured, bootstrap,
+                bootstrapBudgetOptions(null));
+        assertTrue(result.compressed());
+        Map<String, byte[]> outer = PackedJar.readJar(measured);
+        int classes = 0;
+        long bytes = 0;
+        for (Map.Entry<String, byte[]> entry : outer.entrySet()) {
+            if (entry.getKey().endsWith(".class")) {
+                classes++;
+                bytes += entry.getValue().length;
+            }
+        }
+        assertEquals(classes, result.bootstrapClasses());
+        assertEquals(bytes, result.bootstrapBytes());
+        int budget = result.bootstrapClasses();
+
+        Path rejected = directory.resolve("rejected.jar");
+        IOException failure = assertThrows(IOException.class, () -> PackedJar.writePackedJar(original, rejected,
+                bootstrap, bootstrapBudgetOptions(budget - 1)));
+        assertTrue(failure.getMessage().contains(budget + " classes, above the " + (budget - 1) + " class budget"),
+                failure.getMessage());
+        assertTrue(failure.getMessage().contains("largest retained application classes: test/Base.class ("
+                + outer.get("test/Base.class").length + " bytes), test/Main.class ("
+                + outer.get("test/Main.class").length + " bytes)"), failure.getMessage());
+        assertFalse(Files.exists(rejected));
+
+        Path accepted = directory.resolve("accepted.jar");
+        PackedJar.PackResult exact = PackedJar.writePackedJar(original, accepted, bootstrap,
+                bootstrapBudgetOptions(budget));
+        assertEquals(budget, exact.bootstrapClasses());
+        assertArrayEquals(Files.readAllBytes(measured), Files.readAllBytes(accepted));
+    }
+
+    @Test
+    void bootstrapClassBudgetDefaultsToUnlimitedAndRequiresAPositiveCount() {
+        PackagingArtifact artifact = ProjectBuilder.builder().withProjectDir(directory.toFile()).build()
+                .getObjects().newInstance(PackagingArtifact.class, "distribution");
+        assertNull(artifact.getPackedMaximumBootstrapClasses());
+        GradleException failure = assertThrows(GradleException.class,
+                () -> artifact.setPackedMaximumBootstrapClasses(0));
+        assertTrue(failure.getMessage().contains("must be at least 1"), failure.getMessage());
+        assertNull(artifact.getPackedMaximumBootstrapClasses());
+        artifact.setPackedMaximumBootstrapClasses(1);
+        assertEquals(Integer.valueOf(1), artifact.getPackedMaximumBootstrapClasses());
     }
 
     @Test
@@ -457,7 +582,7 @@ public class PackedJarTest {
         Files.write(original, PackedJar.writeJar(repeated, false));
         assertThrows(IOException.class, () -> PackedJar.writePackedJar(original, directory.resolve("out.jar"),
                 Map.of(), new PackedJar.PackOptions(List.of(), List.of(), PackedJar.NativeOptions.empty(),
-                        PackagingArtifact.SPIGOT_CAP_BYTES, directory.resolve("compression-cache"), List.of(), List.of(), false)));
+                        PackagingArtifact.SPIGOT_CAP_BYTES, null, directory.resolve("compression-cache"), List.of(), List.of(), false)));
     }
 
     @Test
@@ -470,7 +595,7 @@ public class PackedJarTest {
         Files.write(original, bytes);
         PackedJar.PackResult result = PackedJar.writePackedJar(original, output, PackedJar.bootstrapClasses(),
                 new PackedJar.PackOptions(List.of(), List.of(), PackedJar.NativeOptions.empty(),
-                        PackagingArtifact.SPIGOT_CAP_BYTES, directory.resolve("compression-cache"), List.of("guides/"), List.of(), false));
+                        PackagingArtifact.SPIGOT_CAP_BYTES, null, directory.resolve("compression-cache"), List.of("guides/"), List.of(), false));
         assertFalse(result.compressed());
         assertArrayEquals(bytes, Files.readAllBytes(output));
         assertArrayEquals(contents.get("guides/reference.md"), PackedJar.readJar(output).get("guides/reference.md"));
@@ -496,7 +621,7 @@ public class PackedJarTest {
 
         PackedJar.PackResult result = PackedJar.writePackedJar(original, output, PackedJar.bootstrapClasses(),
                 new PackedJar.PackOptions(List.of(), List.of(), PackedJar.NativeOptions.empty(),
-                        budget, directory.resolve("compression-cache"), List.of("guides/"), List.of(), false));
+                        budget, null, directory.resolve("compression-cache"), List.of("guides/"), List.of(), false));
 
         assertFalse(result.compressed());
         assertEquals(sourceBytes.length, result.ordinaryBytes());
@@ -525,7 +650,7 @@ public class PackedJarTest {
                 new PackedJar.PackOptions(List.of(), List.of(), new PackedJar.NativeOptions(
                         Map.of("native-common", nativeJar.toFile()), "META-INF/volmit/native-runtime.properties",
                         "META-INF/volmit/native/"),
-                        PackagingArtifact.SPIGOT_CAP_BYTES, directory.resolve("compression-cache"), List.of(), List.of(), false));
+                        PackagingArtifact.SPIGOT_CAP_BYTES, null, directory.resolve("compression-cache"), List.of(), List.of(), false));
         assertFalse(result.compressed());
         Map<String, byte[]> selected = PackedJar.readJar(output);
         assertArrayEquals(Files.readAllBytes(nativeJar), selected.get("META-INF/volmit/native/native-common.jar"));
@@ -538,7 +663,7 @@ public class PackedJarTest {
         PackedJar.PackResult released = PackedJar.writePackedJar(original, releasedOutput, PackedJar.bootstrapClasses(),
                 new PackedJar.PackOptions(List.of(), List.of(), new PackedJar.NativeOptions(
                         Map.of("native-common", nativeJar.toFile()), "META-INF/volmit/native-runtime.properties",
-                        "META-INF/volmit/native/"), PackagingArtifact.SPIGOT_CAP_BYTES,
+                        "META-INF/volmit/native/"), PackagingArtifact.SPIGOT_CAP_BYTES, null,
                         directory.resolve("compression-cache"), List.of("guides/"), List.of(), true));
         assertFalse(released.compressed());
         assertTrue(Files.size(releasedOutput) < Files.size(output));
@@ -554,7 +679,7 @@ public class PackedJarTest {
         PackedJar.PackResult compact = PackedJar.writePackedJar(original, compactOutput, PackedJar.bootstrapClasses(),
                 new PackedJar.PackOptions(List.of(), List.of(), new PackedJar.NativeOptions(
                         Map.of("native-common", nativeJar.toFile()), "META-INF/volmit/native-runtime.properties",
-                        "META-INF/volmit/native/"), budget, directory.resolve("compression-cache"), List.of(), List.of(), false));
+                        "META-INF/volmit/native/"), budget, null, directory.resolve("compression-cache"), List.of(), List.of(), false));
         assertFalse(compact.compressed());
         assertTrue(Files.size(compactOutput) <= budget);
         Map<String, byte[]> compactContents = PackedJar.readJar(compactOutput);
@@ -574,7 +699,7 @@ public class PackedJarTest {
         Files.write(original, sourceBytes);
         IOException failure = assertThrows(IOException.class, () -> PackedJar.writePackedJar(original, output,
                 PackedJar.bootstrapClasses(), new PackedJar.PackOptions(List.of(), List.of(),
-                        PackedJar.NativeOptions.empty(), 1L, directory.resolve("compression-cache"), List.of(), List.of(), false)));
+                        PackedJar.NativeOptions.empty(), 1L, null, directory.resolve("compression-cache"), List.of(), List.of(), false)));
         assertTrue(failure.getMessage().contains("byte budget"));
         assertFalse(Files.exists(output));
         assertArrayEquals(sourceBytes, Files.readAllBytes(original));
@@ -626,16 +751,26 @@ public class PackedJarTest {
         return PackedJar.readJar(archive);
     }
 
+    private PackedJar.PackOptions bootstrapBudgetOptions(Integer maximumBootstrapClasses) {
+        return new PackedJar.PackOptions(List.of(), List.of(), PackedJar.NativeOptions.empty(),
+                PackagingArtifact.SPIGOT_CAP_BYTES, maximumBootstrapClasses, directory.resolve("compression-cache"),
+                List.of(), List.of(), false);
+    }
+
+    private static byte[] constantClass(String name, String value) {
+        ClassWriter writer = new ClassWriter(0);
+        writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, name, null, "java/lang/Object", null);
+        writer.visitField(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC | Opcodes.ACC_FINAL, "VALUE",
+                "Ljava/lang/String;", null, value).visitEnd();
+        constructor(writer, "java/lang/Object");
+        writer.visitEnd();
+        return writer.toByteArray();
+    }
+
     private static void addCompressibleClasses(Map<String, byte[]> contents) {
         for (int index = 0; index < 200; index++) {
             String name = "test/data/Deferred" + index;
-            ClassWriter writer = new ClassWriter(0);
-            writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, name, null, "java/lang/Object", null);
-            writer.visitField(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC | Opcodes.ACC_FINAL, "VALUE",
-                    "Ljava/lang/String;", null, sharedConstant()).visitEnd();
-            constructor(writer, "java/lang/Object");
-            writer.visitEnd();
-            contents.put(name + ".class", writer.toByteArray());
+            contents.put(name + ".class", constantClass(name, sharedConstant()));
         }
     }
 
