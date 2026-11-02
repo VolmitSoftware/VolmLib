@@ -489,7 +489,9 @@ public class ConfigHotloadEngine {
                 if (currentState.missing() && now - pendingSince < hotloadCooldownNanos) {
                     stillPending.put(path, currentState);
                 } else {
-                    if (!alreadyRejected(path, currentState)) {
+                    if (alreadyKnown(path, currentState)) {
+                        knownSignatures.put(path, currentState.signature());
+                    } else if (!alreadyRejected(path, currentState)) {
                         stable.add(new StableContentSnapshot(file, currentState.signature(), currentState.content(), selfWriteRevision(file)));
                     }
                     pendingSinceNanos.remove(path);
@@ -821,6 +823,13 @@ public class ConfigHotloadEngine {
 
     private boolean alreadyRejected(String path, FileState state) {
         return state.equals(rejectedApplies.get(path));
+    }
+
+    private boolean alreadyKnown(String path, FileState state) {
+        if (state.content() == null) {
+            return state.signature().equals(handledNullContentSignatures.get(path));
+        }
+        return state.content().equals(knownContents.get(path));
     }
 
     private void recordApplyCompletionLocked() {

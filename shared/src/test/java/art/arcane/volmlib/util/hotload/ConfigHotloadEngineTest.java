@@ -668,6 +668,32 @@ public class ConfigHotloadEngineTest {
     }
 
     @Test(timeout = 8_000L)
+    public void touchWithoutContentChangeAfterApplyEmitsNothing() throws Exception {
+        File directory = temporaryFolder.newFolder("snapshot-late-touch-managed");
+        File file = new File(directory, "feature.toml");
+        Files.writeString(file.toPath(), "value = 1\n", StandardCharsets.UTF_8);
+        ConfigHotloadEngine engine = createEngine(() -> knownConfigFiles(directory));
+
+        try {
+            engine.configure(100L, 250L, List.of(file), List.of());
+            Files.writeString(file.toPath(), "value = 2\n", StandardCharsets.UTF_8);
+            ConfigHotloadEngine.StableContentSnapshot applied = awaitTouchedSnapshot(engine, file);
+            assertTrue(engine.processSnapshotChange(applied, ignored -> true, null));
+
+            Files.writeString(file.toPath(), "value = 2\n", StandardCharsets.UTF_8);
+            FileTime later = FileTime.fromMillis(Files.getLastModifiedTime(file.toPath()).toMillis() + 5_000L);
+            Files.setLastModifiedTime(file.toPath(), later);
+            assertNoFurtherSnapshots(engine);
+
+            Files.writeString(file.toPath(), "value = 3\n", StandardCharsets.UTF_8);
+            ConfigHotloadEngine.StableContentSnapshot changed = awaitTouchedSnapshot(engine, file);
+            assertEquals("value = 3", changed.normalizedContent());
+        } finally {
+            engine.clear();
+        }
+    }
+
+    @Test(timeout = 8_000L)
     public void retryLaterKeepsRetryingUntilApplied() throws Exception {
         File directory = temporaryFolder.newFolder("snapshot-retry-later-managed");
         File file = new File(directory, "feature.toml");
