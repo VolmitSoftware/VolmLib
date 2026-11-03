@@ -27,6 +27,7 @@ public class FolderWatcher extends FileWatcher {
     private final Set<Path> ancestors;
     private final Map<WatchKey, Path> watchedDirectoryPaths = new HashMap<>();
     private final Map<Path, WatchKey> watchedDirectoryKeys = new HashMap<>();
+    private final Set<File> eventOnlyFiles = new HashSet<>();
     private KMap<File, FolderWatcher> watchers;
     private KList<File> changed;
     private KList<File> created;
@@ -226,6 +227,8 @@ public class FolderWatcher extends FileWatcher {
     }
 
     private void mergeEvents(EventDelta events) {
+        eventOnlyFiles.addAll(events.created());
+        eventOnlyFiles.removeAll(events.deleted());
         addUnique(created, events.created());
         addUnique(changed, events.changed());
         addUnique(deleted, events.deleted());
@@ -238,6 +241,12 @@ public class FolderWatcher extends FileWatcher {
 
     private void mergeScannedEvents(EventDelta events) {
         addUnique(changed, events.changed());
+        for (File removed : events.deleted()) {
+            if (eventOnlyFiles.contains(removed) && !deleted.contains(removed)) {
+                deleted.add(removed);
+            }
+        }
+        eventOnlyFiles.clear();
         changed.removeIf(created::contains);
         changed.removeIf(deleted::contains);
     }
@@ -452,6 +461,7 @@ public class FolderWatcher extends FileWatcher {
         created.clear();
         pendingCreated.clear();
         pendingDeleted.clear();
+        eventOnlyFiles.clear();
         super.close();
     }
 

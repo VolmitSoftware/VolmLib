@@ -53,6 +53,38 @@ public class FolderWatcherEventWatchTest extends WatcherTestRoot {
         }
     }
 
+    @Test(timeout = 30_000L)
+    public void deletingAFileLearnedFromAnEventIsReported() throws Exception {
+        Path quick = root.resolve("quick.json");
+        FolderWatcher watcher = new FolderWatcher(root.toFile());
+
+        try {
+            Assume.assumeTrue(watcher.isEventWatchActive());
+            write(quick, "1");
+            Set<String> created = new HashSet<>();
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(20L);
+            while (System.nanoTime() < deadline && !created.contains("quick.json")) {
+                watcher.checkModifiedEvents();
+                collectNames(watcher.getCreated(), created);
+                Thread.sleep(10L);
+            }
+            assertTrue("created=" + created, created.contains("quick.json"));
+
+            Files.delete(quick);
+
+            Set<String> deleted = new HashSet<>();
+            deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(20L);
+            while (System.nanoTime() < deadline && !deleted.contains("quick.json")) {
+                watcher.checkModifiedEvents();
+                collectNames(watcher.getDeleted(), deleted);
+                Thread.sleep(10L);
+            }
+            assertTrue("deleted=" + deleted, deleted.contains("quick.json"));
+        } finally {
+            watcher.close();
+        }
+    }
+
     private static void collectNames(Iterable<File> files, Set<String> target) {
         for (File file : files) {
             target.add(file.getName());
