@@ -107,7 +107,7 @@ public final class NativeStructureReferenceEnvelope {
                 : adjustedEnvelope;
     }
 
-    private static boolean lowersStreams(StructureTerrainMode mode, Structure source) {
+    static boolean lowersStreams(StructureTerrainMode mode, Structure source) {
         return mode == StructureTerrainMode.FLATTEN
                 || mode == StructureTerrainMode.SOURCE && NativeStructureSurfaceFitter.shouldPrepareSurfaceTerrain(
                 source.terrainAdaptation(), source.step());
