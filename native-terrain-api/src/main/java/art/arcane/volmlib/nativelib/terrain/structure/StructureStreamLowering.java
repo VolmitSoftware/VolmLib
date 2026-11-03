@@ -12,9 +12,10 @@ import java.util.function.IntBinaryOperator;
 public final class StructureStreamLowering {
     public static final int HOLD_REACH = 64;
     public static final int MAX_DROP = 16;
-    private static final int LINK = StructureWaterRules.BANK;
+    public static final int LINK = StructureWaterRules.BANK;
     private static final int EDGE = StructureWaterRules.BANK + 1;
-    private static final int WIDE = 2;
+    private static final int WIDE = 7;
+    private static final int BANK_SLOPE = 10;
     private static final int[][] CARDINALS = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
 
     private StructureStreamLowering() {
@@ -236,7 +237,7 @@ public final class StructureStreamLowering {
     }
 
     public static final class ChunkView {
-        public static final ChunkView DRY = new ChunkView(0, 0, 0, 0, new StructureWaterColumn[0], new int[0]);
+        public static final ChunkView DRY = new ChunkView(0, 0, 0, 0, new StructureWaterColumn[0], new int[0], new int[0]);
 
         private final int minX;
         private final int minZ;
@@ -244,23 +245,26 @@ public final class StructureStreamLowering {
         private final int depth;
         private final StructureWaterColumn[] columns;
         private final int[] levels;
+        private final int[] slopeFloors;
 
-        private ChunkView(int minX, int minZ, int width, int depth, StructureWaterColumn[] columns, int[] levels) {
+        private ChunkView(int minX, int minZ, int width, int depth, StructureWaterColumn[] columns, int[] levels,
+                          int[] slopeFloors) {
             this.minX = minX;
             this.minZ = minZ;
             this.width = width;
             this.depth = depth;
             this.columns = columns;
             this.levels = levels;
+            this.slopeFloors = slopeFloors;
         }
 
         public static ChunkView of(StructureWater water, List<Map<Long, Integer>> plans,
                                    int areaMinX, int areaMinZ, int areaMaxX, int areaMaxZ) {
-            int bank = StructureWaterRules.BANK;
-            int minX = areaMinX - bank;
-            int minZ = areaMinZ - bank;
-            int width = areaMaxX - areaMinX + 1 + bank * 2;
-            int depth = areaMaxZ - areaMinZ + 1 + bank * 2;
+            int reach = StructureWaterRules.BANK + BANK_SLOPE;
+            int minX = areaMinX - reach;
+            int minZ = areaMinZ - reach;
+            int width = areaMaxX - areaMinX + 1 + reach * 2;
+            int depth = areaMaxZ - areaMinZ + 1 + reach * 2;
             StructureWaterColumn[] columns = new StructureWaterColumn[width * depth];
             int[] levels = new int[width * depth];
             Arrays.fill(levels, Integer.MIN_VALUE);
@@ -285,7 +289,29 @@ public final class StructureStreamLowering {
                     levels[index] = level;
                 }
             }
-            return any ? new ChunkView(minX, minZ, width, depth, columns, levels) : DRY;
+            return any ? new ChunkView(minX, minZ, width, depth, columns, levels, slopeFloors(width, depth, levels)) : DRY;
+        }
+
+        private static int[] slopeFloors(int width, int depth, int[] levels) {
+            int reach = StructureWaterRules.BANK + BANK_SLOPE;
+            int[] floors = new int[levels.length];
+            Arrays.fill(floors, Integer.MIN_VALUE);
+            for (int index = 0; index < levels.length; index++) {
+                if (levels[index] == Integer.MIN_VALUE) {
+                    continue;
+                }
+                int x = index % width;
+                int z = index / width;
+                for (int nz = Math.max(0, z - reach); nz <= Math.min(depth - 1, z + reach); nz++) {
+                    for (int nx = Math.max(0, x - reach); nx <= Math.min(width - 1, x + reach); nx++) {
+                        int distance = Math.max(Math.abs(nx - x), Math.abs(nz - z));
+                        int floor = levels[index] - Math.max(0, distance - StructureWaterRules.BANK);
+                        int target = nz * width + nx;
+                        floors[target] = Math.max(floors[target], floor);
+                    }
+                }
+            }
+            return floors;
         }
 
         public StructureWaterColumn column(int x, int z) {
@@ -324,6 +350,14 @@ public final class StructureStreamLowering {
         }
 
         public int keepBank(int x, int z, int groundBefore, int groundAfter) {
+            int index = index(x, z);
+            if (groundAfter >= groundBefore || index < 0) {
+                return groundAfter;
+            }
+            return Math.max(groundAfter, Math.min(groundBefore, slopeFloors[index]));
+        }
+
+        public int keepFootprintBank(int x, int z, int groundBefore, int groundAfter) {
             if (groundAfter >= groundBefore) {
                 return groundAfter;
             }

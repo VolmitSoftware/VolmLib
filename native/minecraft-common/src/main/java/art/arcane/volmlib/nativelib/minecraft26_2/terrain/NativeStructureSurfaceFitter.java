@@ -93,15 +93,15 @@ public final class NativeStructureSurfaceFitter {
         Objects.requireNonNull(surfaceHeight, "Surface structure terrain fitting requires an Iris height resolver");
         Objects.requireNonNull(sea, "Surface structure terrain fitting requires a sea surface");
         Objects.requireNonNull(water, "Surface structure terrain fitting requires structure water");
-        StructureStreamLowering.ChunkView streams = streamView(
-                world, area, targets, surfaceHeight, sea, water, maximumTemplateCells);
         List<SurfaceAnchor> anchors = collectSourceSurfaceAnchors(
                 world, area, targets, maximumTemplateCells);
+        FlattenFootprint flatten = collectFlattenFootprint(
+                world, area, targets, surfaceHeight, maximumTemplateCells);
+        StructureStreamLowering.ChunkView streams = streamView(world, area, targets, surfaceHeight, sea, water,
+                maximumTemplateCells, cutsArea(area, anchors, flatten.anchors()));
         if (!anchors.isEmpty()) {
             fitSurfaceTerrain(world, area, anchors, surfaceHeight, sea, streams);
         }
-        FlattenFootprint flatten = collectFlattenFootprint(
-                world, area, targets, surfaceHeight, maximumTemplateCells);
         FlattenedSurface flattened = flatten.anchors().isEmpty() && flatten.projectedSupport().isEmpty()
                 ? FlattenedSurface.EMPTY : fitFlattenTerrain(world, area, flatten, surfaceHeight, sea, streams);
         flattened = lowerStreams(world, area, streams, flattened);
@@ -117,20 +117,44 @@ public final class NativeStructureSurfaceFitter {
     private static StructureStreamLowering.ChunkView streamView(
             WorldGenLevel world, BoundingBox area,
             List<NativeStructureTerrainIntegrator.TerrainTarget> targets,
-            IntBinaryOperator surfaceHeight, SeaSurface sea, StructureWater water, int maximumTemplateCells) {
+            IntBinaryOperator surfaceHeight, SeaSurface sea, StructureWater water, int maximumTemplateCells,
+            boolean cutsArea) {
         if (water == StructureWater.DRY) {
             return StructureStreamLowering.ChunkView.DRY;
         }
+        boolean lowers = false;
         List<Map<Long, Integer>> plans = new ArrayList<>();
         Set<StructureStart> seen = Collections.newSetFromMap(new IdentityHashMap<>());
         for (NativeStructureTerrainIntegrator.TerrainTarget target : targets) {
             if ((requiresFlattenTerrain(target) || requiresSourceSurfaceTerrain(target))
                     && seen.add(target.start())) {
-                plans.add(streamPlan(world, area, target, surfaceHeight, sea, water, maximumTemplateCells));
+                Map<Long, Integer> plan = streamPlan(world, area, target, surfaceHeight, sea, water, maximumTemplateCells);
+                plans.add(plan);
+                lowers |= !plan.isEmpty();
             }
         }
-        return plans.isEmpty() ? StructureStreamLowering.ChunkView.DRY : StructureStreamLowering.ChunkView.of(
-                water, plans, area.minX(), area.minZ(), area.maxX(), area.maxZ());
+        return plans.isEmpty() || !lowers && !cutsArea ? StructureStreamLowering.ChunkView.DRY
+                : StructureStreamLowering.ChunkView.of(water, plans, area.minX(), area.minZ(), area.maxX(), area.maxZ());
+    }
+
+    private static boolean cutsArea(BoundingBox area, List<SurfaceAnchor> sources, List<FlattenAnchor> flattens) {
+        for (SurfaceAnchor source : sources) {
+            if (reaches(area, source, SURFACE_TERRAIN_RADIUS)) {
+                return true;
+            }
+        }
+        for (FlattenAnchor flatten : flattens) {
+            if (reaches(area, flatten.source(), flatten.radius())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean reaches(BoundingBox area, SurfaceAnchor anchor, int radius) {
+        long outX = Math.max(0, Math.max(anchor.minX() - area.maxX(), area.minX() - anchor.maxX()));
+        long outZ = Math.max(0, Math.max(anchor.minZ() - area.maxZ(), area.minZ() - anchor.maxZ()));
+        return outX * outX + outZ * outZ <= (long) radius * radius;
     }
 
     private static Map<Long, Integer> streamPlan(
@@ -215,7 +239,7 @@ public final class NativeStructureSurfaceFitter {
         BlockState fluid = top.getFluidState().isEmpty()
                 ? Blocks.WATER.defaultBlockState() : top.getFluidState().createLegacyBlock();
         BlockState air = Blocks.AIR.defaultBlockState();
-        clearAboveStream(world, position, x, z, column.surface(), area.maxY());
+        clearAboveStream(world, position, x, z, column.surface(), area.maxY(), drop == 0);
         if (drop > 0) {
             for (int y = Math.max(area.minY(), bedY - STREAM_BED_DEPTH + 1); y <= bedY; y++) {
                 BlockState bed = world.getBlockState(position.set(x, y + drop, z));
@@ -239,7 +263,7 @@ public final class NativeStructureSurfaceFitter {
     }
 
     private static void clearAboveStream(WorldGenLevel world, BlockPos.MutableBlockPos position,
-                                         int x, int z, int surfaceY, int worldMaxY) {
+                                         int x, int z, int surfaceY, int worldMaxY, boolean fluidOnly) {
         BlockState air = Blocks.AIR.defaultBlockState();
         for (int y = surfaceY + 1; y <= worldMaxY; y++) {
             BlockState state = world.getBlockState(position.set(x, y, z));
@@ -247,7 +271,7 @@ public final class NativeStructureSurfaceFitter {
                 recordTerminatingAir(world, x, y, z);
                 return;
             }
-            if (NativeStructureVegetationClearer.isTreeBlock(state)) {
+            if (NativeStructureVegetationClearer.isTreeBlock(state) || fluidOnly && state.getFluidState().isEmpty()) {
                 return;
             }
             world.setBlock(position, air, 2);
@@ -700,8 +724,10 @@ public final class NativeStructureSurfaceFitter {
                     targetHeights[column] = originalY;
                     continue;
                 }
-                targetHeights[column] = streams.keepBank(x, z, originalY, Math.max(area.minY(), Math.min(
-                        area.maxY(), resolution.targetY())));
+                int fitted = Math.max(area.minY(), Math.min(area.maxY(), resolution.targetY()));
+                targetHeights[column] = resolution.rigidBaseSupport()
+                        ? streams.keepFootprintBank(x, z, originalY, fitted)
+                        : streams.keepBank(x, z, originalY, fitted);
                 rigidBaseSupport[column] = resolution.rigidBaseSupport();
             }
         }
@@ -750,7 +776,7 @@ public final class NativeStructureSurfaceFitter {
                     area.minX() - radius, area.minY(), area.minZ() - radius,
                     area.maxX() + radius, area.maxY(), area.maxZ() + radius);
             StructureStart start = target.start();
-            if (!hasExposedFlattenPiece(start, surfaceHeight, range)) {
+            if (!hasPieceIn(start, influenceArea) || !hasExposedFlattenPiece(start, surfaceHeight, range)) {
                 continue;
             }
             BoundingBox first = start.getPieces().getFirst().getBoundingBox();
@@ -797,6 +823,15 @@ public final class NativeStructureSurfaceFitter {
             }
         }
         return new FlattenFootprint(List.copyOf(anchors), Map.copyOf(projectedSupport));
+    }
+
+    private static boolean hasPieceIn(StructureStart start, BoundingBox influenceArea) {
+        for (StructurePiece piece : start.getPieces()) {
+            if (intersectsHorizontally(piece.getBoundingBox(), influenceArea) && flattenPieceAllowed(start, piece)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static void addProjectedFlattenSupport(
@@ -948,7 +983,10 @@ public final class NativeStructureSurfaceFitter {
                         || streamStandsIn(world, position, streams, x, z)) {
                     continue;
                 }
-                int targetY = streams.keepBank(x, z, originalY, flattenTarget(area, resolution, originalY, sea));
+                int fitted = flattenTarget(area, resolution, originalY, sea);
+                int targetY = resolution.footprint()
+                        ? streams.keepFootprintBank(x, z, originalY, fitted)
+                        : streams.keepBank(x, z, originalY, fitted);
                 int minimumY = Math.max(area.minY(), targetY - range);
                 applySurfaceColumn(world, position, x, z, originalY, targetY,
                         minimumY, Math.min(area.maxY(), originalY + range), false, sea);

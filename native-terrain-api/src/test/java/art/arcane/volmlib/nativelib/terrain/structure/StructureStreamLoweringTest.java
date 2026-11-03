@@ -98,10 +98,22 @@ public class StructureStreamLoweringTest {
     @Test
     public void aWideRiverStaysAndItsFeederStopsAtItsLevel() {
         Line line = Line.falling(4);
-        StructureWater wide = (x, z) -> Math.abs(z) > 3 || Math.abs(x) > BOX ? StructureWaterColumn.DRY : line.column(x);
-        IntBinaryOperator after = (x, z) -> Math.abs(z) == 4 && Math.abs(x) < 20 ? line.ground(x, z) - 8 : line.ground(x, z);
+        StructureWater wide = (x, z) -> Math.abs(z) > 7 || Math.abs(x) > BOX ? StructureWaterColumn.DRY : line.column(x);
+        IntBinaryOperator after = (x, z) -> Math.abs(z) == 8 && Math.abs(x) < 20 ? line.ground(x, z) - 8 : line.ground(x, z);
 
         assertTrue(StructureStreamLowering.plan(wide, line::ground, after, NO_SEA, -BOX, -BOX, BOX, BOX).isEmpty());
+    }
+
+    @Test
+    public void waterNarrowerThanTheLimitGoesDownWithTheCut() {
+        Line line = Line.falling(4);
+        StructureWater river = (x, z) -> Math.abs(z) > 6 || Math.abs(x) > BOX ? StructureWaterColumn.DRY : line.column(x);
+        IntBinaryOperator after = (x, z) -> Math.abs(z) == 7 && Math.abs(x) < 20 ? line.ground(x, z) - 8 : line.ground(x, z);
+
+        Map<Long, Integer> plan = StructureStreamLowering.plan(river, line::ground, after, NO_SEA, -BOX, -BOX, BOX, BOX);
+
+        assertTrue(plan.containsKey(StructureStreamLowering.columnKey(0, 6)));
+        assertTrue(plan.containsKey(StructureStreamLowering.columnKey(0, 0)));
     }
 
     @Test
@@ -164,15 +176,29 @@ public class StructureStreamLoweringTest {
     }
 
     @Test
-    public void keptBanksStopAtTheGroundAndFadeBeyondTheBank() {
+    public void keptBanksStopAtTheGroundAndSlopeBeyondTheBank() {
+        Line line = Line.falling(Integer.MAX_VALUE);
+        int surface = line.surface(0);
+        StructureStreamLowering.ChunkView view = StructureStreamLowering.ChunkView.of(line::columnAt, List.of(), -8, -8, 8, 8);
+        int ground = surface + 2;
+        int cut = surface - 6;
+
+        assertEquals("a cut bank keeps the water's level", surface, view.keepBank(0, 2, ground, cut));
+        assertEquals("lower ground is never raised to the water", surface - 1, view.keepBank(0, 2, surface - 1, cut));
+        assertEquals("uncut ground stays", ground, view.keepBank(0, 2, ground, ground));
+        assertEquals("one block down past the bank", surface - 1, view.keepBank(0, 3, ground, cut));
+        assertEquals("two blocks down past the bank", surface - 2, view.keepBank(0, 4, ground, cut));
+        assertEquals("the slope ends at the cut", cut, view.keepBank(0, 8, ground, cut));
+    }
+
+    @Test
+    public void structureFootprintsKeepOnlyTheBankItself() {
         Line line = Line.falling(Integer.MAX_VALUE);
         int surface = line.surface(0);
         StructureStreamLowering.ChunkView view = StructureStreamLowering.ChunkView.of(line::columnAt, List.of(), -8, -8, 8, 8);
 
-        assertEquals("a cut bank keeps the water's level", surface, view.keepBank(0, 2, surface + 2, surface - 6));
-        assertEquals("lower ground is never raised to the water", surface - 1, view.keepBank(0, 2, surface - 1, surface - 6));
-        assertEquals("ground beyond the bank is cut", surface - 6, view.keepBank(0, 3, surface + 2, surface - 6));
-        assertEquals("uncut ground stays", surface + 2, view.keepBank(0, 2, surface + 2, surface + 2));
+        assertEquals(surface, view.keepFootprintBank(0, 2, surface + 2, surface - 6));
+        assertEquals(surface - 6, view.keepFootprintBank(0, 3, surface + 2, surface - 6));
     }
 
     private static Map<Long, Integer> plan(Line line, IntBinaryOperator after, int seaTop) {
