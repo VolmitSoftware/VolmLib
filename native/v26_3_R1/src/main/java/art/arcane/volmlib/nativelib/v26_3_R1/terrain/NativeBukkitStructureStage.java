@@ -481,7 +481,9 @@ public final class NativeBukkitStructureStage<C, D, P extends StructureStartPlan
             try {
                 surfaceTerrainPlan = NativeStructureSurfaceFitter.prepareSurfaceStructures(
                         boundedWorld, area, terrainTargets,
-                        policy.surfaceHeight(policy.current()), resolveSeaSurface());
+                        policy.surfaceHeight(policy.current()), resolveSeaSurface(),
+                        Objects.requireNonNull(policy.water(policy.current()),
+                                "Native structure stage policy did not supply structure water"));
                 surfaceTerrainPlan.primeHeightmaps(chunk);
             } catch (Throwable error) {
                 throw NativeStructureGenerationException.failure(

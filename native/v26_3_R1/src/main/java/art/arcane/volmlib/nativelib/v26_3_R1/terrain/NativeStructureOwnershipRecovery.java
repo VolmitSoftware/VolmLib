@@ -85,7 +85,9 @@ public final class NativeStructureOwnershipRecovery {
         }
         StructureTerrainSettings terrain = NativeStructureTerrainIntegrator.resolveNativeTerrain(
                 start, ownership.terrain());
-        if (terrain.resolvedMode() != StructureTerrainMode.VACUUM) {
+        StructureTerrainMode mode = terrain.resolvedMode();
+        if (mode != StructureTerrainMode.VACUUM && mode != StructureTerrainMode.FLATTEN
+                && mode != StructureTerrainMode.SOURCE) {
             return ownership;
         }
         BoundingBox expected = NativeStructureReferenceEnvelope.referenceBounds(

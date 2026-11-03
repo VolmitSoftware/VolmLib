@@ -433,7 +433,9 @@ public final class NativeModdedStructureStage<C, P extends StructureStartPlan, O
             try {
                 surfaceTerrainPlan = NativeStructureSurfaceFitter.prepareSurfaceStructures(
                         boundedWorld, area, terrainTargets,
-                        policy.surfaceHeight(current), resolveSeaSurface(current));
+                        policy.surfaceHeight(current), resolveSeaSurface(current),
+                        Objects.requireNonNull(policy.water(current),
+                                "Native structure stage policy did not supply structure water"));
                 surfaceTerrainPlan.primeHeightmaps(chunk);
             } catch (Throwable error) {
                 throw NativeStructureGenerationException.failure(

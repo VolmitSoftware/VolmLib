@@ -1,6 +1,7 @@
 package art.arcane.volmlib.nativelib.v26_3_R1.terrain;
 
 import art.arcane.volmlib.nativelib.terrain.structure.StructureTerrainSettings;
+import art.arcane.volmlib.nativelib.terrain.structure.StructureWater;
 import art.arcane.volmlib.util.structure.StructureTerrainMode;
 import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
@@ -148,7 +149,7 @@ public class NativeStructureSurfaceFitterSeaSurfaceTest {
 
     private static NativeStructureSurfaceFitter.SurfaceTerrainPlan fitCoast(Map<Long, BlockState> blocks) {
         return NativeStructureSurfaceFitter.prepareSurfaceStructures(world(blocks), COAST,
-                List.of(beachedWreck()), NativeStructureSurfaceFitterSeaSurfaceTest::surfaceHeight, sea());
+                List.of(beachedWreck()), NativeStructureSurfaceFitterSeaSurfaceTest::surfaceHeight, sea(), StructureWater.DRY);
     }
 
     private static NativeStructureSurfaceFitter.SeaSurface sea() {

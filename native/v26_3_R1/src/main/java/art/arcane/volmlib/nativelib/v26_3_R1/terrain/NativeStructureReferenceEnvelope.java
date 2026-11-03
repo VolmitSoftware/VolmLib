@@ -1,5 +1,6 @@
 package art.arcane.volmlib.nativelib.v26_3_R1.terrain;
 
+import art.arcane.volmlib.nativelib.terrain.structure.StructureStreamLowering;
 import art.arcane.volmlib.nativelib.terrain.structure.StructureTerrainSettings;
 import art.arcane.volmlib.util.structure.StructureTerrainMode;
 
@@ -101,7 +102,21 @@ public final class NativeStructureReferenceEnvelope {
             warnClippedTerrain(start, source, structureKey);
             return referencedEnvelope;
         }
-        return adjustedEnvelope;
+        return lowersStreams(mode, source)
+                ? clampReferenceRange(start.getChunkPos(), inflated(adjustedEnvelope, StructureStreamLowering.HOLD_REACH))
+                : adjustedEnvelope;
+    }
+
+    private static boolean lowersStreams(StructureTerrainMode mode, Structure source) {
+        return mode == StructureTerrainMode.FLATTEN
+                || mode == StructureTerrainMode.SOURCE && NativeStructureSurfaceFitter.shouldPrepareSurfaceTerrain(
+                source.terrainAdaptation(), source.step());
+    }
+
+    private static BoundingBox inflated(BoundingBox bounds, int margin) {
+        return new BoundingBox(
+                bounds.minX() - margin, bounds.minY(), bounds.minZ() - margin,
+                bounds.maxX() + margin, bounds.maxY(), bounds.maxZ() + margin);
     }
 
     public static boolean contentFitsReferenceRange(StructureStart start) {
