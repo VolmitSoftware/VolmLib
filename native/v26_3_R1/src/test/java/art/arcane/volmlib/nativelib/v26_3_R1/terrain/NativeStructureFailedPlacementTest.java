@@ -2,12 +2,16 @@ package art.arcane.volmlib.nativelib.v26_3_R1.terrain;
 
 
 import art.arcane.volmlib.nativelib.terrain.NativeBlockChangeSet;
+import art.arcane.volmlib.nativelib.terrain.NativePlacementFailures;
 import art.arcane.volmlib.nativelib.terrain.structure.StructureCachePolicy;
 import art.arcane.volmlib.nativelib.terrain.structure.StructureOwnershipRecordView;
 import art.arcane.volmlib.nativelib.terrain.structure.StructurePlacementDecision;
 import art.arcane.volmlib.nativelib.terrain.structure.StructureReferencePolicy;
 import art.arcane.volmlib.nativelib.terrain.structure.StructureStagePolicy;
+import art.arcane.volmlib.nativelib.terrain.structure.StructureSeaSurface;
 import art.arcane.volmlib.nativelib.terrain.structure.StructureStartPlan;
+import art.arcane.volmlib.nativelib.terrain.structure.StructureStrata;
+import art.arcane.volmlib.nativelib.terrain.structure.StructureWater;
 import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
@@ -31,7 +35,11 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 import org.mockito.MockedStatic;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertSame;
@@ -76,6 +84,50 @@ public class NativeStructureFailedPlacementTest {
         assertSame(invalidationFailure, failure.getSuppressed()[0].getCause());
     }
 
+    @Test
+    public void aThrowingStartIsSkippedAndTheNextStartStillPlaces() {
+        Fixture fixture = new Fixture();
+        List<String> skipped = fixture.recordSkips();
+        try {
+            assertEquals(2, fixture.placeWithFirstStartThrowing());
+        } finally {
+            NativePlacementFailures.register(null);
+        }
+
+        assertEquals(List.of("vanilla structure"), skipped);
+        verify(fixture.policy).invalidateBlockChanges(null, fixture.changes);
+    }
+
+    @Test
+    public void anEngineFailureFromAStartStopsTheChunk() {
+        Fixture fixture = new Fixture();
+        NativePlacementFailures.register((failure, kind, id, x, z) -> {
+            throw (IllegalStateException) failure;
+        });
+        try {
+            NativeStructureGenerationException failure = assertThrows(NativeStructureGenerationException.class,
+                    fixture::placeWithFirstStartThrowing);
+            assertSame(fixture.placementFailure, failure.getCause());
+        } finally {
+            NativePlacementFailures.register(null);
+        }
+        verify(fixture.policy).invalidateBlockChanges(null, fixture.changes);
+    }
+
+    @Test
+    public void structureTerrainStepsThatThrowAreSkippedAndPlacementContinues() {
+        Fixture fixture = new Fixture();
+        List<String> skipped = fixture.recordSkips();
+        try {
+            assertEquals(2, fixture.placeWithTerrainStepsThrowing());
+        } finally {
+            NativePlacementFailures.register(null);
+        }
+
+        assertEquals(List.of("structure vegetation", "structure surface", "structure terrain"), skipped);
+        verify(fixture.policy).invalidateBlockChanges(null, fixture.changes);
+    }
+
     private static final class Fixture {
         private final WorldGenLevel world = mock(WorldGenLevel.class);
         private final ChunkAccess chunk = mock(ChunkAccess.class);
@@ -95,6 +147,7 @@ public class NativeStructureFailedPlacementTest {
             Registry<Structure> registry = mock(Registry.class);
             Structure structure = mock(Structure.class);
             StructureStart start = mock(StructureStart.class);
+            StructureStart nextStart = mock(StructureStart.class);
             StructurePlacementDecision decision = mock(StructurePlacementDecision.class);
             Holder<Biome> biome = Holder.direct(mock(Biome.class));
             when(world.registryAccess()).thenReturn(registries);
@@ -103,9 +156,15 @@ public class NativeStructureFailedPlacementTest {
             when(registry.getKey(structure)).thenReturn(Identifier.parse("minecraft:village_plains"));
             when(structure.step()).thenReturn(GenerationStep.Decoration.SURFACE_STRUCTURES);
             when(manager.shouldGenerateStructures()).thenReturn(true);
-            when(manager.startsForStructure(anyInt(), anyInt(), any(Structure.class))).thenReturn(List.of(start));
+            when(manager.startsForStructure(anyInt(), anyInt(), any(Structure.class))).thenReturn(List.of(start, nextStart));
             when(start.getChunkPos()).thenReturn(new ChunkPos(0, 0));
             when(start.getBoundingBox()).thenReturn(new BoundingBox(0, 60, 0, 15, 80, 15));
+            when(nextStart.getChunkPos()).thenReturn(new ChunkPos(0, 1));
+            when(nextStart.getBoundingBox()).thenReturn(new BoundingBox(0, 60, 16, 15, 80, 31));
+            when(policy.allowsFootprint(any(), any())).thenReturn(true);
+            when(policy.strata(any())).thenReturn(mock(StructureStrata.class));
+            when(policy.water(any())).thenReturn(mock(StructureWater.class));
+            when(policy.seaSurface(any())).thenReturn(StructureSeaSurface.NONE);
             when(policy.structurePolicy(any())).thenReturn(structures);
             when(structures.resolve(anyString(), anyBoolean())).thenReturn(decision);
             when(decision.generate()).thenReturn(true);
@@ -122,6 +181,56 @@ public class NativeStructureFailedPlacementTest {
             when(world.setBlock(any(), any(), anyInt(), anyInt())).thenReturn(true);
             stage = new NativeBukkitStructureStage<>(new NativeBukkitStructureStage.Configuration<>(
                     null, null, -64, policy, cache, null));
+        }
+
+        private List<String> recordSkips() {
+            List<String> skipped = new ArrayList<>();
+            NativePlacementFailures.register((failure, kind, id, x, z) -> skipped.add(kind));
+            return skipped;
+        }
+
+        private int placeWithFirstStartThrowing() {
+            AtomicInteger placed = new AtomicInteger();
+            try (MockedStatic<WorldgenTerrainHeightmaps> heights = mockStatic(WorldgenTerrainHeightmaps.class);
+                 MockedStatic<NativeStructureOwnershipRecovery> ownership = mockStatic(NativeStructureOwnershipRecovery.class);
+                 MockedStatic<NativeStructureVegetationClearer> vegetation = mockStatic(NativeStructureVegetationClearer.class);
+                 MockedStatic<NativeStructureSurfaceFitter> surface = mockStatic(NativeStructureSurfaceFitter.class);
+                 MockedStatic<NativeStructurePostProcessor> post = mockStatic(NativeStructurePostProcessor.class)) {
+                surface.when(() -> NativeStructureSurfaceFitter.prepareSurfaceStructures(any(), any(), any(), any(), any(), any(), any()))
+                        .thenReturn(new NativeStructureSurfaceFitter.SurfaceTerrainPlan(List.of(), Set.of(), Map.of(), Map.of()));
+                post.when(() -> NativeStructurePostProcessor.place(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
+                        .thenAnswer(invocation -> {
+                            if (placed.incrementAndGet() == 1) {
+                                throw placementFailure;
+                            }
+                            return null;
+                        });
+                stage.placeVanillaStructures(world, chunk, manager);
+            }
+            return placed.get();
+        }
+
+        private int placeWithTerrainStepsThrowing() {
+            AtomicInteger placed = new AtomicInteger();
+            try (MockedStatic<WorldgenTerrainHeightmaps> heights = mockStatic(WorldgenTerrainHeightmaps.class);
+                 MockedStatic<NativeStructureOwnershipRecovery> ownership = mockStatic(NativeStructureOwnershipRecovery.class);
+                 MockedStatic<NativeStructureVegetationClearer> vegetation = mockStatic(NativeStructureVegetationClearer.class);
+                 MockedStatic<NativeStructureSurfaceFitter> surface = mockStatic(NativeStructureSurfaceFitter.class);
+                 MockedStatic<NativeStructurePostProcessor> post = mockStatic(NativeStructurePostProcessor.class)) {
+                vegetation.when(() -> NativeStructureVegetationClearer.clearIntersectingVegetation(any(), any(), any(), any()))
+                        .thenThrow(placementFailure);
+                surface.when(() -> NativeStructureSurfaceFitter.prepareSurfaceStructures(any(), any(), any(), any(), any(), any(), any()))
+                        .thenThrow(placementFailure);
+                post.when(() -> NativeStructurePostProcessor.prepareTerrain(any(), any(), any(), any(), any()))
+                        .thenThrow(placementFailure);
+                post.when(() -> NativeStructurePostProcessor.place(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
+                        .thenAnswer(invocation -> {
+                            placed.incrementAndGet();
+                            return null;
+                        });
+                stage.placeVanillaStructures(world, chunk, manager);
+            }
+            return placed.get();
         }
 
         private NativeStructureGenerationException failDuringClearing() {
