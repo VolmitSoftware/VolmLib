@@ -10,6 +10,8 @@ import art.arcane.volmlib.nativelib.v26_3_R1.terrain.WorldgenTerrainHeightmaps;
 
 
 import art.arcane.volmlib.nativelib.terrain.NativeBlockChangeRecorder;
+import art.arcane.volmlib.nativelib.terrain.NativeBlockState;
+import art.arcane.volmlib.nativelib.terrain.structure.StructureStrata;
 import art.arcane.volmlib.nativelib.terrain.structure.StructureStreamLowering;
 import art.arcane.volmlib.nativelib.terrain.structure.StructureTerrainSettings;
 import art.arcane.volmlib.nativelib.terrain.structure.StructureWater;
@@ -53,6 +55,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.WeakHashMap;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Function;
 import java.util.function.IntBinaryOperator;
 
 public final class NativeStructureSurfaceFitter {
@@ -78,21 +81,23 @@ public final class NativeStructureSurfaceFitter {
     public static SurfaceTerrainPlan prepareSurfaceStructures(
             WorldGenLevel world, BoundingBox area,
             List<NativeStructureTerrainIntegrator.TerrainTarget> targets,
-            IntBinaryOperator surfaceHeight, SeaSurface sea, StructureWater water) {
+            IntBinaryOperator surfaceHeight, SeaSurface sea, StructureWater water, SurfaceStrata strata) {
         return prepareSurfaceStructures(
-                world, area, targets, surfaceHeight, sea, water, MAX_SURFACE_TEMPLATE_CELLS);
+                world, area, targets, surfaceHeight, sea, water, strata, MAX_SURFACE_TEMPLATE_CELLS);
     }
 
     public static SurfaceTerrainPlan prepareSurfaceStructures(
             WorldGenLevel world, BoundingBox area,
             List<NativeStructureTerrainIntegrator.TerrainTarget> targets,
-            IntBinaryOperator surfaceHeight, SeaSurface sea, StructureWater water, int maximumTemplateCells) {
+            IntBinaryOperator surfaceHeight, SeaSurface sea, StructureWater water, SurfaceStrata strata,
+            int maximumTemplateCells) {
         if (targets == null || targets.isEmpty()) {
             return SurfaceTerrainPlan.empty();
         }
         Objects.requireNonNull(surfaceHeight, "Surface structure terrain fitting requires an Iris height resolver");
         Objects.requireNonNull(sea, "Surface structure terrain fitting requires a sea surface");
         Objects.requireNonNull(water, "Surface structure terrain fitting requires structure water");
+        Objects.requireNonNull(strata, "Surface structure terrain fitting requires biome strata");
         List<SurfaceAnchor> anchors = collectSourceSurfaceAnchors(
                 world, area, targets, maximumTemplateCells);
         FlattenFootprint flatten = collectFlattenFootprint(
@@ -100,15 +105,15 @@ public final class NativeStructureSurfaceFitter {
         StructureStreamLowering.ChunkView streams = streamView(world, area, targets, surfaceHeight, sea, water,
                 maximumTemplateCells, cutsArea(area, anchors, flatten.anchors()));
         if (!anchors.isEmpty()) {
-            fitSurfaceTerrain(world, area, anchors, surfaceHeight, sea, streams);
+            fitSurfaceTerrain(world, area, anchors, surfaceHeight, sea, streams, strata);
         }
         FlattenedSurface flattened = flatten.anchors().isEmpty() && flatten.projectedSupport().isEmpty()
-                ? FlattenedSurface.EMPTY : fitFlattenTerrain(world, area, flatten, surfaceHeight, sea, streams);
+                ? FlattenedSurface.EMPTY : fitFlattenTerrain(world, area, flatten, surfaceHeight, sea, streams, strata);
         flattened = lowerStreams(world, area, streams, flattened);
         VacuumFootprint vacuum = collectVacuumFootprint(
                 world, area, targets, maximumTemplateCells);
         if (!vacuum.anchors().isEmpty()) {
-            fitVacuumTerrain(world, area, vacuum, surfaceHeight, sea);
+            fitVacuumTerrain(world, area, vacuum, surfaceHeight, sea, strata);
         }
         return SurfaceTerrainPlan.create(
                 vacuum, area, flattened);
@@ -280,7 +285,7 @@ public final class NativeStructureSurfaceFitter {
 
     public static void repairVacuumFoundations(
             WorldGenLevel world, BoundingBox area,
-            SurfaceTerrainPlan plan) {
+            SurfaceTerrainPlan plan, SurfaceStrata strata) {
         if (plan == null || plan.foundationBases.isEmpty()) {
             return;
         }
@@ -304,14 +309,12 @@ public final class NativeStructureSurfaceFitter {
                     supportY + 1, base.getY() - 1)) {
                 continue;
             }
-            BlockState fill = resolveSurfaceMaterials(
-                    world, position, base.getX(), base.getZ(), supportY,
-                    area.minY()).subsurface();
+            SurfaceStrata.Column column = strata.column(base.getX(), base.getZ(), base.getY(), false);
             for (int y = supportY + 1; y < base.getY(); y++) {
                 BlockState existing = world.getBlockState(
                         position.set(base.getX(), y, base.getZ()));
                 if (existing.isAir() || !existing.getFluidState().isEmpty()) {
-                    world.setBlock(position, fill, 2);
+                    world.setBlock(position, column.block(y), 2);
                 }
             }
         }
@@ -706,7 +709,7 @@ public final class NativeStructureSurfaceFitter {
     private static void fitSurfaceTerrain(WorldGenLevel world, BoundingBox area,
                                           List<SurfaceAnchor> anchors,
                                           IntBinaryOperator surfaceHeight, SeaSurface sea,
-                                          StructureStreamLowering.ChunkView streams) {
+                                          StructureStreamLowering.ChunkView streams, SurfaceStrata strata) {
         int width = area.getXSpan();
         int depth = area.getZSpan();
         int[] originalHeights = new int[width * depth];
@@ -727,7 +730,7 @@ public final class NativeStructureSurfaceFitter {
                 int fitted = Math.max(area.minY(), Math.min(area.maxY(), resolution.targetY()));
                 targetHeights[column] = resolution.rigidBaseSupport()
                         ? streams.keepFootprintBank(x, z, originalY, fitted)
-                        : streams.keepBank(x, z, originalY, fitted);
+                        : streams.capFill(x, z, originalY, streams.keepBank(x, z, originalY, fitted));
                 rigidBaseSupport[column] = resolution.rigidBaseSupport();
             }
         }
@@ -736,7 +739,7 @@ public final class NativeStructureSurfaceFitter {
                 int column = (z - area.minZ()) * width + x - area.minX();
                 applySurfaceColumn(world, position, x, z,
                         originalHeights[column], targetHeights[column], area.minY(), area.maxY(),
-                        rigidBaseSupport[column], sea);
+                        rigidBaseSupport[column], sea, strata);
             }
         }
     }
@@ -967,7 +970,8 @@ public final class NativeStructureSurfaceFitter {
 
     private static FlattenedSurface fitFlattenTerrain(
             WorldGenLevel world, BoundingBox area, FlattenFootprint footprint,
-            IntBinaryOperator surfaceHeight, SeaSurface sea, StructureStreamLowering.ChunkView streams) {
+            IntBinaryOperator surfaceHeight, SeaSurface sea, StructureStreamLowering.ChunkView streams,
+            SurfaceStrata strata) {
         Map<Long, Integer> heights = new HashMap<>();
         Map<Long, Integer> floodedHeights = new HashMap<>();
         BlockPos.MutableBlockPos position = new BlockPos.MutableBlockPos();
@@ -986,11 +990,11 @@ public final class NativeStructureSurfaceFitter {
                 int fitted = flattenTarget(area, resolution, originalY, sea);
                 int targetY = resolution.footprint()
                         ? streams.keepFootprintBank(x, z, originalY, fitted)
-                        : streams.keepBank(x, z, originalY, fitted);
+                        : streams.capFill(x, z, originalY, streams.keepBank(x, z, originalY, fitted));
                 int minimumY = Math.max(area.minY(), targetY - range);
                 applySurfaceColumn(world, position, x, z, originalY, targetY,
-                        minimumY, Math.min(area.maxY(), originalY + range), false, sea);
-                fillFlattenFoundation(world, position, x, z, targetY, minimumY);
+                        minimumY, Math.min(area.maxY(), originalY + range), false, sea, strata);
+                fillFlattenFoundation(world, position, x, z, targetY, minimumY, sea, strata);
                 heights.put(column, targetY + 1);
                 int floodedTopY = Math.min(originalY, sea.topY());
                 if (targetY < floodedTopY) {
@@ -1003,10 +1007,11 @@ public final class NativeStructureSurfaceFitter {
 
     private static void fillFlattenFoundation(
             WorldGenLevel world, BlockPos.MutableBlockPos position,
-            int x, int z, int targetY, int minimumY) {
-        SurfaceMaterials materials = resolveSurfaceMaterials(world, position, x, z, targetY, minimumY);
+            int x, int z, int targetY, int minimumY, SeaSurface sea, SurfaceStrata strata) {
+        SurfaceStrata.Column column = null;
         if (!isTerrainBlock(world.getBlockState(position.set(x, targetY, z)))) {
-            world.setBlock(position, materials.surface(), 2);
+            column = strataColumn(strata, x, z, targetY, sea);
+            world.setBlock(position, column.block(targetY), 2);
         }
         for (int y = targetY - 1; y >= minimumY; y--) {
             BlockState existing = world.getBlockState(position.set(x, y, z));
@@ -1015,13 +1020,16 @@ public final class NativeStructureSurfaceFitter {
                     || isTerrainBlock(existing)) {
                 break;
             }
-            world.setBlock(position, materials.subsurface(), 2);
+            if (column == null) {
+                column = strataColumn(strata, x, z, targetY, sea);
+            }
+            world.setBlock(position, column.block(y), 2);
         }
     }
 
     private static void fitVacuumTerrain(
             WorldGenLevel world, BoundingBox area, VacuumFootprint footprint,
-            IntBinaryOperator surfaceHeight, SeaSurface sea) {
+            IntBinaryOperator surfaceHeight, SeaSurface sea, SurfaceStrata strata) {
         int width = area.getXSpan();
         int depth = area.getZSpan();
         int[] originalHeights = new int[width * depth];
@@ -1057,7 +1065,7 @@ public final class NativeStructureSurfaceFitter {
                 int column = (z - area.minZ()) * width + x - area.minX();
                 applySurfaceColumn(world, position, x, z,
                         originalHeights[column], targetHeights[column],
-                        area.minY(), area.maxY(), rigidBaseSupport[column], sea);
+                        area.minY(), area.maxY(), rigidBaseSupport[column], sea, strata);
             }
         }
     }
@@ -1191,45 +1199,52 @@ public final class NativeStructureSurfaceFitter {
     public static void applySurfaceColumn(WorldGenLevel world, BlockPos.MutableBlockPos position,
                                    int x, int z, int originalY, int targetY,
                                    int worldMinY, int worldMaxY,
-                                   boolean requireRigidBaseSupport, SeaSurface sea) {
+                                   boolean requireRigidBaseSupport, SeaSurface sea, SurfaceStrata strata) {
         if (targetY == originalY) {
             if (requireRigidBaseSupport) {
-                ensureRigidBaseTerrain(world, position, x, z, targetY, worldMinY);
+                ensureRigidBaseTerrain(world, position, x, z, targetY, worldMinY, sea, strata);
             }
             return;
         }
-        SurfaceMaterials materials = resolveSurfaceMaterials(world, position, x, z, originalY, worldMinY);
+        SurfaceStrata.Column column;
         if (targetY < originalY) {
             BlockState clearedState = clearSurfaceDecorationAndResolveFill(
                     world, position, x, z, originalY, worldMaxY);
+            column = strata.column(x, z, targetY, targetY < sea.topY() || !clearedState.getFluidState().isEmpty());
             for (int y = originalY; y > targetY; y--) {
                 world.setBlock(position.set(x, y, z),
                         y <= sea.topY() && clearedState.getFluidState().isEmpty() ? sea.fluid() : clearedState, 2);
             }
-            world.setBlock(position.set(x, targetY, z), materials.surface(), 2);
-            if (requireRigidBaseSupport) {
-                ensureRigidBaseTerrain(world, position, x, z, targetY, worldMinY, materials);
+            world.setBlock(position.set(x, targetY, z), column.block(targetY), 2);
+            repaintSoil(world, position, x, z, targetY - 1, Math.max(worldMinY, targetY - column.soilDepth() + 1), column);
+        } else {
+            column = strataColumn(strata, x, z, targetY, sea);
+            for (int y = targetY; y > originalY; y--) {
+                position.set(x, y, z);
+                if (!NativeStructureVegetationClearer.isTreeBlock(world.getBlockState(position))) {
+                    world.setBlock(position, column.block(y), 2);
+                }
             }
-            return;
-        }
-        for (int y = originalY + 1; y < targetY; y++) {
-            position.set(x, y, z);
-            if (!NativeStructureVegetationClearer.isTreeBlock(world.getBlockState(position))) {
-                world.setBlock(position, materials.subsurface(), 2);
-            }
-        }
-        position.set(x, targetY, z);
-        if (!NativeStructureVegetationClearer.isTreeBlock(world.getBlockState(position))) {
-            world.setBlock(position, materials.surface(), 2);
+            repaintSoil(world, position, x, z, originalY, Math.max(worldMinY, originalY - column.soilDepth() + 1), column);
         }
         if (requireRigidBaseSupport) {
-            ensureRigidBaseTerrain(world, position, x, z, targetY, worldMinY, materials);
+            ensureRigidBaseTerrain(world, position, x, z, targetY, worldMinY, column);
+        }
+    }
+
+    private static void repaintSoil(WorldGenLevel world, BlockPos.MutableBlockPos position,
+                                    int x, int z, int topY, int floorY, SurfaceStrata.Column column) {
+        for (int y = topY; y >= floorY; y--) {
+            if (isTerrainBlock(world.getBlockState(position.set(x, y, z)))) {
+                world.setBlock(position, column.block(y), 2);
+            }
         }
     }
 
     private static void ensureRigidBaseTerrain(WorldGenLevel world,
                                                BlockPos.MutableBlockPos position,
-                                               int x, int z, int targetY, int worldMinY) {
+                                               int x, int z, int targetY, int worldMinY,
+                                               SeaSurface sea, SurfaceStrata strata) {
         int supportY = targetY - 1;
         boolean targetIsTerrain = isTerrainBlock(world.getBlockState(position.set(x, targetY, z)));
         boolean supportIsTerrain = supportY < worldMinY
@@ -1237,27 +1252,29 @@ public final class NativeStructureSurfaceFitter {
         if (targetIsTerrain && supportIsTerrain) {
             return;
         }
-        SurfaceMaterials materials = resolveSurfaceMaterials(
-                world, position, x, z, targetY, worldMinY);
-        ensureRigidBaseTerrain(world, position, x, z, targetY, worldMinY, materials);
+        ensureRigidBaseTerrain(world, position, x, z, targetY, worldMinY, strataColumn(strata, x, z, targetY, sea));
     }
 
     private static void ensureRigidBaseTerrain(WorldGenLevel world,
                                                BlockPos.MutableBlockPos position,
                                                int x, int z, int targetY, int worldMinY,
-                                               SurfaceMaterials materials) {
+                                               SurfaceStrata.Column column) {
         int supportY = targetY - 1;
         position.set(x, targetY, z);
         if (!isTerrainBlock(world.getBlockState(position))) {
-            world.setBlock(position, materials.surface(), 2);
+            world.setBlock(position, column.block(targetY), 2);
         }
         if (supportY < worldMinY) {
             return;
         }
         position.set(x, supportY, z);
         if (!isTerrainBlock(world.getBlockState(position))) {
-            world.setBlock(position, materials.subsurface(), 2);
+            world.setBlock(position, column.block(supportY), 2);
         }
+    }
+
+    private static SurfaceStrata.Column strataColumn(SurfaceStrata strata, int x, int z, int surfaceY, SeaSurface sea) {
+        return strata.column(x, z, surfaceY, surfaceY < sea.topY());
     }
 
     private static BlockState clearSurfaceDecorationAndResolveFill(
@@ -1291,30 +1308,36 @@ public final class NativeStructureSurfaceFitter {
         }
     }
 
-    private static SurfaceMaterials resolveSurfaceMaterials(WorldGenLevel world,
-                                                            BlockPos.MutableBlockPos position,
-                                                            int x, int z, int originalY,
-                                                            int worldMinY) {
-        BlockState surface = world.getBlockState(position.set(x, originalY, z));
-        BlockState subsurface = null;
-        for (int y = originalY - 1; y >= worldMinY; y--) {
-            BlockState candidate = world.getBlockState(position.set(x, y, z));
-            if (isTerrainBlock(candidate)) {
-                subsurface = candidate;
-                break;
-            }
-        }
-        if (subsurface == null) {
-            subsurface = isTerrainBlock(surface) ? surface : Blocks.STONE.defaultBlockState();
-        }
-        if (!isTerrainBlock(surface)) {
-            surface = subsurface;
-        }
-        return new SurfaceMaterials(surface, subsurface);
-    }
-
     private static boolean isTerrainBlock(BlockState state) {
         return state.isSolid() && !NativeStructureVegetationClearer.isTreeBlock(state);
+    }
+
+    @FunctionalInterface
+    public interface SurfaceStrata {
+        Column column(int x, int z, int surfaceY, boolean submerged);
+
+        static SurfaceStrata of(StructureStrata strata, Function<NativeBlockState, BlockState> blocks) {
+            return (x, z, surfaceY, submerged) -> {
+                StructureStrata.Column column = strata.column(x, z, surfaceY, submerged);
+                return new Column() {
+                    @Override
+                    public BlockState block(int y) {
+                        return blocks.apply(column.block(y));
+                    }
+
+                    @Override
+                    public int soilDepth() {
+                        return column.soilDepth();
+                    }
+                };
+            };
+        }
+
+        interface Column {
+            BlockState block(int y);
+
+            int soilDepth();
+        }
     }
 
     public record SeaSurface(int topY, BlockState fluid) {
@@ -1342,9 +1365,6 @@ public final class NativeStructureSurfaceFitter {
 
     private record FlattenedSurface(Map<Long, Integer> groundHeights, Map<Long, Integer> floodedHeights) {
         private static final FlattenedSurface EMPTY = new FlattenedSurface(Map.of(), Map.of());
-    }
-
-    private record SurfaceMaterials(BlockState surface, BlockState subsurface) {
     }
 
     private record SurfaceResolution(int targetY, boolean rigidBaseSupport) {

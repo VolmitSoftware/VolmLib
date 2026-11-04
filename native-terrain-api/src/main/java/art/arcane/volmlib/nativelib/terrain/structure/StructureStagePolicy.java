@@ -25,6 +25,7 @@ public interface StructureStagePolicy<C, P extends StructureStartPlan, O extends
     IntBinaryOperator surfaceHeight(C context);
     StructureSeaSurface seaSurface(C context);
     StructureWater water(C context);
+    StructureStrata strata(C context);
     IntBinaryOperator worldgenHeight(C context, int runtimeMinY, boolean floor);
     NativeBlockState paletteBlock(StructurePalette palette, RNG rng, int x, int y, int z);
     String generationLabel(String structureId);

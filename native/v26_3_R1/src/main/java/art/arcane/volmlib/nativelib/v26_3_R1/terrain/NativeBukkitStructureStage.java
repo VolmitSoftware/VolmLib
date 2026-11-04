@@ -477,13 +477,18 @@ public final class NativeBukkitStructureStage<C, D, P extends StructureStartPlan
                         "vegetation cleanup", nativeStructureBatchContext(placementGroups),
                         chunkPos.x(), chunkPos.z(), error);
             }
+            NativeStructureSurfaceFitter.SurfaceStrata surfaceStrata = NativeStructureSurfaceFitter.SurfaceStrata.of(
+                    Objects.requireNonNull(policy.strata(policy.current()),
+                            "Native structure stage policy did not supply structure strata"),
+                    this::strataBlock);
             NativeStructureSurfaceFitter.SurfaceTerrainPlan surfaceTerrainPlan;
             try {
                 surfaceTerrainPlan = NativeStructureSurfaceFitter.prepareSurfaceStructures(
                         boundedWorld, area, terrainTargets,
                         policy.surfaceHeight(policy.current()), resolveSeaSurface(),
                         Objects.requireNonNull(policy.water(policy.current()),
-                                "Native structure stage policy did not supply structure water"));
+                                "Native structure stage policy did not supply structure water"),
+                        surfaceStrata);
                 surfaceTerrainPlan.primeHeightmaps(chunk);
             } catch (Throwable error) {
                 throw NativeStructureGenerationException.failure(
@@ -514,7 +519,7 @@ public final class NativeBukkitStructureStage<C, D, P extends StructureStartPlan
             }
             try {
                 NativeStructureSurfaceFitter.repairVacuumFoundations(
-                        boundedWorld, area, surfaceTerrainPlan);
+                        boundedWorld, area, surfaceTerrainPlan, surfaceStrata);
             } catch (Throwable error) {
                 throw NativeStructureGenerationException.failure(
                         "foundation repair", nativeStructureBatchContext(placementGroups),
@@ -624,6 +629,13 @@ public final class NativeBukkitStructureStage<C, D, P extends StructureStartPlan
             structureStepCache = new StructureStepCache(runtimeId, registry, resolved);
             return resolved;
         }
+    }
+
+    private BlockState strataBlock(NativeBlockState platformState) {
+        if (platformState != null && platformState.placementHandle() instanceof CraftBlockData craftBlockData) {
+            return craftBlockData.getState();
+        }
+        throw new IllegalStateException("Structure strata resolved no Bukkit block: " + platformState);
     }
 
     private BlockState resolvePaletteBlock(StructurePalette source, RNG rng, int x, int y, int z) {

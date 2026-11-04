@@ -141,7 +141,7 @@ public class NativeStructureSurfaceFitterStreamTest {
         for (int chunkX = FIRST_X >> 4; chunkX <= LAST_X >> 4; chunkX++) {
             BoundingBox area = new BoundingBox(chunkX << 4, MIN_Y, site.minZ(), (chunkX << 4) + 15, MAX_Y, site.maxZ());
             NativeStructureSurfaceFitter.prepareSurfaceStructures(world, area, List.of(target),
-                    site::ground, NativeStructureSurfaceFitter.SeaSurface.NONE, site.water());
+                    site::ground, NativeStructureSurfaceFitter.SeaSurface.NONE, site.water(), PlainSurfaceStrata.STRATA);
         }
     }
 
@@ -178,7 +178,7 @@ public class NativeStructureSurfaceFitterStreamTest {
                 }
             }
             if (!visible.isEmpty()) {
-                NativeStructureSurfaceFitter.prepareSurfaceStructures(world, area, visible, site::ground, NativeStructureSurfaceFitter.SeaSurface.NONE, site.water());
+                NativeStructureSurfaceFitter.prepareSurfaceStructures(world, area, visible, site::ground, NativeStructureSurfaceFitter.SeaSurface.NONE, site.water(), PlainSurfaceStrata.STRATA);
             }
         }
         return blocks;
@@ -236,7 +236,7 @@ public class NativeStructureSurfaceFitterStreamTest {
         for (int chunkX : chunks) {
             BoundingBox area = new BoundingBox(chunkX << 4, MIN_Y, site.minZ(), (chunkX << 4) + 15, MAX_Y, site.maxZ());
             NativeStructureSurfaceFitter.prepareSurfaceStructures(world, area, List.of(target),
-                    site::ground, sea, site.water());
+                    site::ground, sea, site.water(), PlainSurfaceStrata.STRATA);
         }
         return blocks;
     }

@@ -429,13 +429,18 @@ public final class NativeModdedStructureStage<C, P extends StructureStartPlan, O
                         "vegetation cleanup", nativeStructureBatchContext(placementGroups),
                         chunkPos.x, chunkPos.z, error);
             }
+            NativeStructureSurfaceFitter.SurfaceStrata surfaceStrata = NativeStructureSurfaceFitter.SurfaceStrata.of(
+                    Objects.requireNonNull(policy.strata(current),
+                            "Native structure stage policy did not supply structure strata"),
+                    this::strataBlock);
             NativeStructureSurfaceFitter.SurfaceTerrainPlan surfaceTerrainPlan;
             try {
                 surfaceTerrainPlan = NativeStructureSurfaceFitter.prepareSurfaceStructures(
                         boundedWorld, area, terrainTargets,
                         policy.surfaceHeight(current), resolveSeaSurface(current),
                         Objects.requireNonNull(policy.water(current),
-                                "Native structure stage policy did not supply structure water"));
+                                "Native structure stage policy did not supply structure water"),
+                        surfaceStrata);
                 surfaceTerrainPlan.primeHeightmaps(chunk);
             } catch (Throwable error) {
                 throw NativeStructureGenerationException.failure(
@@ -466,7 +471,7 @@ public final class NativeModdedStructureStage<C, P extends StructureStartPlan, O
             }
             try {
                 NativeStructureSurfaceFitter.repairVacuumFoundations(
-                        boundedWorld, area, surfaceTerrainPlan);
+                        boundedWorld, area, surfaceTerrainPlan, surfaceStrata);
             } catch (Throwable error) {
                 throw NativeStructureGenerationException.failure(
                         "foundation repair", nativeStructureBatchContext(placementGroups),
@@ -578,6 +583,13 @@ public final class NativeModdedStructureStage<C, P extends StructureStartPlan, O
 
     public void clearWorldCheckStructureShifts() {
         policy.clearShifts();
+    }
+
+    private BlockState strataBlock(NativeBlockState platformState) {
+        if (platformState != null && platformState.nativeHandle() instanceof BlockState blockState) {
+            return blockState;
+        }
+        throw new IllegalStateException("Structure strata resolved no Minecraft block: " + platformState);
     }
 
     private BlockState resolvePaletteBlock(StructurePalette source, RNG rng,

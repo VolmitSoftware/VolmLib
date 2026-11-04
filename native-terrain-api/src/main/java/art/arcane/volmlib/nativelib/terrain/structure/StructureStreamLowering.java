@@ -237,7 +237,7 @@ public final class StructureStreamLowering {
     }
 
     public static final class ChunkView {
-        public static final ChunkView DRY = new ChunkView(0, 0, 0, 0, new StructureWaterColumn[0], new int[0], new int[0]);
+        public static final ChunkView DRY = new ChunkView(0, 0, 0, 0, new StructureWaterColumn[0], new int[0], new int[0], new int[0]);
 
         private final int minX;
         private final int minZ;
@@ -246,9 +246,10 @@ public final class StructureStreamLowering {
         private final StructureWaterColumn[] columns;
         private final int[] levels;
         private final int[] slopeFloors;
+        private final int[] fillCeilings;
 
         private ChunkView(int minX, int minZ, int width, int depth, StructureWaterColumn[] columns, int[] levels,
-                          int[] slopeFloors) {
+                          int[] slopeFloors, int[] fillCeilings) {
             this.minX = minX;
             this.minZ = minZ;
             this.width = width;
@@ -256,6 +257,7 @@ public final class StructureStreamLowering {
             this.columns = columns;
             this.levels = levels;
             this.slopeFloors = slopeFloors;
+            this.fillCeilings = fillCeilings;
         }
 
         public static ChunkView of(StructureWater water, List<Map<Long, Integer>> plans,
@@ -289,7 +291,8 @@ public final class StructureStreamLowering {
                     levels[index] = level;
                 }
             }
-            return any ? new ChunkView(minX, minZ, width, depth, columns, levels, slopeFloors(width, depth, levels)) : DRY;
+            return any ? new ChunkView(minX, minZ, width, depth, columns, levels, slopeFloors(width, depth, levels),
+                    fillCeilings(width, depth, levels)) : DRY;
         }
 
         private static int[] slopeFloors(int width, int depth, int[] levels) {
@@ -312,6 +315,27 @@ public final class StructureStreamLowering {
                 }
             }
             return floors;
+        }
+
+        private static int[] fillCeilings(int width, int depth, int[] levels) {
+            int reach = StructureWaterRules.BANK + BANK_SLOPE;
+            int[] ceilings = new int[levels.length];
+            Arrays.fill(ceilings, Integer.MAX_VALUE);
+            for (int index = 0; index < levels.length; index++) {
+                if (levels[index] == Integer.MIN_VALUE) {
+                    continue;
+                }
+                int x = index % width;
+                int z = index / width;
+                for (int nz = Math.max(0, z - reach); nz <= Math.min(depth - 1, z + reach); nz++) {
+                    for (int nx = Math.max(0, x - reach); nx <= Math.min(width - 1, x + reach); nx++) {
+                        int distance = Math.max(Math.abs(nx - x), Math.abs(nz - z));
+                        int target = nz * width + nx;
+                        ceilings[target] = Math.min(ceilings[target], levels[index] + Math.max(0, distance - 1));
+                    }
+                }
+            }
+            return ceilings;
         }
 
         public StructureWaterColumn column(int x, int z) {
@@ -355,6 +379,14 @@ public final class StructureStreamLowering {
                 return groundAfter;
             }
             return Math.max(groundAfter, Math.min(groundBefore, slopeFloors[index]));
+        }
+
+        public int capFill(int x, int z, int groundBefore, int groundAfter) {
+            int index = index(x, z);
+            if (groundAfter <= groundBefore || index < 0) {
+                return groundAfter;
+            }
+            return Math.max(groundBefore, Math.min(groundAfter, fillCeilings[index]));
         }
 
         public int keepFootprintBank(int x, int z, int groundBefore, int groundAfter) {

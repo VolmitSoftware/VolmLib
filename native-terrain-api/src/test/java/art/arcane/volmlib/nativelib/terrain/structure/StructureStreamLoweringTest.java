@@ -2,6 +2,7 @@ package art.arcane.volmlib.nativelib.terrain.structure;
 
 import org.junit.Test;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
@@ -189,6 +190,43 @@ public class StructureStreamLoweringTest {
         assertEquals("one block down past the bank", surface - 1, view.keepBank(0, 3, ground, cut));
         assertEquals("two blocks down past the bank", surface - 2, view.keepBank(0, 4, ground, cut));
         assertEquals("the slope ends at the cut", cut, view.keepBank(0, 8, ground, cut));
+    }
+
+    @Test
+    public void fillsRiseFromTheWaterOneBlockPerColumn() {
+        int surface = 90;
+        StructureStreamLowering.ChunkView view = StructureStreamLowering.ChunkView.of(
+                (x, z) -> z == 0 ? new StructureWaterColumn(true, true, surface - 4, surface) : StructureWaterColumn.DRY,
+                List.of(), -8, -8, 7, 7);
+        int ground = surface - 3;
+        int fill = surface + 30;
+
+        assertEquals("the column beside the water meets it", surface, view.capFill(0, 1, ground, fill));
+        assertEquals("one block up per column", surface + 1, view.capFill(0, 2, ground, fill));
+        assertEquals("six columns out", surface + 5, view.capFill(0, 6, ground, fill));
+        assertEquals("a low fill is untouched", surface - 1, view.capFill(0, 2, ground, surface - 1));
+        assertEquals("ground above the ceiling is never cut", surface + 4, view.capFill(0, 1, surface + 4, fill));
+        assertEquals("a cut is not a fill", ground - 5, view.capFill(0, 1, ground, ground - 5));
+        assertEquals("the DRY view keeps every fill", fill,
+                StructureStreamLowering.ChunkView.DRY.capFill(0, 1, ground, fill));
+    }
+
+    @Test
+    public void fillCeilingsFollowTheLoweredLevelAndAgreeAcrossChunks() {
+        int surface = 90;
+        StructureWater water = (x, z) -> z == 0
+                ? new StructureWaterColumn(true, true, surface - 4, surface) : StructureWaterColumn.DRY;
+        Map<Long, Integer> plan = new HashMap<>();
+        for (int x = -40; x <= 40; x++) {
+            plan.put(StructureStreamLowering.columnKey(x, 0), surface - 3);
+        }
+        StructureStreamLowering.ChunkView west = StructureStreamLowering.ChunkView.of(water, List.of(plan), -16, 0, -1, 15);
+        StructureStreamLowering.ChunkView east = StructureStreamLowering.ChunkView.of(water, List.of(plan), 0, 0, 15, 15);
+
+        assertEquals(surface - 3, west.capFill(-1, 1, surface - 8, surface + 30));
+        for (int z = 0; z <= 15; z++) {
+            assertEquals(west.capFill(-1, z, surface - 8, surface + 30), east.capFill(0, z, surface - 8, surface + 30));
+        }
     }
 
     @Test
