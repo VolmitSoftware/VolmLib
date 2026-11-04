@@ -97,14 +97,6 @@ tasks.register('compileCurrentSpigotCompatibility', JavaCompile) {
     options.release.set(25)
 }
 
-tasks.register('compileApiCompatibility') {
-    group = 'verification'
-    description = 'Compiles the shared sources against every supported Paper and Spigot API.'
-    dependsOn(tasks.named('compileSpigotCompatibility'))
-    dependsOn(tasks.named('compileCurrentPaperCompatibility'))
-    dependsOn(tasks.named('compileCurrentSpigotCompatibility'))
-}
-
 Map<String, String> minecraft26_3Apis = [
         Paper: 'io.papermc.paper:paper-api:26.3.build.25-alpha',
         Spigot: 'org.spigotmc:spigot-api:26.3-R0.1-SNAPSHOT'
@@ -130,13 +122,15 @@ minecraft26_3Apis.each { String platform, String coordinate ->
         options.encoding = 'UTF-8'
         options.release.set(25)
     }
-    tasks.named('compileApiCompatibility').configure {
+    tasks.named('check').configure {
         dependsOn(compileCompatibility)
     }
 }
 
 tasks.named('check').configure {
-    dependsOn(tasks.named('compileApiCompatibility'))
+    dependsOn(tasks.named('compileSpigotCompatibility'))
+    dependsOn(tasks.named('compileCurrentPaperCompatibility'))
+    dependsOn(tasks.named('compileCurrentSpigotCompatibility'))
 }
 
 int testForkCount = providers.gradleProperty('volmLibTestForks')
