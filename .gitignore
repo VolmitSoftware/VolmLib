@@ -19,3 +19,5 @@ BUILDS/
 shared/native/noise/target/
 
 .kotlin/
+
+.DS_Store
