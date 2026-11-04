@@ -9,7 +9,16 @@ permissions:
 
 jobs:
   build:
+    name: ${{ matrix.check }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - check: Build and test
+            arguments: build -x :shared:compileApiCompatibility
+          - check: API compatibility
+            arguments: :shared:compileApiCompatibility
     steps:
       - name: Check out VolmLib
         uses: actions/checkout@v4
@@ -20,5 +29,5 @@ jobs:
           java-version: "25"
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
-      - name: Build and verify compatibility
-        run: ./gradlew build
+      - name: ${{ matrix.check }}
+        run: ./gradlew ${{ matrix.arguments }}
