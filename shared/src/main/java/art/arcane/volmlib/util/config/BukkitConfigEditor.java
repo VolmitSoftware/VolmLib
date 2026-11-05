@@ -695,7 +695,7 @@ public final class BukkitConfigEditor implements Listener, AutoCloseable {
         ArrayList<String> lore = new ArrayList<>();
         lore.add(displayPath(entry.path()));
         if (!section) {
-            lore.add(text(player, BukkitConfigMessages.CURRENT, MessageArgument.untrusted("value", preview(entry.value()))));
+            lore.add(text(player, BukkitConfigMessages.CURRENT, MessageArgument.untrusted("value", itemPreview(entry.value()))));
         }
         lore.add(text(player, section ? BukkitConfigMessages.OPEN
                 : entry.kind() == ConfigEditorDocument.Kind.BOOLEAN ? BukkitConfigMessages.TOGGLE : BukkitConfigMessages.EDIT));
@@ -710,7 +710,7 @@ public final class BukkitConfigEditor implements Listener, AutoCloseable {
         ArrayList<String> lore = new ArrayList<>();
         lore.add(text(player, presentation.description()));
         if (!section) {
-            lore.add(text(player, BukkitConfigMessages.CURRENT, MessageArgument.untrusted("value", preview(entry.value()))));
+            lore.add(text(player, BukkitConfigMessages.CURRENT, MessageArgument.untrusted("value", itemPreview(entry.value()))));
         }
         if (presentation.action() == null) {
             if (presentation.numeric() != null && numeric(entry.kind())) {
@@ -934,6 +934,11 @@ public final class BukkitConfigEditor implements Listener, AutoCloseable {
         String text = value.isJsonPrimitive() && value.getAsJsonPrimitive().isString() ? value.getAsString() : value.toString();
         String singleLine = text.replace("\r", "\\r").replace("\n", "\\n");
         return singleLine.length() <= 120 ? singleLine : singleLine.substring(0, 117) + "...";
+    }
+
+    static String itemPreview(JsonElement value) {
+        return value.isJsonPrimitive() && value.getAsJsonPrimitive().isNumber() && Double.isFinite(value.getAsDouble())
+                ? value.getAsBigDecimal().stripTrailingZeros().toPlainString() : preview(value);
     }
 
     static String displayPath(List<String> path) {

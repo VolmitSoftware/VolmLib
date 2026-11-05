@@ -543,6 +543,15 @@ public class BukkitConfigEditorTest {
     }
 
     @Test
+    public void itemPreviewsDropTrailingZerosFromNumbers() {
+        assertEquals("100", BukkitConfigEditor.itemPreview(new JsonPrimitive(100.0D)));
+        assertEquals("2500", BukkitConfigEditor.itemPreview(new JsonPrimitive(2500)));
+        assertEquals("0.25", BukkitConfigEditor.itemPreview(new JsonPrimitive(0.25D)));
+        assertEquals("true", BukkitConfigEditor.itemPreview(new JsonPrimitive(true)));
+        assertEquals("100.0", BukkitConfigEditor.preview(new JsonPrimitive(100.0D)));
+    }
+
+    @Test
     public void configuredCategoriesKeepCenteredRowsSeparateFromNavigation() {
         assertEquals(List.of(22), BukkitConfigEditor.categorySlots(1));
         assertEquals(List.of(19, 21, 23, 25, 29, 31, 33), BukkitConfigEditor.categorySlots(7));
