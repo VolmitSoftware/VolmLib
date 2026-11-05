@@ -55,6 +55,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.function.IntBinaryOperator;
 
+import art.arcane.volmlib.nativelib.terrain.NativePlacementFailures;
 import art.arcane.volmlib.nativelib.terrain.NativeBlockChangeSet;
 import art.arcane.volmlib.nativelib.terrain.NativeBlockChangeSnapshot;
 import net.minecraft.world.level.block.Block;
@@ -327,7 +328,12 @@ public final class NativeModdedImportedFeatures {
             }
             random.setFeatureSeed(decorationSeed, globalIndex, stepIndex);
             level.setCurrentlyGenerating(() -> describeFeature(featureRegistry, feature));
-            feature.placeWithBiomeCheck(level, owner, random, origin);
+            try {
+                feature.placeWithBiomeCheck(level, owner, random, origin);
+            } catch (Throwable error) {
+                NativePlacementFailures.skip(error, "imported feature", describeFeature(featureRegistry, feature), origin.getX(), origin.getZ());
+                observer.failed(origin.getX() >> 4, origin.getZ() >> 4, error);
+            }
         }
     }
 

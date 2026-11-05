@@ -5,6 +5,7 @@ import art.arcane.volmlib.nativelib.minecraft26_2.terrain.NativeStructureTerrain
 import art.arcane.volmlib.nativelib.terrain.NativeBlockChangeSet;
 import art.arcane.volmlib.nativelib.terrain.structure.StructurePalette;
 import art.arcane.volmlib.nativelib.terrain.structure.StructureTerrainSettings;
+import art.arcane.volmlib.nativelib.terrain.structure.StructureWater;
 import art.arcane.volmlib.util.structure.StructureCarveShape;
 import art.arcane.volmlib.util.structure.StructureTerrainMode;
 import net.minecraft.SharedConstants;
@@ -69,14 +70,14 @@ public class NativeStructureBlockChangeTest {
         NativeStructureSurfaceFitter.prepareSurfaceStructures(world, new BoundingBox(0, 0, 0, 0, 127, 0),
                 List.of(new NativeStructureTerrainIntegrator.TerrainTarget(
                         "minecraft:desert_pyramid", desertStart(), new FlattenTerrain(16))),
-                (x, z) -> ORIGINAL_SURFACE_Y, NativeStructureSurfaceFitter.SeaSurface.NONE);
+                (x, z) -> ORIGINAL_SURFACE_Y, NativeStructureSurfaceFitter.SeaSurface.NONE, StructureWater.DRY, PlainSurfaceStrata.STRATA);
 
         int targetY = desertStart().getBoundingBox().minY() - 1;
         assertEquals(Blocks.GRASS_BLOCK.defaultBlockState(), blocks.get(new BlockPos(0, targetY, 0)));
         assertTrue(blocks.get(new BlockPos(0, ORIGINAL_SURFACE_Y + 1, 0)).isAir());
         assertEquals(Blocks.MOSS_CARPET.defaultBlockState(), blocks.get(new BlockPos(0, ORIGINAL_SURFACE_Y + 3, 0)));
         List<Integer> expected = new ArrayList<>();
-        for (int y = targetY; y <= ORIGINAL_SURFACE_Y + 2; y++) {
+        for (int y = targetY - 2; y <= ORIGINAL_SURFACE_Y + 2; y++) {
             expected.add(y);
         }
         assertEquals(expected, reportedHeights(changes));

@@ -53,6 +53,7 @@ import art.arcane.volmlib.nativelib.minecraft26_2.terrain.NativeStructureVertica
 import art.arcane.volmlib.nativelib.minecraft26_2.terrain.NativeStructureVanillaLocator;
 import art.arcane.volmlib.nativelib.minecraft26_2.terrain.WorldgenTerrainHeightmaps;
 import art.arcane.volmlib.nativelib.terrain.NativeBlockState;
+import art.arcane.volmlib.nativelib.terrain.NativePlacementFailures;
 import art.arcane.volmlib.util.math.RNG;
 import com.mojang.datafixers.util.Pair;
 import io.papermc.paper.event.world.StructuresLocateEvent;
@@ -471,9 +472,19 @@ public class NativeChunkGenerator<C, D, P extends StructureStartPlan, O extends 
                     // dimension set importedFeatures.enabled.
                     importedFeatures.run(generatoraccessseed, ichunkaccess, this);
                 }
-                delegate.applyBiomeDecoration(generatoraccessseed, ichunkaccess, structuremanager, false);
+                decorateDelegate(delegate, generatoraccessseed, ichunkaccess, structuremanager);
             }
             NativeTerrainPipeline.claimGeneratedSemantics(route, ichunkaccess, context.minimumY());
+        }
+    }
+
+    static void decorateDelegate(ChunkGenerator delegate, WorldGenLevel level, ChunkAccess chunk, StructureManager manager) {
+        try {
+            delegate.applyBiomeDecoration(level, chunk, manager, false);
+        } catch (Throwable error) {
+            ChunkPos chunkPos = chunk.getPos();
+            NativePlacementFailures.skip(error, "delegate decoration", delegate.getClass().getSimpleName(),
+                    chunkPos.getMinBlockX(), chunkPos.getMinBlockZ());
         }
     }
 

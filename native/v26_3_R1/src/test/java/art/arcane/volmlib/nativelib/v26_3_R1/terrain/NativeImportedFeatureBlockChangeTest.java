@@ -1,6 +1,7 @@
 package art.arcane.volmlib.nativelib.v26_3_R1.terrain;
 
 import art.arcane.volmlib.nativelib.terrain.NativeBlockChangeSet;
+import art.arcane.volmlib.nativelib.terrain.NativePlacementFailures;
 import art.arcane.volmlib.nativelib.terrain.feature.NativeImportedFeatureControl;
 import art.arcane.volmlib.nativelib.terrain.feature.NativeImportedFeaturePolicy;
 import net.minecraft.SharedConstants;
@@ -30,6 +31,7 @@ import net.minecraft.world.level.levelgen.placement.PlacedFeature;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
@@ -162,6 +164,40 @@ public class NativeImportedFeatureBlockChangeTest {
         verify(fixture.level).setCurrentlyGenerating(null);
     }
 
+    @Test
+    public void aThrowingFeatureIsSkippedAndTheNextFeatureStillPlaces() {
+        Fixture fixture = new Fixture(false, true);
+        List<String> skipped = new ArrayList<>();
+        NativePlacementFailures.register((failure, kind, id, x, z) -> skipped.add(kind));
+        try {
+            fixture.run();
+        } finally {
+            NativePlacementFailures.register(null);
+        }
+
+        assertEquals(List.of("imported feature"), skipped);
+        assertTrue(fixture.nextFeaturePlaced);
+        assertEquals(Set.of(REJECTED, UNTOUCHED), fixture.saved);
+        verify(fixture.level).setCurrentlyGenerating(null);
+    }
+
+    @Test
+    public void anEngineFailureThroughTheHandlerStopsTheChunk() {
+        Fixture fixture = new Fixture(false, true);
+        NativePlacementFailures.register((failure, kind, id, x, z) -> {
+            throw (IllegalStateException) failure;
+        });
+        try {
+            IllegalStateException failure = assertThrows(IllegalStateException.class, fixture::run);
+            assertSame(fixture.failure, failure.getCause());
+        } finally {
+            NativePlacementFailures.register(null);
+        }
+
+        assertFalse(fixture.nextFeaturePlaced);
+        assertEquals(Set.of(REJECTED, UNTOUCHED), fixture.saved);
+    }
+
     private static final class Fixture {
         private final WorldGenLevel level = mock(WorldGenLevel.class);
         private final ChunkAccess chunk = mock(ChunkAccess.class);
@@ -177,6 +213,7 @@ public class NativeImportedFeatureBlockChangeTest {
         private WorldGenLevel placementWorld;
         private boolean failSnapshotRead;
         private boolean snapshotReadsFail;
+        private boolean nextFeaturePlaced;
 
         @SuppressWarnings("unchecked")
         private Fixture(boolean guarded, boolean failAfterWrite) {
@@ -232,8 +269,10 @@ public class NativeImportedFeatureBlockChangeTest {
             when(biomeHolder.unwrapKey()).thenReturn(Optional.of(
                     ResourceKey.create(Registries.BIOME, Identifier.parse("minecraft:plains"))));
             when(biomeHolder.value()).thenReturn(biome);
+            PlacedFeature nextFeature = feature(world -> nextFeaturePlaced = true);
             when(biome.getGenerationSettings()).thenReturn(new BiomeGenerationSettings.PlainBuilder()
-                    .addFeature(0, Holder.direct(feature)).build());
+                    .addFeature(0, Holder.direct(feature))
+                    .addFeature(0, Holder.direct(nextFeature)).build());
             when(level.getMinY()).thenReturn(-64);
             when(level.getMinSectionY()).thenReturn(-4);
             when(level.getHeight()).thenReturn(384);

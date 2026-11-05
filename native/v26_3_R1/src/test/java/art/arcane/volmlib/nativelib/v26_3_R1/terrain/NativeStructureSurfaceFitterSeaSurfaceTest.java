@@ -1,6 +1,7 @@
 package art.arcane.volmlib.nativelib.v26_3_R1.terrain;
 
 import art.arcane.volmlib.nativelib.terrain.structure.StructureTerrainSettings;
+import art.arcane.volmlib.nativelib.terrain.structure.StructureWater;
 import art.arcane.volmlib.util.structure.StructureTerrainMode;
 import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
@@ -70,7 +71,7 @@ public class NativeStructureSurfaceFitterSeaSurfaceTest {
         }
 
         NativeStructureSurfaceFitter.applySurfaceColumn(world(blocks), new BlockPos.MutableBlockPos(),
-                0, 0, 66, 58, 0, 127, false, sea());
+                0, 0, 66, 58, 0, 127, false, sea(), PlainSurfaceStrata.STRATA);
 
         for (int y = 59; y <= 62; y++) {
             assertEquals("Sea water at y " + y, Blocks.WATER.defaultBlockState(), state(blocks, 0, y));
@@ -116,7 +117,7 @@ public class NativeStructureSurfaceFitterSeaSurfaceTest {
                 new NativeStructureSurfaceFitter.SeaSurface(SEA_TOP_Y, Blocks.LAVA.defaultBlockState());
 
         NativeStructureSurfaceFitter.applySurfaceColumn(world(blocks), new BlockPos.MutableBlockPos(),
-                0, 0, 60, 56, 0, 127, false, lavaSea);
+                0, 0, 60, 56, 0, 127, false, lavaSea, PlainSurfaceStrata.STRATA);
 
         for (int y = 57; y <= 70; y++) {
             assertEquals("Column water at y " + y, Blocks.WATER.defaultBlockState(), state(blocks, 0, y));
@@ -148,7 +149,7 @@ public class NativeStructureSurfaceFitterSeaSurfaceTest {
 
     private static NativeStructureSurfaceFitter.SurfaceTerrainPlan fitCoast(Map<Long, BlockState> blocks) {
         return NativeStructureSurfaceFitter.prepareSurfaceStructures(world(blocks), COAST,
-                List.of(beachedWreck()), NativeStructureSurfaceFitterSeaSurfaceTest::surfaceHeight, sea());
+                List.of(beachedWreck()), NativeStructureSurfaceFitterSeaSurfaceTest::surfaceHeight, sea(), StructureWater.DRY, PlainSurfaceStrata.STRATA);
     }
 
     private static NativeStructureSurfaceFitter.SeaSurface sea() {

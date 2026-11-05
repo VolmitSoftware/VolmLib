@@ -33,6 +33,7 @@ import art.arcane.volmlib.nativelib.v26_3_R1.terrain.NativeStructureVegetationCl
 import art.arcane.volmlib.nativelib.v26_3_R1.terrain.NativeStructureVerticalPlacer;
 import art.arcane.volmlib.nativelib.v26_3_R1.terrain.NativeStructureVanillaLocator;
 import art.arcane.volmlib.nativelib.v26_3_R1.terrain.WorldgenTerrainHeightmaps;
+import art.arcane.volmlib.nativelib.terrain.NativePlacementFailures;
 import art.arcane.volmlib.nativelib.terrain.NativeBlockChangeSet;
 import art.arcane.volmlib.nativelib.terrain.NativeBlockState;
 import art.arcane.volmlib.util.math.RNG;
@@ -473,20 +474,23 @@ public final class NativeBukkitStructureStage<C, D, P extends StructureStartPlan
                 NativeStructureVegetationClearer.clearIntersectingVegetation(
                         boundedWorld, chunk, area, vegetationTargets);
             } catch (Throwable error) {
-                throw NativeStructureGenerationException.failure(
-                        "vegetation cleanup", nativeStructureBatchContext(placementGroups),
-                        chunkPos.x(), chunkPos.z(), error);
+                containStructure(error, "structure vegetation", nativeStructureBatchContext(placementGroups), chunkPos);
             }
-            NativeStructureSurfaceFitter.SurfaceTerrainPlan surfaceTerrainPlan;
+            NativeStructureSurfaceFitter.SurfaceStrata surfaceStrata = NativeStructureSurfaceFitter.SurfaceStrata.of(
+                    Objects.requireNonNull(policy.strata(policy.current()),
+                            "Native structure stage policy did not supply structure strata"),
+                    this::strataBlock);
+            NativeStructureSurfaceFitter.SurfaceTerrainPlan surfaceTerrainPlan = null;
             try {
                 surfaceTerrainPlan = NativeStructureSurfaceFitter.prepareSurfaceStructures(
                         boundedWorld, area, terrainTargets,
-                        policy.surfaceHeight(policy.current()), resolveSeaSurface());
+                        policy.surfaceHeight(policy.current()), resolveSeaSurface(),
+                        Objects.requireNonNull(policy.water(policy.current()),
+                                "Native structure stage policy did not supply structure water"),
+                        surfaceStrata);
                 surfaceTerrainPlan.primeHeightmaps(chunk);
             } catch (Throwable error) {
-                throw NativeStructureGenerationException.failure(
-                        "terrain integration", nativeStructureBatchContext(placementGroups),
-                        chunkPos.x(), chunkPos.z(), error);
+                containStructure(error, "structure surface", nativeStructureBatchContext(placementGroups), chunkPos);
             }
             try {
                 NativeStructurePostProcessor.prepareTerrain(
@@ -494,29 +498,24 @@ public final class NativeBukkitStructureStage<C, D, P extends StructureStartPlan
                         Objects.requireNonNull(policy.water(policy.current()),
                                 "Native structure stage policy did not supply structure water"));
             } catch (Throwable error) {
-                throw NativeStructureGenerationException.failure(
-                        "terrain preparation", nativeStructureBatchContext(placementGroups),
-                        chunkPos.x(), chunkPos.z(), error);
+                containStructure(error, "structure terrain", nativeStructureBatchContext(placementGroups), chunkPos);
             }
             for (NativePlacementGroup group : placementGroups) {
                 random.setFeatureSeed(decoSeed, group.featureIndex(), group.step());
-                try {
-                    for (NativePlacement placement : group.placements()) {
+                for (NativePlacement placement : group.placements()) {
+                    try {
                         placeVanillaStructure(boundedWorld, structureManager, random, area, chunkPos,
                                 group.structureId(), placement.start(), placement.decision());
+                    } catch (Throwable error) {
+                        containStructure(error, "vanilla structure", group.structureId(), chunkPos);
                     }
-                } catch (Throwable error) {
-                    throw NativeStructureGenerationException.failure(
-                            "placement", group.structureId(), chunkPos.x(), chunkPos.z(), error);
                 }
             }
             try {
                 NativeStructureSurfaceFitter.repairVacuumFoundations(
-                        boundedWorld, area, surfaceTerrainPlan);
+                        boundedWorld, area, surfaceTerrainPlan, surfaceStrata);
             } catch (Throwable error) {
-                throw NativeStructureGenerationException.failure(
-                        "foundation repair", nativeStructureBatchContext(placementGroups),
-                        chunkPos.x(), chunkPos.z(), error);
+                containStructure(error, "structure foundation", nativeStructureBatchContext(placementGroups), chunkPos);
             }
         } catch (Throwable error) {
             placementFailure = error;
@@ -533,6 +532,14 @@ public final class NativeBukkitStructureStage<C, D, P extends StructureStartPlan
                 }
                 placementFailure.addSuppressed(invalidationFailure);
             }
+        }
+    }
+
+    private static void containStructure(Throwable failure, String kind, String structures, ChunkPos chunkPos) {
+        try {
+            NativePlacementFailures.skip(failure, kind, structures, chunkPos.getMinBlockX(), chunkPos.getMinBlockZ());
+        } catch (Throwable stopped) {
+            throw NativeStructureGenerationException.failure(kind, structures, chunkPos.x(), chunkPos.z(), stopped);
         }
     }
 
@@ -622,6 +629,13 @@ public final class NativeBukkitStructureStage<C, D, P extends StructureStartPlan
             structureStepCache = new StructureStepCache(runtimeId, registry, resolved);
             return resolved;
         }
+    }
+
+    private BlockState strataBlock(NativeBlockState platformState) {
+        if (platformState != null && platformState.placementHandle() instanceof CraftBlockData craftBlockData) {
+            return craftBlockData.getState();
+        }
+        throw new IllegalStateException("Structure strata resolved no Bukkit block: " + platformState);
     }
 
     private BlockState resolvePaletteBlock(StructurePalette source, RNG rng, int x, int y, int z) {
