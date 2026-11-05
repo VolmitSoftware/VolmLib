@@ -9,7 +9,8 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # The org variable CI_RUNNER picks the build runners. Pull requests always stay on GitHub's.
+    runs-on: ${{ github.event_name != 'pull_request' && vars.CI_RUNNER || 'ubuntu-latest' }}
     steps:
       - name: Check out VolmLib
         uses: actions/checkout@v4
