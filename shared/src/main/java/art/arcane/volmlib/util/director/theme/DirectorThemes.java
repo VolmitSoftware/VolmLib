@@ -163,6 +163,15 @@ public final class DirectorThemes {
             "minecraft:block.note_block.bass"
     );
 
+    public static final DirectorTheme BRIMSTONE = new DirectorTheme(
+            DirectorProduct.BRIMSTONE,
+            "#ff6b6b",
+            "#9e2a2a",
+            "#fff1d0",
+            "minecraft:entity.experience_orb.pickup",
+            "minecraft:block.note_block.bass"
+    );
+
     private DirectorThemes() {
     }
 
@@ -190,6 +199,7 @@ public final class DirectorThemes {
             case KEYSTONE -> KEYSTONE;
             case ECHELON -> ECHELON;
             case SKYPRIME -> SKYPRIME;
+            case BRIMSTONE -> BRIMSTONE;
         };
     }
 }

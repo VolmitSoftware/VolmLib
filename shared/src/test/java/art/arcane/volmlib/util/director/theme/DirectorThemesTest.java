@@ -32,6 +32,14 @@ public class DirectorThemesTest {
     }
 
     @Test
+    public void brimstoneKeepsItsTntRedAndIvoryPalette() {
+        DirectorTheme theme = DirectorThemes.forProduct(DirectorProduct.BRIMSTONE);
+        assertEquals("#ff6b6b", theme.getPrimaryHex());
+        assertEquals("#9e2a2a", theme.getSecondaryHex());
+        assertEquals("#fff1d0", theme.getAccentHex());
+    }
+
+    @Test
     public void everyProductHasAMatchingTheme() {
         for (DirectorProduct product : DirectorProduct.values()) {
             DirectorTheme theme = DirectorThemes.forProduct(product);

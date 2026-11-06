@@ -5,11 +5,18 @@ import org.bukkit.block.BlockFace;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.Event;
+import org.bukkit.event.EventException;
+import org.bukkit.event.EventPriority;
 import org.bukkit.event.block.Action;
+import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.player.PlayerInteractEntityEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.plugin.Plugin;
+import org.bukkit.plugin.RegisteredListener;
+
+import java.util.Set;
 
 public final class ProtectionProbe {
     private static final String EVENT_NAME = "VolmLibProtectionProbe";
@@ -32,6 +39,18 @@ public final class ProtectionProbe {
         return new EntityProbe(player, entity);
     }
 
+    public static boolean breakAllowed(Player player, Block block, Set<Plugin> skipped) throws EventException {
+        BlockBreakEvent event = new BreakProbe(block, player);
+        for (RegisteredListener listener : BlockBreakEvent.getHandlerList().getRegisteredListeners()) {
+            Plugin plugin = listener.getPlugin();
+            if (listener.getPriority() == EventPriority.MONITOR || skipped.contains(plugin) || !plugin.isEnabled()) {
+                continue;
+            }
+            listener.callEvent(event);
+        }
+        return !event.isCancelled();
+    }
+
     private record BlockInteraction(Block block, ItemStack item, EquipmentSlot hand) {
     }
 
@@ -39,6 +58,17 @@ public final class ProtectionProbe {
         private BlockProbe(Player player, BlockInteraction interaction) {
             super(player, Action.RIGHT_CLICK_BLOCK, interaction.item(), interaction.block(),
                 BlockFace.UP, interaction.hand());
+        }
+
+        @Override
+        public String getEventName() {
+            return EVENT_NAME;
+        }
+    }
+
+    private static final class BreakProbe extends BlockBreakEvent {
+        private BreakProbe(Block block, Player player) {
+            super(block, player);
         }
 
         @Override

@@ -18,5 +18,6 @@ public enum DirectorProduct {
     CINDER,
     KEYSTONE,
     ECHELON,
-    SKYPRIME
+    SKYPRIME,
+    BRIMSTONE
 }

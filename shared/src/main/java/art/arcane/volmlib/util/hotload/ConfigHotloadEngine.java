@@ -330,18 +330,12 @@ public class ConfigHotloadEngine {
         closeFolderWatchers();
         fileWatchers.clear();
         directoryWatchers.clear();
-        knownSignatures.clear();
-        knownContents.clear();
-        handledNullContentSignatures.clear();
-        rejectedApplies.clear();
-        pendingStates.clear();
-        pendingSinceNanos.clear();
-        queuedTouchedSnapshots.clear();
-        selfWriteRevisions.clear();
+        Map<String, File> knownFiles = managedKnownFiles();
+        Set<String> previouslyKnown = new HashSet<>(knownContents.keySet());
+        previouslyKnown.addAll(handledNullContentSignatures.keySet());
+        retainWatcherState(knownFiles.keySet());
         resetSignatureReconciliation();
         updateTimingLocked(pollIntervalMs, hotloadCooldownMs);
-        lastTouchedEmissionNanos = 0L;
-        emittedTouchedFiles = false;
 
         if (watchedFiles != null) {
             for (File file : watchedFiles) {
@@ -362,7 +356,7 @@ public class ConfigHotloadEngine {
         }
 
         initializeDirectoryWatchService();
-        primeKnownSnapshots();
+        reconcileKnownSnapshots(knownFiles.values(), previouslyKnown);
         if (directoryWatchService != null && !directoryWatchKeys.isEmpty()) {
             fullWatchScanCountdown = fullWatchScanEveryPolls;
             signatureScanCountdown = signatureScanEveryPolls;
@@ -508,17 +502,61 @@ public class ConfigHotloadEngine {
         return stable;
     }
 
-    private void primeKnownSnapshots() {
+    private Map<String, File> managedKnownFiles() {
+        Map<String, File> files = new HashMap<>();
         for (File file : safeKnownFiles()) {
-            if (file == null || !managedConfigFilePredicate.test(file)) {
+            if (file != null && managedConfigFilePredicate.test(file)) {
+                files.putIfAbsent(file.getAbsolutePath(), file);
+            }
+        }
+        return files;
+    }
+
+    private void retainWatcherState(Set<String> knownPaths) {
+        knownSignatures.keySet().retainAll(knownPaths);
+        knownContents.keySet().retainAll(knownPaths);
+        handledNullContentSignatures.keySet().retainAll(knownPaths);
+        rejectedApplies.keySet().retainAll(knownPaths);
+        pendingStates.keySet().removeIf(path -> !managedConfigFilePredicate.test(new File(path)));
+        pendingSinceNanos.keySet().retainAll(pendingStates.keySet());
+        queuedTouchedSnapshots.keySet().removeIf(path -> !managedConfigFilePredicate.test(new File(path)));
+        Set<String> revisionPaths = new HashSet<>(knownPaths);
+        revisionPaths.addAll(pendingStates.keySet());
+        revisionPaths.addAll(queuedTouchedSnapshots.keySet());
+        selfWriteRevisions.keySet().retainAll(revisionPaths);
+    }
+
+    private void reconcileKnownSnapshots(Collection<File> files, Set<String> previouslyKnown) {
+        long now = clock.getAsLong();
+        for (File file : files) {
+            String path = file.getAbsolutePath();
+            if (!previouslyKnown.contains(path)) {
+                primeKnownSnapshot(file);
                 continue;
             }
 
-            try {
-                updateKnownSnapshot(file, readNormalizedContent(file));
-            } catch (RuntimeException failure) {
-                updateKnownSnapshot(file, signature(file), null);
+            FileState currentState = state(file);
+            StableContentSnapshot queued = queuedTouchedSnapshots.get(path);
+            if (queued != null && queued.matches(currentState)) {
+                continue;
             }
+            queuedTouchedSnapshots.remove(path);
+            if (alreadyKnown(path, currentState)) {
+                knownSignatures.put(path, currentState.signature());
+                pendingStates.remove(path);
+                pendingSinceNanos.remove(path);
+            } else if (!alreadyRejected(path, currentState) && !currentState.equals(pendingStates.get(path))) {
+                pendingStates.put(path, currentState);
+                pendingSinceNanos.put(path, now);
+            }
+        }
+    }
+
+    private void primeKnownSnapshot(File file) {
+        try {
+            updateKnownSnapshot(file, readNormalizedContent(file));
+        } catch (RuntimeException failure) {
+            updateKnownSnapshot(file, signature(file), null);
         }
     }
 

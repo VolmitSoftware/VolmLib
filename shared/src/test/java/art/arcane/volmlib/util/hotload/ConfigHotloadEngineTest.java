@@ -859,6 +859,62 @@ public class ConfigHotloadEngineTest {
         }
     }
 
+    @Test
+    public void reconfigureReportsAnEditMadeBeforeTheWatchedFilesChanged() throws IOException {
+        File directory = temporaryFolder.newFolder("reconfigure-managed");
+        File config = new File(directory, "config.toml");
+        File language = new File(directory, "language.toml");
+        Files.writeString(config.toPath(), "value = 1\n", StandardCharsets.UTF_8);
+        List<File> known = new ArrayList<>(List.of(config));
+        ConfigHotloadEngine engine = createEngine(() -> List.copyOf(known));
+        try {
+            engine.configure(100L, 100L, List.of(config), List.of());
+            assertTrue(engine.pollTouchedSnapshots().isEmpty());
+
+            Files.writeString(config.toPath(), "value = 2\n", StandardCharsets.UTF_8);
+            Files.writeString(language.toPath(), "greeting = \"hello\"\n", StandardCharsets.UTF_8);
+            known.add(language);
+            engine.configure(100L, 100L, List.of(config, language), List.of());
+
+            advanceVirtualClock();
+            Set<ConfigHotloadEngine.StableContentSnapshot> touched = engine.pollTouchedSnapshots();
+            assertEquals(1, touched.size());
+            ConfigHotloadEngine.StableContentSnapshot snapshot = touched.iterator().next();
+            assertEquals(config.getAbsoluteFile(), snapshot.file());
+            assertEquals("value = 2", snapshot.normalizedContent());
+            AtomicReference<ConfigHotloadEngine.ContentDelta> delta = new AtomicReference<>();
+            assertTrue(engine.processSnapshotChange(snapshot, ignored -> true, delta::set));
+            assertEquals("value = 1", delta.get().before());
+            assertNoFurtherSnapshots(engine);
+        } finally {
+            engine.clear();
+        }
+    }
+
+    @Test
+    public void reconfigureKeepsAPendingEditForAStillWatchedFile() throws IOException {
+        File config = temporaryFolder.newFile("reconfigure-pending.toml");
+        File language = temporaryFolder.newFile("reconfigure-added.toml");
+        Files.writeString(config.toPath(), "value = 1\n", StandardCharsets.UTF_8);
+        Files.writeString(language.toPath(), "greeting = \"hello\"\n", StandardCharsets.UTF_8);
+        List<File> known = new ArrayList<>(List.of(config));
+        ConfigHotloadEngine engine = createEngine(() -> List.copyOf(known));
+        try {
+            engine.configure(100L, 100L, List.of(config), List.of());
+            Files.writeString(config.toPath(), "value = 2\n", StandardCharsets.UTF_8);
+            assertTrue(engine.pollTouchedSnapshots().isEmpty());
+
+            known.add(language);
+            engine.configure(100L, 100L, List.of(config, language), List.of());
+            advanceVirtualClock();
+            Set<ConfigHotloadEngine.StableContentSnapshot> touched = engine.pollTouchedSnapshots();
+            assertEquals(1, touched.size());
+            assertEquals("value = 2", touched.iterator().next().normalizedContent());
+        } finally {
+            engine.clear();
+        }
+    }
+
     private ConfigHotloadEngine createEngine(KnownFilesSupplier knownFilesSupplier) {
         return new ConfigHotloadEngine(
                 file -> file != null && file.getName().endsWith(".toml"),

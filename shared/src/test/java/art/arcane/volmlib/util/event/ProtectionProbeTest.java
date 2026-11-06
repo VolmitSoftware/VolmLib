@@ -4,16 +4,26 @@ import org.bukkit.block.Block;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.Event;
+import org.bukkit.event.EventException;
+import org.bukkit.event.EventPriority;
+import org.bukkit.event.Listener;
+import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.block.Action;
 import org.bukkit.event.player.PlayerInteractEntityEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.PlayerInventory;
+import org.bukkit.plugin.Plugin;
+import org.bukkit.plugin.RegisteredListener;
 import org.junit.Test;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Set;
+import java.util.function.Consumer;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -24,6 +34,50 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 public class ProtectionProbeTest {
+    @Test
+    public void breakProbeAsksDecidingListenersAndSkipsMonitorsCallersAndDisabledPlugins() throws EventException {
+        Player player = mock(Player.class);
+        Block block = mock(Block.class);
+        Plugin claims = plugin(true);
+        Plugin caller = plugin(true);
+        Plugin disabled = plugin(true);
+        Plugin logger = plugin(true);
+        List<String> calls = new ArrayList<>();
+        Listener listener = new Listener() {
+        };
+        List<RegisteredListener> registered = List.of(
+                register(listener, claims, EventPriority.NORMAL, false, event -> {
+                    calls.add("claims");
+                    assertTrue(ProtectionProbe.isProbe(event));
+                    ((BlockBreakEvent) event).setCancelled(((BlockBreakEvent) event).getPlayer() == player);
+                }),
+                register(listener, caller, EventPriority.HIGH, false, event -> calls.add("caller")),
+                register(listener, disabled, EventPriority.HIGH, false, event -> calls.add("disabled")),
+                register(listener, logger, EventPriority.MONITOR, false, event -> calls.add("logger")));
+        when(disabled.isEnabled()).thenReturn(false);
+        try {
+            assertFalse(ProtectionProbe.breakAllowed(player, block, Set.of(caller)));
+            assertEquals(List.of("claims"), calls);
+            assertTrue(ProtectionProbe.breakAllowed(mock(Player.class), block, Set.of(caller)));
+        } finally {
+            registered.forEach(BlockBreakEvent.getHandlerList()::unregister);
+        }
+    }
+
+    private static Plugin plugin(boolean enabled) {
+        Plugin plugin = mock(Plugin.class);
+        when(plugin.isEnabled()).thenReturn(enabled);
+        return plugin;
+    }
+
+    private static RegisteredListener register(Listener listener, Plugin plugin, EventPriority priority, boolean ignoreCancelled,
+                                               Consumer<Event> body) {
+        RegisteredListener registered = new RegisteredListener(listener, (ignored, event) -> body.accept(event), priority,
+                plugin, ignoreCancelled);
+        BlockBreakEvent.getHandlerList().register(registered);
+        return registered;
+    }
+
     @Test
     public void blockProbePreservesProtectionContextAndHandlerList() {
         Player player = mock(Player.class);
