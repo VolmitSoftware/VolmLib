@@ -329,7 +329,8 @@ public final class NativeBukkitStructureStage<C, D, P extends StructureStartPlan
             }
             BoundingBox footprint = start.getBoundingBox();
             if (!policy.allowsFootprint(policy.current(), new Footprint(footprint.minX(), footprint.minZ(), footprint.maxX(), footprint.maxZ()))
-                    || !StructureWaterRules.admitsStart(configuredStarts.get(structure), policy.water(policy.current()),
+                    || !StructureWaterRules.admitsStart(configuredStarts.get(structure),
+                            NativeStructureVegetationClearer.isUndergroundStep(structure.step()), policy.water(policy.current()),
                             NativeStructureTerrainIntegrator.pieceFootprints(start))) {
                 access.setStartForStructure(structure, StructureStart.INVALID_START);
                 if (configuredStarts.containsKey(structure)) {

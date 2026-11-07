@@ -48,11 +48,21 @@ public class StructureWaterRulesTest {
         StructureWater flooded = (x, z) -> riverColumn();
         List<StructureStagePolicy.Footprint> pieces = List.of(new StructureStagePolicy.Footprint(0, 0, 15, 15));
 
-        assertFalse(StructureWaterRules.admitsStart(plan(false, false), flooded, pieces));
-        assertTrue(StructureWaterRules.admitsStart(plan(true, false), flooded, pieces));
-        assertTrue(StructureWaterRules.admitsStart(plan(false, true), flooded, pieces));
-        assertTrue("starts no placement planned keep their own rules",
-                StructureWaterRules.admitsStart(null, flooded, pieces));
+        assertFalse(StructureWaterRules.admitsStart(plan(false, false), false, flooded, pieces));
+        assertTrue(StructureWaterRules.admitsStart(plan(true, false), false, flooded, pieces));
+        assertTrue(StructureWaterRules.admitsStart(plan(false, true), false, flooded, pieces));
+    }
+
+    @Test
+    public void unplannedSurfaceStartsAvoidRivers() {
+        StructureWater flooded = (x, z) -> riverColumn();
+        List<StructureStagePolicy.Footprint> pieces = List.of(new StructureStagePolicy.Footprint(0, 0, 15, 15));
+
+        assertFalse("an ocean monument must not land in a river",
+                StructureWaterRules.admitsStart(null, false, flooded, pieces));
+        assertTrue("a buried start ignores the river above it",
+                StructureWaterRules.admitsStart(null, true, flooded, pieces));
+        assertTrue(StructureWaterRules.admitsStart(null, false, StructureWater.DRY, pieces));
     }
 
     @Test

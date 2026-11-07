@@ -271,7 +271,8 @@ public final class NativeModdedStructureStage<C, P extends StructureStartPlan, O
             }
             BoundingBox footprint = start.getBoundingBox();
             if (!policy.allowsFootprint(current, new Footprint(footprint.minX(), footprint.minZ(), footprint.maxX(), footprint.maxZ()))
-                    || !StructureWaterRules.admitsStart(configuredStarts.get(structure), policy.water(current),
+                    || !StructureWaterRules.admitsStart(configuredStarts.get(structure),
+                            NativeStructureVegetationClearer.isUndergroundStep(structure.step()), policy.water(current),
                             NativeStructureTerrainIntegrator.pieceFootprints(start))) {
                 chunk.setStartForStructure(structure, StructureStart.INVALID_START);
                 if (configuredStarts.containsKey(structure)) {

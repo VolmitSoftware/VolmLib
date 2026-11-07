@@ -12,9 +12,12 @@ public final class StructureWaterRules {
     private StructureWaterRules() {
     }
 
-    public static boolean admitsStart(StructureStartPlan plan, StructureWater water,
+    public static boolean admitsStart(StructureStartPlan plan, boolean undergroundStep, StructureWater water,
                                       List<StructureStagePolicy.Footprint> pieces) {
-        return plan == null || plan.underground() || plan.allowWater() || admitsFootprint(water, pieces);
+        if (plan == null) {
+            return undergroundStep || admitsFootprint(water, pieces);
+        }
+        return plan.underground() || plan.allowWater() || admitsFootprint(water, pieces);
     }
 
     public static boolean admitsFootprint(StructureWater water, List<StructureStagePolicy.Footprint> pieces) {
