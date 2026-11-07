@@ -12,4 +12,6 @@ public @interface ConfigDoc {
     String value();
 
     String impact() default "";
+
+    boolean compactEntries() default false;
 }

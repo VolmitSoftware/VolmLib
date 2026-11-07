@@ -4,8 +4,11 @@ import com.google.gson.JsonObject;
 import org.junit.Test;
 
 import java.io.IOException;
+import java.util.Map;
+import java.util.TreeMap;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 public class TomlCodecTest {
@@ -65,5 +68,61 @@ public class TomlCodecTest {
         assertEquals("a\\\\b", values.get("literal_multiline").getAsString());
         assertEquals("path\\", values.get("trailing").getAsString());
         assertEquals("\uE000", values.get("private_use").getAsString());
+    }
+
+    @Test
+    public void compactEntriesDocumentFieldsOnceWithoutParentHeader() throws IOException {
+        CompactConfig config = new CompactConfig();
+        config.rules.put("b", new CompactRule(false, 5));
+
+        String content = TomlCodec.toToml(config, "compact");
+
+        assertEquals("# Configuration - compact\n"
+                + "# This file is canonicalized on load; comments and new keys may update automatically.\n"
+                + "\n"
+                + "\n"
+                + "# Rules by id.\n"
+                + "# enabled: Allow the rule.\n"
+                + "# cost: Fee.\n"
+                + "[rules.a]\n"
+                + "enabled = true\n"
+                + "cost = 1\n"
+                + "\n"
+                + "[rules.b]\n"
+                + "enabled = false\n"
+                + "cost = 5\n", content);
+        CompactConfig parsed = TomlCodec.fromToml(content, CompactConfig.class);
+        assertEquals(5, parsed.rules.get("b").cost);
+        assertFalse(parsed.rules.get("b").enabled);
+    }
+
+    @Test
+    public void emptyCompactEntriesKeepTheDocumentedHeader() throws IOException {
+        CompactConfig config = new CompactConfig();
+        config.rules.clear();
+
+        String content = TomlCodec.toToml(config, "compact");
+
+        assertTrue(content.endsWith("# Rules by id.\n[rules]\n"));
+    }
+
+    public static final class CompactConfig {
+        @ConfigDoc(value = "Rules by id.", compactEntries = true)
+        public Map<String, CompactRule> rules = new TreeMap<>(Map.of("a", new CompactRule(true, 1)));
+    }
+
+    public static final class CompactRule {
+        @ConfigDoc("Allow the rule.")
+        public boolean enabled;
+        @ConfigDoc("Fee.")
+        public int cost;
+
+        public CompactRule() {
+        }
+
+        CompactRule(boolean enabled, int cost) {
+            this.enabled = enabled;
+            this.cost = cost;
+        }
     }
 }

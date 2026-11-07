@@ -476,6 +476,7 @@ public final class TomlCodec {
         private final StringBuilder out = new StringBuilder();
         private final String sourceTag;
         private final ConfigExposePolicy exposePolicy;
+        private boolean fieldComments = true;
 
         private ReflectiveTomlWriter(String sourceTag, ConfigExposePolicy exposePolicy) {
             this.sourceTag = sourceTag == null ? "config" : sourceTag;
@@ -543,14 +544,19 @@ public final class TomlCodec {
                     continue;
                 }
 
-                writeSectionHeader(childPath,
-                        ConfigDocumentation.buildSectionComments(sourceTag, childPath, field, value));
+                writeSectionHeader(childPath, fieldComments
+                        ? ConfigDocumentation.buildSectionComments(sourceTag, childPath, field, value) : List.of());
                 writePojoSection(childPath, value);
             }
         }
 
         private void writeMapSection(String sectionPath, Map<?, ?> map, Field sourceField) {
-            writeSectionHeader(sectionPath, ConfigDocumentation.buildFieldComments(sourceTag, sectionPath, sourceField, map));
+            List<String> comments = ConfigDocumentation.buildFieldComments(sourceTag, sectionPath, sourceField, map);
+            if (compactEntries(map, sourceField)) {
+                writeCompactEntries(sectionPath, map, comments);
+                return;
+            }
+            writeSectionHeader(sectionPath, comments);
             if (map.isEmpty()) {
                 return;
             }
@@ -595,6 +601,48 @@ public final class TomlCodec {
             }
         }
 
+        private static boolean compactEntries(Map<?, ?> map, Field sourceField) {
+            ConfigDoc annotation = sourceField == null ? null : sourceField.getAnnotation(ConfigDoc.class);
+            if (annotation == null || !annotation.compactEntries() || map.isEmpty()) {
+                return false;
+            }
+            for (Map.Entry<?, ?> entry : map.entrySet()) {
+                Object value = entry.getValue();
+                if (entry.getKey() == null || value == null || isInlineValue(value) || value instanceof Map<?, ?>
+                        || value instanceof Collection<?> || value.getClass().isArray()) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        private void writeCompactEntries(String sectionPath, Map<?, ?> map, List<String> comments) {
+            List<String> header = new ArrayList<>(comments);
+            Object sample = map.values().iterator().next();
+            for (Field field : getSerializableFields(sample.getClass())) {
+                Object value = getFieldValue(field, sample);
+                if (value == null || !isInlineValue(value) || !exposePolicy.expose(sourceTag, sectionPath, field, value)) {
+                    continue;
+                }
+                List<String> lines = ConfigDocumentation.buildFieldComments(sourceTag, sectionPath, field, value);
+                if (!lines.isEmpty()) {
+                    header.add(field.getName() + ": " + lines.get(0));
+                }
+            }
+            boolean previous = fieldComments;
+            fieldComments = false;
+            try {
+                for (Map.Entry<?, ?> entry : map.entrySet()) {
+                    String childPath = joinPath(sectionPath, String.valueOf(entry.getKey()));
+                    writeSectionHeader(childPath, header);
+                    header = List.of();
+                    writePojoSection(childPath, entry.getValue());
+                }
+            } finally {
+                fieldComments = previous;
+            }
+        }
+
         private void writeMapBody(String sectionPath, Map<?, ?> map) {
             List<Map.Entry<?, ?>> deferred = new ArrayList<>();
             for (Map.Entry<?, ?> entry : map.entrySet()) {
@@ -627,6 +675,9 @@ public final class TomlCodec {
         }
 
         private void writeFieldComments(String path, Field field, Object value) {
+            if (!fieldComments) {
+                return;
+            }
             List<String> comments = ConfigDocumentation.buildFieldComments(sourceTag, path, field, value);
             for (String comment : comments) {
                 if (comment == null || comment.isBlank()) {
