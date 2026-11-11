@@ -6,6 +6,7 @@ import art.arcane.volmlib.nativelib.monitor.ExplosionPacketSuppressor;
 import art.arcane.volmlib.nativelib.monitor.FallingBlockTickHook;
 import art.arcane.volmlib.nativelib.monitor.FurnaceTickHook;
 import art.arcane.volmlib.nativelib.monitor.HopperTickHook;
+import art.arcane.volmlib.nativelib.monitor.InstrumentationAttach;
 import art.arcane.volmlib.nativelib.monitor.NativeMonitor;
 import net.bytebuddy.ByteBuddy;
 import net.bytebuddy.agent.ByteBuddyAgent;
@@ -466,25 +467,15 @@ public final class NativeMonitorImpl implements NativeMonitor {
         }
     }
 
-    private static volatile Instrumentation cachedInstrumentation;
+    private static final InstrumentationAttach ATTACH = new InstrumentationAttach(NativeMonitorImpl::installByteBuddy, LOG);
 
     private static Instrumentation attachAgent() {
-        Instrumentation existing = cachedInstrumentation;
-        if (existing != null) {
-            return existing;
-        }
-        synchronized (NativeMonitorImpl.class) {
-            if (cachedInstrumentation != null) {
-                return cachedInstrumentation;
-            }
-            try {
-                String shadedPrefix = ByteBuddyAgent.class.getName().replace(".agent.ByteBuddyAgent", "");
-                System.setProperty(shadedPrefix + ".experimental", "true");
-                cachedInstrumentation = ByteBuddyAgent.install();
-            } catch (Throwable t) {
-                LOG.log(Level.WARNING, "[VolmLib] ByteBuddyAgent install failed: " + t.getMessage(), t);
-            }
-            return cachedInstrumentation;
-        }
+        return ATTACH.get();
+    }
+
+    private static Instrumentation installByteBuddy() {
+        String shadedPrefix = ByteBuddyAgent.class.getName().replace(".agent.ByteBuddyAgent", "");
+        System.setProperty(shadedPrefix + ".experimental", "true");
+        return ByteBuddyAgent.install();
     }
 }
