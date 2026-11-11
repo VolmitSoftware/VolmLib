@@ -4,6 +4,8 @@ package art.arcane.volmlib.nativelib.v26_3_R1.terrain;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.WorldGenLevel;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.CarpetBlock;
+import net.minecraft.world.level.block.SnowLayerBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.levelgen.structure.BoundingBox;
 import net.minecraft.world.level.levelgen.structure.PoolElementStructurePiece;
@@ -90,11 +92,11 @@ public final class NativeStructureTemplateOccupancy {
         return lowest;
     }
 
-    public static Map<Long, LowestCell> lowestProcessedSolidCells(Map<Long, OccupancyCell> occupancy) {
+    public static Map<Long, LowestCell> lowestFoundationCells(Map<Long, OccupancyCell> occupancy) {
         Map<Long, LowestCell> lowest = new HashMap<>();
         for (Map.Entry<Long, OccupancyCell> entry : occupancy.entrySet()) {
             OccupancyCell cell = entry.getValue();
-            if (cell.blocker() || !isSolidBase(cell.state())) {
+            if (cell.blocker() || !isFoundationBase(cell.state())) {
                 continue;
             }
             BlockPos position = BlockPos.of(entry.getKey());
@@ -113,6 +115,14 @@ public final class NativeStructureTemplateOccupancy {
                 && !state.is(Blocks.STRUCTURE_VOID)
                 && !state.is(Blocks.JIGSAW)
                 && state.getFluidState().isEmpty();
+    }
+
+    public static boolean isFoundationBase(BlockState state) {
+        return isSolidBase(state) || state != null && needsFloor(state);
+    }
+
+    private static boolean needsFloor(BlockState state) {
+        return state.getBlock() instanceof SnowLayerBlock || state.getBlock() instanceof CarpetBlock;
     }
 
     public static long columnKey(int x, int z) {

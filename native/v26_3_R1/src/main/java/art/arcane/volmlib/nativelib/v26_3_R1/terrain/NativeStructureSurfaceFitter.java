@@ -296,7 +296,7 @@ public final class NativeStructureSurfaceFitter {
                 continue;
             }
             BlockState baseState = world.getBlockState(position.set(base));
-            if (!NativeStructureTemplateOccupancy.isSolidBase(baseState)) {
+            if (!NativeStructureTemplateOccupancy.isFoundationBase(baseState)) {
                 continue;
             }
             int supportY = findVacuumFoundationSupport(
@@ -505,7 +505,7 @@ public final class NativeStructureSurfaceFitter {
         int maximumFoundationY = piece.getBoundingBox().minY()
                 + piece.getGroundLevelDelta();
         Map<Long, NativeStructureTemplateOccupancy.LowestCell> lowest =
-                NativeStructureTemplateOccupancy.lowestProcessedSolidCells(occupancy.cells());
+                NativeStructureTemplateOccupancy.lowestFoundationCells(occupancy.cells());
         for (NativeStructureTemplateOccupancy.LowestCell cell : lowest.values()) {
             budget.consume(1);
             if (projection == StructureTemplatePool.Projection.RIGID
@@ -597,7 +597,7 @@ public final class NativeStructureSurfaceFitter {
                                 column, Math.min(cell.y(), groundY), Math::min);
                         if (cell.occupancy().blocker()
                                 || cell.y() > groundY + 1
-                                || !NativeStructureTemplateOccupancy.isSolidBase(
+                                || !NativeStructureTemplateOccupancy.isFoundationBase(
                                 cell.occupancy().state())) {
                             continue;
                         }
@@ -845,7 +845,7 @@ public final class NativeStructureSurfaceFitter {
                 area::isInside, budget::consume);
         for (Map.Entry<Long, NativeStructureTemplateOccupancy.OccupancyCell> entry : occupancy.cells().entrySet()) {
             NativeStructureTemplateOccupancy.OccupancyCell cell = entry.getValue();
-            if (cell.blocker() || !NativeStructureTemplateOccupancy.isSolidBase(cell.state())) {
+            if (cell.blocker() || !NativeStructureTemplateOccupancy.isFoundationBase(cell.state())) {
                 continue;
             }
             BlockPos position = BlockPos.of(entry.getKey());

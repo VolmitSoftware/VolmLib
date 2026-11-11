@@ -196,7 +196,7 @@ public final class NativeStructureFoundationBuilder {
         for (int cell = 0; cell < column.ys().length; cell++) {
             int y = column.ys()[cell];
             BlockState state = world.getBlockState(position.set(column.x(), y, column.z()));
-            if (state.isSolid()) {
+            if (NativeStructureTemplateOccupancy.isFoundationBase(state)) {
                 return y;
             }
         }
