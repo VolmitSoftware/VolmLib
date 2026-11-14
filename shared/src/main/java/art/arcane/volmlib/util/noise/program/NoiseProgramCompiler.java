@@ -128,7 +128,8 @@ final class NoiseProgramCompiler {
         entry.identityPost = cng.isIdentityPostFastPath();
         entry.identitySigned = cng.isIdentitySignedFastPath();
         if (cng.getFracture() != null && !cng.isNoscale()) {
-            entry.fracture = node(cng.getFracture());
+            entry.fractureSource = cng.getFracture();
+            entry.fracture = node(entry.fractureSource);
         }
         KList<CNG> children = cng.getChildren();
         if (children != null && !children.isEmpty()) {
@@ -191,7 +192,7 @@ final class NoiseProgramCompiler {
             case NoiseProgram.UNSIGNED_2D, NoiseProgram.NOISE_2D -> {
                 if (fracture >= 0) {
                     term.dep0 = term(fracture, NoiseProgram.UNSIGNED_2D, a0, a1, 0);
-                    term.dep1 = term(fracture, NoiseProgram.UNSIGNED_2D, a1, a0, 0);
+                    term.dep1 = term(fractureNode(entry, 1), NoiseProgram.UNSIGNED_2D, a0, a1, 0);
                 }
                 term.applyPost = term.mode == NoiseProgram.NOISE_2D || !entry.identityPost;
                 if (term.applyPost && entry.children != null) {
@@ -203,14 +204,14 @@ final class NoiseProgramCompiler {
                     term.dep0 = term(term.node, NoiseProgram.UNSIGNED_2D, a0, a1, 0);
                 } else if (fracture >= 0) {
                     term.dep0 = term(fracture, NoiseProgram.SIGNED_2D, a0, a1, 0);
-                    term.dep1 = term(fracture, NoiseProgram.SIGNED_2D, a1, a0, 0);
+                    term.dep1 = term(fractureNode(entry, 1), NoiseProgram.SIGNED_2D, a0, a1, 0);
                 }
             }
             case NoiseProgram.UNSIGNED_3D, NoiseProgram.NOISE_3D -> {
                 if (fracture >= 0) {
                     term.dep0 = term(fracture, NoiseProgram.UNSIGNED_3D, a0, a1, a2);
-                    term.dep1 = term(fracture, NoiseProgram.UNSIGNED_2D, a1, a0, 0);
-                    term.dep2 = term(fracture, NoiseProgram.UNSIGNED_3D, a2, a0, a1);
+                    term.dep1 = term(fractureNode(entry, 1), NoiseProgram.UNSIGNED_2D, a0, a1, 0);
+                    term.dep2 = term(fractureNode(entry, 2), NoiseProgram.UNSIGNED_3D, a0, a1, a2);
                 }
                 term.applyPost = term.mode == NoiseProgram.NOISE_3D || !entry.identityPost;
                 if (term.applyPost && entry.children != null) {
@@ -222,11 +223,15 @@ final class NoiseProgramCompiler {
                     term.dep0 = term(term.node, NoiseProgram.UNSIGNED_3D, a0, a1, a2);
                 } else if (fracture >= 0) {
                     term.dep0 = term(fracture, NoiseProgram.SIGNED_3D, a0, a1, a2);
-                    term.dep1 = term(fracture, NoiseProgram.SIGNED_2D, a1, a0, 0);
-                    term.dep2 = term(fracture, NoiseProgram.SIGNED_3D, a2, a0, a1);
+                    term.dep1 = term(fractureNode(entry, 1), NoiseProgram.SIGNED_2D, a0, a1, 0);
+                    term.dep2 = term(fractureNode(entry, 2), NoiseProgram.SIGNED_3D, a0, a1, a2);
                 }
             }
         }
+    }
+
+    private int fractureNode(NodeEntry entry, int axis) {
+        return node(entry.fractureSource.reseededForAxis(axis));
     }
 
     private int[] childTerms(NodeEntry entry, int mode, int axis0, int axis1, int axis2) {
@@ -253,6 +258,7 @@ final class NoiseProgramCompiler {
         boolean identityPost;
         boolean identitySigned;
         ChildInjector injector;
+        CNG fractureSource;
         int fracture = -1;
         int[] children;
 
