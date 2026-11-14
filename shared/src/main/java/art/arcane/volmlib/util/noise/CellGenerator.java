@@ -26,6 +26,8 @@ public class CellGenerator {
     private final FastNoiseDouble fn;
     private final FastNoiseDouble fd;
     private final CNG cng;
+    private final CNG secondAxisShuffle;
+    private final CNG thirdAxisShuffle;
 
     @Getter
     @Setter
@@ -39,6 +41,8 @@ public class CellGenerator {
         shuffle = 128;
         cellScale = 0.73;
         cng = CNG.signature(rng.nextParallelRNG(3204));
+        secondAxisShuffle = cng.reseededForAxis(1);
+        thirdAxisShuffle = cng.reseededForAxis(2);
         RNG rx = rng.nextParallelRNG(8735652);
         long s = rx.lmax();
         fn = new FastNoiseDouble(s);
@@ -52,11 +56,11 @@ public class CellGenerator {
     }
 
     public double getDistance(double x, double z) {
-        return ((fd.GetCellular(((x * cellScale) + (cng.noise(x, z) * shuffle)), ((z * cellScale) + (cng.noise(z, x) * shuffle)))) + 1f) / 2f;
+        return ((fd.GetCellular(((x * cellScale) + (cng.noise(x, z) * shuffle)), ((z * cellScale) + (secondAxisShuffle.noise(x, z) * shuffle)))) + 1f) / 2f;
     }
 
     public double getDistance(double x, double y, double z) {
-        return ((fd.GetCellular(((x * cellScale) + (cng.noise(x, y, z) * shuffle)), ((y * cellScale) + (cng.noise(x, y, z) * shuffle)), ((z * cellScale) + (cng.noise(z, y, x) * shuffle)))) + 1f) / 2f;
+        return ((fd.GetCellular(((x * cellScale) + (cng.noise(x, y, z) * shuffle)), ((y * cellScale) + (cng.noise(x, y, z) * shuffle)), ((z * cellScale) + (thirdAxisShuffle.noise(x, y, z) * shuffle)))) + 1f) / 2f;
     }
 
     public double getValue(double x, double z, int possibilities) {
@@ -64,7 +68,7 @@ public class CellGenerator {
             return 0;
         }
 
-        return ((fn.GetCellular(((x * cellScale) + (cng.noise(x, z) * shuffle)), ((z * cellScale) + (cng.noise(z, x) * shuffle))) + 1f) / 2f) * (possibilities - 1);
+        return ((fn.GetCellular(((x * cellScale) + (cng.noise(x, z) * shuffle)), ((z * cellScale) + (secondAxisShuffle.noise(x, z) * shuffle))) + 1f) / 2f) * (possibilities - 1);
     }
 
     public double getValue(double x, double y, double z, int possibilities) {
@@ -72,7 +76,7 @@ public class CellGenerator {
             return 0;
         }
 
-        return ((fn.GetCellular(((x * cellScale) + (cng.noise(x, z) * shuffle)), ((y * 8 * cellScale) + (cng.noise(x, y * 8) * shuffle)), ((z * cellScale) + (cng.noise(z, x) * shuffle))) + 1f) / 2f) * (possibilities - 1);
+        return ((fn.GetCellular(((x * cellScale) + (cng.noise(x, z) * shuffle)), ((y * 8 * cellScale) + (cng.noise(x, y * 8) * shuffle)), ((z * cellScale) + (secondAxisShuffle.noise(x, z) * shuffle))) + 1f) / 2f) * (possibilities - 1);
     }
 
     public int getIndex(double x, double z, int possibilities) {
