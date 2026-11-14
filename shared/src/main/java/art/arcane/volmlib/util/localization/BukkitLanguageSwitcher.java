@@ -812,9 +812,11 @@ public final class BukkitLanguageSwitcher implements AutoCloseable, Listener {
             return;
         }
         UUID playerId = sender instanceof Player player ? player.getUniqueId() : null;
-        message(sender, BukkitLanguageMessages.PREPARING,
-                MessageArgument.untrusted("locale", locale),
-                MessageArgument.untrusted("target", selection.label()));
+        if (!locale.equalsIgnoreCase("reset")) {
+            message(sender, BukkitLanguageMessages.PREPARING,
+                    MessageArgument.untrusted("locale", locale),
+                    MessageArgument.untrusted("target", selection.label()));
+        }
         for (Endpoint endpoint : selection.endpoints()) {
             CompletableFuture<String> pending = selection.scope().equals("self")
                     ? endpoint.self().apply(playerId, locale)
