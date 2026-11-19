@@ -91,8 +91,7 @@ public final class JarCompactor {
                 if (removed) {
                     copyEntry(input, OutputStream.nullOutputStream(), entry, buffer);
                 } else {
-                    expected.put(entry.getName(), writeEntry(input, output, entry, buffer,
-                            options.stripLocalVariables(), releaseDeflater));
+                    expected.put(entry.getName(), writeEntry(input, output, entry, buffer, options, releaseDeflater));
                 }
             }
         }
@@ -100,9 +99,10 @@ public final class JarCompactor {
     }
 
     private static EntryIdentity writeEntry(ZipFile input, ZipArchiveOutputStream output, ZipArchiveEntry entry,
-                                           byte[] buffer, boolean stripLocalVariables, ReleaseDeflater releaseDeflater)
+                                           byte[] buffer, CompactionOptions options, ReleaseDeflater releaseDeflater)
             throws IOException {
-        boolean transformClass = stripLocalVariables && entry.getName().endsWith(".class");
+        boolean transformClass = (options.stripLocalVariables() || options.stripParameterNames())
+                && entry.getName().endsWith(".class");
         ZipArchiveEntry target = new ZipArchiveEntry(entry);
         target.setMethod(ZipEntry.DEFLATED);
         target.setCompressedSize(-1L);
@@ -115,7 +115,9 @@ public final class JarCompactor {
         ByteArrayOutputStream source = new ByteArrayOutputStream();
         EntryIdentity originalIdentity = copyEntry(input, source, entry, buffer);
         byte[] original = source.toByteArray();
-        byte[] content = transformClass ? LocalVariableStripper.strip(original) : original;
+        byte[] content = transformClass
+                ? LocalVariableStripper.strip(original, options.stripLocalVariables(), options.stripParameterNames())
+                : original;
         EntryIdentity identity = content == original ? originalIdentity : identity(content);
         target.setSize(identity.size());
         target.setCrc(identity.crc());
@@ -187,11 +189,16 @@ public final class JarCompactor {
         }
     }
 
-    public record CompactionOptions(Set<String> removedEntries, boolean stripDirectories,
-                                    boolean stripLocalVariables, boolean releaseCompression, Path compressionCache) {
+    public record CompactionOptions(Set<String> removedEntries, boolean stripDirectories, boolean stripLocalVariables,
+                                    boolean stripParameterNames, boolean releaseCompression, Path compressionCache) {
         public CompactionOptions {
             removedEntries = Set.copyOf(removedEntries);
             Objects.requireNonNull(compressionCache, "compressionCache");
+        }
+
+        public CompactionOptions(Set<String> removedEntries, boolean stripDirectories, boolean stripLocalVariables,
+                                 boolean releaseCompression, Path compressionCache) {
+            this(removedEntries, stripDirectories, stripLocalVariables, false, releaseCompression, compressionCache);
         }
     }
 

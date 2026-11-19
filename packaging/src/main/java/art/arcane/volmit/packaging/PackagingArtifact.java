@@ -35,6 +35,7 @@ public class PackagingArtifact implements Named {
     private boolean shrink = true;
     private boolean stripDirectories;
     private boolean stripLocalVariables;
+    private boolean stripParameterNames;
     private boolean packed;
     private boolean intermediate;
     private List<String> packedEntrypoints = new ArrayList<>();
@@ -124,6 +125,14 @@ public class PackagingArtifact implements Named {
 
     public void setStripLocalVariables(boolean stripLocalVariables) {
         this.stripLocalVariables = stripLocalVariables;
+    }
+
+    public boolean isStripParameterNames() {
+        return stripParameterNames;
+    }
+
+    public void setStripParameterNames(boolean stripParameterNames) {
+        this.stripParameterNames = stripParameterNames;
     }
 
     public boolean isReleaseCompression() {

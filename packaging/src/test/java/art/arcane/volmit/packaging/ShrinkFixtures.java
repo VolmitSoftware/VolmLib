@@ -16,6 +16,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 import java.util.stream.Stream;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
@@ -34,14 +35,23 @@ final class ShrinkFixtures {
             }
             """.formatted("a".repeat(4096), "b".repeat(4096), "c".repeat(4096));
 
+    // Exporting the JDK takes seconds; every fixture in this test JVM run shares one copy.
+    private static final Path SHARED_JDK = Path.of(System.getProperty("user.dir"), "build", "tmp", "shrink-fixture-jdk");
+
     private ShrinkFixtures() {
     }
 
     static Path jar(Path directory, String main, Map<String, String> sources) throws IOException {
+        return jar(directory, main, sources, List.of());
+    }
+
+    static Path jar(Path directory, String main, Map<String, String> sources, List<String> javacOptions)
+            throws IOException {
         Path sourceRoot = directory.resolve("src");
         Path classes = directory.resolve("classes");
         Files.createDirectories(classes);
         List<String> arguments = new ArrayList<>(List.of("--release", "17", "-d", classes.toString()));
+        arguments.addAll(javacOptions);
         Map<String, String> all = new LinkedHashMap<>(sources);
         all.put("fixture.padding.Padding", PADDING);
         for (Map.Entry<String, String> source : all.entrySet()) {
@@ -69,9 +79,15 @@ final class ShrinkFixtures {
     }
 
     static void shrink(Path directory, Path artifact) throws IOException {
+        shrink(directory, artifact, policy -> {
+        });
+    }
+
+    static void shrink(Path directory, Path artifact, Consumer<PackagingArtifact> configuration) throws IOException {
         PackagingArtifact policy = ProjectBuilder.builder().withProjectDir(directory.resolve("project").toFile()).build()
                 .getObjects().newInstance(PackagingArtifact.class, "fixture");
-        File library = JdkClassLibrary.export(directory.resolve("jdk").toFile());
+        configuration.accept(policy);
+        File library = JdkClassLibrary.export(SHARED_JDK.toFile());
         ShrinkRules.ShrinkRequest request = new ShrinkRules.ShrinkRequest(artifact.toFile(),
                 directory.resolve("fixture.shrink.jar").toFile(), policy, List.of(library),
                 directory.resolve("reports").toFile(), "fixture");

@@ -157,6 +157,7 @@ public class PluginPackagingPlugin implements Plugin<Project> {
             task.getInputs().property("packaging.intermediate", policy.isIntermediate());
             task.getInputs().property("packaging.stripDirectories", policy.isStripDirectories());
             task.getInputs().property("packaging.stripLocalVariables", policy.isStripLocalVariables());
+            task.getInputs().property("packaging.stripParameterNames", policy.isStripParameterNames());
             task.getInputs().property("packaging.releaseCompression", policy.isReleaseCompression());
             task.getInputs().property("packaging.prunePrefixes", policy.getPrunePrefixes());
             task.getInputs().property("packaging.keepPrefixes", policy.getKeepPrefixes());
@@ -256,7 +257,8 @@ public class PluginPackagingPlugin implements Plugin<Project> {
             Set<String> removedEntries = new HashSet<>(removed);
             removedEntries.addAll(removedResources);
             JarCompactor.compact(artifact, new JarCompactor.CompactionOptions(removedEntries, policy.isStripDirectories(),
-                    policy.isStripLocalVariables(), policy.isReleaseCompression(), libraryCache.toPath().resolve("compression")));
+                    policy.isStripLocalVariables(), policy.isStripParameterNames(), policy.isReleaseCompression(),
+                    libraryCache.toPath().resolve("compression")));
             JarArtifactAudit.write(artifact, policy, mode, report, before, removed, removedResources, shrink);
             task.getLogger().lifecycle("{}: {} -> {} bytes; shrink {} ({} classes, {} tolerated warnings, {} advice classes restored); {} unused dependency classes and {} unused native libraries removed",
                     artifact.getName(), before, artifact.length(), shrink.applied() ? "applied" : shrink.reason(),

@@ -1,6 +1,7 @@
 package art.arcane.volmit.packaging;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.objectweb.asm.AnnotationVisitor;
 import org.objectweb.asm.Attribute;
 import org.objectweb.asm.ByteVector;
@@ -21,8 +22,11 @@ import java.lang.annotation.Target;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.zip.ZipFile;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -36,7 +40,7 @@ class LocalVariableStripperTest {
     void preservesInstructionsAnnotationsParametersAndSourceLocations() throws Exception {
         byte[] original = fixture(true);
 
-        byte[] stripped = LocalVariableStripper.strip(original);
+        byte[] stripped = LocalVariableStripper.strip(original, true, false);
 
         assertTrue(stripped.length < original.length);
         assertEquals(metadata(original), metadata(stripped));
@@ -61,14 +65,14 @@ class LocalVariableStripperTest {
             assertEquals("Fixture.java", failure.getCause().getStackTrace()[0].getFileName());
             assertEquals(42, failure.getCause().getStackTrace()[0].getLineNumber());
         }
-        assertSame(stripped, LocalVariableStripper.strip(stripped));
+        assertSame(stripped, LocalVariableStripper.strip(stripped, true, false));
     }
 
     @Test
     void returnsOriginalBytesForClassesWithoutLocalTables() throws Exception {
         byte[] original = fixture(false);
 
-        assertSame(original, LocalVariableStripper.strip(original));
+        assertSame(original, LocalVariableStripper.strip(original, true, false));
     }
 
     @Test
@@ -79,7 +83,7 @@ class LocalVariableStripperTest {
         writer.visitEnd();
         byte[] original = writer.toByteArray();
 
-        assertSame(original, LocalVariableStripper.strip(original));
+        assertSame(original, LocalVariableStripper.strip(original, true, false));
     }
 
     @Test
@@ -95,7 +99,7 @@ class LocalVariableStripperTest {
         byte[] original = writer.toByteArray();
         assertTrue(new String(original, StandardCharsets.ISO_8859_1).contains("LocalVariableTypeTable"));
 
-        byte[] stripped = LocalVariableStripper.strip(original);
+        byte[] stripped = LocalVariableStripper.strip(original, true, false);
 
         assertFalse(new String(stripped, StandardCharsets.ISO_8859_1).contains("LocalVariableTypeTable"));
         assertEquals(metadata(original), metadata(stripped));
@@ -107,18 +111,99 @@ class LocalVariableStripperTest {
             byte[] original = fixture(true, location);
             byte[] unchanged = original.clone();
 
-            IOException failure = assertThrows(IOException.class, () -> LocalVariableStripper.strip(original));
+            IOException failure = assertThrows(IOException.class, () -> LocalVariableStripper.strip(original, true, false));
 
             assertTrue(failure.getMessage().contains("PrivatePayload"));
             assertArrayEquals(unchanged, original);
             byte[] noLocals = fixture(false, location);
-            assertSame(noLocals, LocalVariableStripper.strip(noLocals));
+            assertSame(noLocals, LocalVariableStripper.strip(noLocals, true, false));
         }
     }
 
     @Test
+    void keepsTheShrinkerConstantPoolOrder(@TempDir Path directory) throws Exception {
+        Path artifact = ShrinkFixtures.jar(directory, "fixture.Ordered", Map.of("fixture.Ordered", """
+                package fixture;
+
+                import java.util.List;
+
+                public final class Ordered {
+                    public static String join(List<String> parts, String separator) {
+                        StringBuilder debuggerOnlyBuffer = new StringBuilder();
+                        for (String part : parts) {
+                            debuggerOnlyBuffer.append(part).append(separator);
+                        }
+                        return debuggerOnlyBuffer.toString();
+                    }
+                }
+                """), List.of("-g", "-parameters"));
+        ShrinkFixtures.shrink(directory, artifact, policy -> policy.setShrinkKeep(
+                List.of("-keepattributes LocalVariableTable,LocalVariableTypeTable")));
+        byte[] original;
+        try (ZipFile zip = new ZipFile(artifact.toFile())) {
+            original = zip.getInputStream(zip.getEntry("fixture/Ordered.class")).readAllBytes();
+        }
+        assertTrue(localCount(original) > 0, "the shrunk fixture must still carry local variable tables");
+
+        byte[] stripped = LocalVariableStripper.strip(original, true, false);
+
+        List<String> before = constantPool(original);
+        List<String> after = constantPool(stripped);
+        assertEquals(0, localCount(stripped));
+        assertTrue(before.containsAll(after), "stripping must not add constants");
+        assertFalse(after.contains("Utf8 debuggerOnlyBuffer"));
+        assertEquals(before.stream().filter(after::contains).toList(), after);
+    }
+
+    @Test
+    void keepsLdcConstantsLoadableBeyondTheFirst256PoolEntries(@TempDir Path directory) throws Exception {
+        StringBuilder literals = new StringBuilder();
+        List<String> expected = new ArrayList<>();
+        for (int index = 0; index < 300; index++) {
+            String value = "value-" + (299 - index);
+            expected.add(value);
+            literals.append('"').append(value).append("\", ");
+        }
+        Path artifact = ShrinkFixtures.jar(directory, "fixture.Wide", Map.of("fixture.Wide", """
+                package fixture;
+
+                public final class Wide {
+                    public static String[] values() {
+                        String[] debuggerOnly = {%s};
+                        return debuggerOnly;
+                    }
+                }
+                """.formatted(literals)), List.of("-g"));
+        byte[] original;
+        try (ZipFile zip = new ZipFile(artifact.toFile())) {
+            original = zip.getInputStream(zip.getEntry("fixture/Wide.class")).readAllBytes();
+        }
+
+        byte[] stripped = LocalVariableStripper.strip(original, true, false);
+
+        assertEquals(0, localCount(stripped));
+        Method values = new FixtureLoader().define(stripped).getMethod("values");
+        assertEquals(expected, List.of((String[]) values.invoke(null)));
+    }
+
+    @Test
+    void dropsParameterNamesOnlyWhenAsked() throws Exception {
+        byte[] original = fixture(false);
+
+        byte[] stripped = LocalVariableStripper.strip(original, false, true);
+
+        assertSame(original, LocalVariableStripper.strip(original, false, false));
+        Method method = new FixtureLoader().define(stripped).getMethod("echo", List.class);
+        assertFalse(method.getParameters()[0].isNamePresent());
+        assertTrue(method.isAnnotationPresent(RuntimeMarker.class));
+        List<String> input = List.of("retained");
+        assertSame(input, method.invoke(null, input));
+        assertSame(stripped, LocalVariableStripper.strip(stripped, true, true));
+    }
+
+    @Test
     void rejectsMalformedClasses() {
-        assertThrows(IOException.class, () -> LocalVariableStripper.strip(new byte[]{1, 2, 3}));
+        assertThrows(IOException.class, () -> LocalVariableStripper.strip(new byte[]{1, 2, 3}, true, false));
     }
 
     static byte[] fixture(boolean locals) {
@@ -179,6 +264,34 @@ class LocalVariableStripperTest {
         method.visitEnd();
         writer.visitEnd();
         return writer.toByteArray();
+    }
+
+    static List<String> constantPool(byte[] bytes) {
+        ClassReader reader = new ClassReader(bytes);
+        List<String> entries = new ArrayList<>();
+        for (int index = 1; index < reader.getItemCount(); index++) {
+            if (reader.getItem(index) != 0) {
+                entries.add(constant(reader, bytes, index));
+            }
+        }
+        return entries;
+    }
+
+    private static String constant(ClassReader reader, byte[] bytes, int index) {
+        int offset = reader.getItem(index);
+        int tag = reader.readByte(offset - 1);
+        return switch (tag) {
+            case 1 -> "Utf8 " + new String(bytes, offset + 2, reader.readUnsignedShort(offset), StandardCharsets.ISO_8859_1);
+            case 3, 4 -> tag + " " + reader.readInt(offset);
+            case 5, 6 -> tag + " " + reader.readLong(offset);
+            case 7, 8, 16, 19, 20 -> tag + " " + constant(reader, bytes, reader.readUnsignedShort(offset));
+            case 9, 10, 11, 12 -> tag + " " + constant(reader, bytes, reader.readUnsignedShort(offset)) + " | "
+                    + constant(reader, bytes, reader.readUnsignedShort(offset + 2));
+            case 15 -> tag + " " + reader.readByte(offset) + " " + constant(reader, bytes, reader.readUnsignedShort(offset + 1));
+            case 17, 18 -> tag + " " + reader.readUnsignedShort(offset) + " "
+                    + constant(reader, bytes, reader.readUnsignedShort(offset + 2));
+            default -> throw new AssertionError("unexpected constant tag " + tag);
+        };
     }
 
     static int localCount(byte[] bytes) {

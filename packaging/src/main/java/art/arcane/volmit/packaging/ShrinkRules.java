@@ -26,19 +26,18 @@ public final class ShrinkRules {
     private static final Pattern CLASS_NAME = Pattern.compile("[A-Za-z_$][\\w$]*(?:[./][A-Za-z_$][\\w$]*)+");
     private static final Pattern CLASS_NAME_TOKEN = Pattern.compile("[A-Za-z_$][\\w$]*(?:\\.[A-Za-z_$][\\w$]*)+");
     private static final Pattern DESCRIPTOR_KEY = Pattern.compile("^(main|bootstrapper|loader):\\s*['\"]?([\\w.$]+)['\"]?\\s*$");
+    // The obfuscation pass runs only so that -keepattributes applies; -keepnames keeps every name.
     private static final List<String> OPTIONS = List.of(
-            "-dontobfuscate",
+            "-keepnames class ** { *; }",
+            "-keeppackagenames **",
             "-dontoptimize",
-            "-keepparameternames",
             "-keepdirectories",
             "-dontskipnonpubliclibraryclassmembers",
             "-ignorewarnings",
-            "-dontnote **",
-            "-keepattributes RuntimeVisibleAnnotations,RuntimeInvisibleAnnotations,"
-                    + "RuntimeVisibleParameterAnnotations,RuntimeInvisibleParameterAnnotations,"
-                    + "RuntimeVisibleTypeAnnotations,RuntimeInvisibleTypeAnnotations,AnnotationDefault,"
-                    + "Signature,InnerClasses,EnclosingMethod,MethodParameters,Exceptions,Record,"
-                    + "PermittedSubclasses,NestHost,NestMembers,SourceFile,LineNumberTable");
+            "-dontnote **");
+    private static final String KEPT_ATTRIBUTES = "RuntimeVisibleAnnotations,RuntimeVisibleParameterAnnotations,"
+            + "RuntimeVisibleTypeAnnotations,AnnotationDefault,Signature,InnerClasses,EnclosingMethod,Exceptions,"
+            + "Record,PermittedSubclasses,NestHost,NestMembers,SourceFile,LineNumberTable,Synthetic";
     public static final List<String> SHARED_DONTWARN = List.of(
             "javax.annotation.**",
             "org.jetbrains.annotations.**",
@@ -106,6 +105,9 @@ public final class ShrinkRules {
             lines.add("-libraryjars " + quote(library) + "(!META-INF/**)");
         }
         lines.addAll(OPTIONS);
+        lines.add("-keepattributes " + KEPT_ATTRIBUTES
+                + (request.policy().isStripParameterNames() ? "" : ",MethodParameters"));
+        lines.add("-printmapping " + quote(request.report("mapping")));
         lines.add("-printseeds " + quote(request.report("seeds")));
         lines.add("-printusage " + quote(request.report("usage")));
         lines.add("-printconfiguration " + quote(request.report("configuration")));

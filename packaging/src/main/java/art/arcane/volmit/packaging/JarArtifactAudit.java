@@ -120,6 +120,7 @@ public final class JarArtifactAudit {
                 : policy.isPacked() ? "selected distribution" : "artifact");
         result.put("modded", policy.isModded());
         result.put("stripLocalVariables", policy.isStripLocalVariables());
+        result.put("stripParameterNames", policy.isStripParameterNames());
         result.put("releaseCompression", policy.isReleaseCompression());
         result.put("classCompressedBytes", classes);
         result.put("resourceCompressedBytes", resources);

@@ -298,7 +298,7 @@ public class JarCompactorTest {
 
             try (JarFile archive = new JarFile(artifact)) {
                 assertNotNull(archive.getJarEntry("example/"));
-                assertArrayEquals(LocalVariableStripper.strip(originalClass),
+                assertArrayEquals(LocalVariableStripper.strip(originalClass, true, false),
                         archive.getInputStream(archive.getJarEntry("example/Fixture.class")).readAllBytes());
                 assertArrayEquals(noLocals,
                         archive.getInputStream(archive.getJarEntry("unchanged/Fixture.class")).readAllBytes());
@@ -314,6 +314,26 @@ public class JarCompactorTest {
             byte[] first = Files.readAllBytes(artifact.toPath());
             JarCompactor.compact(artifact, new CompactionOptions(Set.of(), false, true, release, temporaryFolder.resolve("compression-cache")));
             assertArrayEquals(first, Files.readAllBytes(artifact.toPath()));
+        }
+    }
+
+    @Test
+    public void stripsParameterNamesOnlyWhenRequested() throws Exception {
+        byte[] noLocals = LocalVariableStripperTest.fixture(false);
+        for (boolean parameterNames : new boolean[]{false, true}) {
+            File artifact = temporaryFolder.resolve("parameters-" + parameterNames + ".jar").toFile();
+            try (JarOutputStream output = new JarOutputStream(new FileOutputStream(artifact))) {
+                writeEntry(output, "example/Fixture.class", noLocals);
+                writeEntry(output, "example/padding.txt", "padding ".repeat(4096).getBytes(StandardCharsets.UTF_8));
+            }
+
+            JarCompactor.compact(artifact, new CompactionOptions(Set.of(), false, false, parameterNames, false,
+                    temporaryFolder.resolve("compression-cache")));
+
+            try (JarFile archive = new JarFile(artifact)) {
+                assertArrayEquals(parameterNames ? LocalVariableStripper.strip(noLocals, false, true) : noLocals,
+                        archive.getInputStream(archive.getJarEntry("example/Fixture.class")).readAllBytes());
+            }
         }
     }
 

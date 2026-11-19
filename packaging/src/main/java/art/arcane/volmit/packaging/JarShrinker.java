@@ -37,6 +37,7 @@ public final class JarShrinker {
     private static final Pattern TRAILING_CLASS = Pattern.compile("(?:class|interface) ([\\w.$]+)$");
     private static final Pattern DEPENDENCY = Pattern.compile("^library class ([\\w.$]+) (?:depends on|extends or implements) program class ([\\w.$]+)$");
     private static final Pattern MISPLACED = Pattern.compile("^class \\[.*] unexpectedly contains class \\[([\\w.$]+)]$");
+    private static final Pattern MAPPED_MEMBER = Pattern.compile("^(?:\\d+:\\d+:)?\\S+ ([^\\s(:]+)(?:\\([^)]*\\))?(?::\\d+){0,2}$");
 
     private JarShrinker() {
     }
@@ -71,6 +72,8 @@ public final class JarShrinker {
         if (!Files.isRegularFile(output)) {
             throw new IOException("ProGuard produced no output for " + artifact.getName());
         }
+        verifyNoRenames(request.report("mapping"));
+        InnerClassNames.restore(output.toFile(), InnerClassNames.read(artifact));
         AdviceClasses.restore(artifact, output.toFile(), advice);
         appendRestored(request.report("usage"), advice);
         int removed = classCount(artifact) - classCount(output.toFile());
@@ -203,6 +206,36 @@ public final class JarShrinker {
             text.append(name).append('\n');
         }
         Files.writeString(usage.toPath(), text, StandardCharsets.UTF_8, StandardOpenOption.APPEND);
+    }
+
+    static void verifyNoRenames(File mapping) throws IOException {
+        if (!mapping.isFile()) {
+            // ProGuard writes no mapping when a rule file adds -dontobfuscate, and then renames nothing.
+            return;
+        }
+        List<String> renamed = new ArrayList<>();
+        for (String line : Files.readAllLines(mapping.toPath(), StandardCharsets.UTF_8)) {
+            String entry = line.trim();
+            if (entry.isEmpty() || entry.startsWith("#")) {
+                continue;
+            }
+            int arrow = entry.indexOf(" -> ");
+            String original = arrow < 0 ? null : entry.substring(0, arrow);
+            String result = arrow < 0 ? null : entry.substring(arrow + 4);
+            if (original != null && !Character.isWhitespace(line.charAt(0)) && result.endsWith(":")) {
+                result = result.substring(0, result.length() - 1);
+            } else if (original != null) {
+                Matcher member = MAPPED_MEMBER.matcher(original);
+                original = member.matches() ? member.group(1) : null;
+            }
+            if (original == null || !original.equals(result)) {
+                renamed.add(entry);
+            }
+        }
+        if (!renamed.isEmpty()) {
+            throw new IOException("ProGuard renamed " + renamed.size() + " entries; names must never change. See "
+                    + mapping + ":\n" + String.join("\n", renamed.subList(0, Math.min(20, renamed.size()))));
+        }
     }
 
     public static Set<String> classEntries(File archive) throws IOException {

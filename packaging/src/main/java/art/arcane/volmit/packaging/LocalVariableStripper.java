@@ -1,43 +1,83 @@
 package art.arcane.volmit.packaging;
 
-import org.objectweb.asm.Attribute;
 import org.objectweb.asm.ClassReader;
-import org.objectweb.asm.ClassVisitor;
-import org.objectweb.asm.ClassWriter;
-import org.objectweb.asm.FieldVisitor;
-import org.objectweb.asm.Label;
-import org.objectweb.asm.MethodVisitor;
-import org.objectweb.asm.Opcodes;
-import org.objectweb.asm.RecordComponentVisitor;
+import proguard.classfile.Clazz;
+import proguard.classfile.Member;
+import proguard.classfile.Method;
+import proguard.classfile.ProgramClass;
+import proguard.classfile.ProgramMethod;
+import proguard.classfile.attribute.Attribute;
+import proguard.classfile.attribute.CodeAttribute;
+import proguard.classfile.attribute.UnknownAttribute;
+import proguard.classfile.attribute.visitor.AllAttributeVisitor;
+import proguard.classfile.attribute.visitor.AttributeVisitor;
+import proguard.classfile.editor.AttributesEditor;
+import proguard.classfile.editor.ConstantPoolShrinker;
+import proguard.classfile.editor.ConstantPoolSorter;
+import proguard.classfile.io.ProgramClassReader;
+import proguard.classfile.io.ProgramClassWriter;
+import proguard.classfile.visitor.MemberVisitor;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
 import java.io.IOException;
 import java.util.LinkedHashSet;
 import java.util.Set;
 
 public final class LocalVariableStripper {
+    private static final String LOCAL_VARIABLES = "LocalVariableTable";
+    private static final String LOCAL_VARIABLE_TYPES = "LocalVariableTypeTable";
+    private static final String PARAMETERS = "MethodParameters";
+
     private LocalVariableStripper() {
     }
 
-    public static byte[] strip(byte[] original) throws IOException {
+    public static byte[] strip(byte[] original, boolean localVariables, boolean parameterNames) throws IOException {
         try {
             ClassReader reader = new ClassReader(original);
-            if (!hasLocalTables(reader, original.length)) {
+            if (!carriesTables(reader, original.length, localVariables, parameterNames)) {
                 return original;
             }
-            ClassWriter writer = new ClassWriter(0);
-            StrippingVisitor visitor = new StrippingVisitor(writer);
-            reader.accept(visitor, 0);
-            if (!visitor.unknownAttributes.isEmpty()) {
-                throw new IOException("Cannot rewrite local-variable metadata in " + reader.getClassName()
-                        + " with unknown attributes: " + visitor.unknownAttributes);
+            ProgramClass type = new ProgramClass();
+            type.accept(new ProgramClassReader(new DataInputStream(new ByteArrayInputStream(original))));
+            Set<String> unknownAttributes = unknownAttributes(type);
+            if (!unknownAttributes.isEmpty()) {
+                throw new IOException("Cannot rewrite debug metadata in " + reader.getClassName()
+                        + " with unknown attributes: " + unknownAttributes);
             }
-            return writer.toByteArray();
-        } catch (IllegalArgumentException | IndexOutOfBoundsException failure) {
-            throw new IOException("Invalid class while stripping local-variable metadata.", failure);
+            type.methodsAccept(new TableRemover(localVariables, parameterNames));
+            // The ProGuard shrink leaves pools in this order; it compresses better than javac's or ASM's.
+            type.accept(new ConstantPoolShrinker());
+            type.accept(new ConstantPoolSorter());
+            ByteArrayOutputStream output = new ByteArrayOutputStream(original.length);
+            try (DataOutputStream data = new DataOutputStream(output)) {
+                type.accept(new ProgramClassWriter(data));
+            }
+            return output.toByteArray();
+        } catch (RuntimeException failure) {
+            throw new IOException("Invalid class while stripping debug metadata.", failure);
         }
     }
 
-    private static boolean hasLocalTables(ClassReader reader, int length) throws IOException {
+    private static Set<String> unknownAttributes(ProgramClass type) {
+        Set<String> names = new LinkedHashSet<>();
+        type.accept(new AllAttributeVisitor(true, new AttributeVisitor() {
+            @Override
+            public void visitAnyAttribute(Clazz owner, Attribute attribute) {
+            }
+
+            @Override
+            public void visitUnknownAttribute(Clazz owner, UnknownAttribute attribute) {
+                names.add(attribute.getAttributeName(owner));
+            }
+        }));
+        return names;
+    }
+
+    private static boolean carriesTables(ClassReader reader, int length, boolean localVariables, boolean parameterNames)
+            throws IOException {
         char[] characters = new char[reader.getMaxStringLength()];
         int position = reader.header + 6;
         position += 2 + reader.readUnsignedShort(position) * 2;
@@ -53,7 +93,9 @@ public final class LocalVariableStripper {
             position += 8;
             for (int attribute = 0; attribute < attributes; attribute++) {
                 int end = attributeEnd(reader, position, length);
-                if ("Code".equals(reader.readUTF8(position, characters))
+                String name = reader.readUTF8(position, characters);
+                if (parameterNames && PARAMETERS.equals(name)
+                        || localVariables && "Code".equals(name)
                         && codeHasLocalTables(reader, position + 6, end, characters)) {
                     return true;
                 }
@@ -85,7 +127,7 @@ public final class LocalVariableStripper {
         for (int attribute = 0; attribute < attributes; attribute++) {
             int next = attributeEnd(reader, position, end);
             String name = reader.readUTF8(position, characters);
-            if ("LocalVariableTable".equals(name) || "LocalVariableTypeTable".equals(name)) {
+            if (LOCAL_VARIABLES.equals(name) || LOCAL_VARIABLE_TYPES.equals(name)) {
                 return true;
             }
             position = next;
@@ -104,52 +146,36 @@ public final class LocalVariableStripper {
         return position + 6 + size;
     }
 
-    private static final class StrippingVisitor extends ClassVisitor {
-        private final Set<String> unknownAttributes = new LinkedHashSet<>();
+    private static void deleteAll(AttributesEditor editor, String name) {
+        while (editor.findAttribute(name) != null) {
+            editor.deleteAttribute(name);
+        }
+    }
 
-        private StrippingVisitor(ClassWriter writer) {
-            super(Opcodes.ASM9, writer);
+    private record TableRemover(boolean localVariables, boolean parameterNames) implements MemberVisitor, AttributeVisitor {
+        @Override
+        public void visitAnyMember(Clazz owner, Member member) {
         }
 
         @Override
-        public void visitAttribute(Attribute attribute) {
-            unknownAttributes.add(attribute.type);
+        public void visitProgramMethod(ProgramClass owner, ProgramMethod method) {
+            if (parameterNames) {
+                deleteAll(new AttributesEditor(owner, method, false), PARAMETERS);
+            }
+            if (localVariables) {
+                method.attributesAccept(owner, this);
+            }
         }
 
         @Override
-        public FieldVisitor visitField(int access, String name, String descriptor, String signature, Object value) {
-            return new FieldVisitor(Opcodes.ASM9, super.visitField(access, name, descriptor, signature, value)) {
-                @Override
-                public void visitAttribute(Attribute attribute) {
-                    unknownAttributes.add(attribute.type);
-                }
-            };
+        public void visitAnyAttribute(Clazz owner, Attribute attribute) {
         }
 
         @Override
-        public RecordComponentVisitor visitRecordComponent(String name, String descriptor, String signature) {
-            return new RecordComponentVisitor(Opcodes.ASM9, super.visitRecordComponent(name, descriptor, signature)) {
-                @Override
-                public void visitAttribute(Attribute attribute) {
-                    unknownAttributes.add(attribute.type);
-                }
-            };
-        }
-
-        @Override
-        public MethodVisitor visitMethod(int access, String name, String descriptor, String signature,
-                                         String[] exceptions) {
-            return new MethodVisitor(Opcodes.ASM9, super.visitMethod(access, name, descriptor, signature, exceptions)) {
-                @Override
-                public void visitLocalVariable(String localName, String localDescriptor, String localSignature,
-                                               Label start, Label end, int index) {
-                }
-
-                @Override
-                public void visitAttribute(Attribute attribute) {
-                    unknownAttributes.add(attribute.type);
-                }
-            };
+        public void visitCodeAttribute(Clazz owner, Method method, CodeAttribute code) {
+            AttributesEditor editor = new AttributesEditor((ProgramClass) owner, (ProgramMethod) method, code, false);
+            deleteAll(editor, LOCAL_VARIABLES);
+            deleteAll(editor, LOCAL_VARIABLE_TYPES);
         }
     }
 }
