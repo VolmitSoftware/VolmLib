@@ -9,6 +9,7 @@ import org.bukkit.event.EventException;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.block.Action;
 import org.bukkit.event.block.BlockBreakEvent;
+import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.player.PlayerInteractEntityEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.EquipmentSlot;
@@ -29,18 +30,23 @@ public final class ProtectionProbe {
     }
 
     public static PlayerInteractEvent blockInteract(Player player, Block block, EquipmentSlot hand) {
-        ItemStack item = hand == EquipmentSlot.OFF_HAND
-            ? player.getInventory().getItemInOffHand()
-            : player.getInventory().getItemInMainHand();
-        return new BlockProbe(player, new BlockInteraction(block, item, hand));
+        return new BlockProbe(player, new BlockInteraction(block, heldItem(player, hand), hand));
     }
 
     public static PlayerInteractEntityEvent entityInteract(Player player, Entity entity) {
         return new EntityProbe(player, entity);
     }
 
+    public static BlockBreakEvent blockBreak(Player player, Block block) {
+        return new BreakProbe(block, player);
+    }
+
+    public static BlockPlaceEvent blockPlace(Player player, Block block, EquipmentSlot hand) {
+        return new PlaceProbe(player, new BlockInteraction(block, heldItem(player, hand), hand));
+    }
+
     public static boolean breakAllowed(Player player, Block block, Set<Plugin> skipped) throws EventException {
-        BlockBreakEvent event = new BreakProbe(block, player);
+        BlockBreakEvent event = blockBreak(player, block);
         for (RegisteredListener listener : BlockBreakEvent.getHandlerList().getRegisteredListeners()) {
             Plugin plugin = listener.getPlugin();
             if (listener.getPriority() == EventPriority.MONITOR || skipped.contains(plugin) || !plugin.isEnabled()) {
@@ -49,6 +55,12 @@ public final class ProtectionProbe {
             listener.callEvent(event);
         }
         return !event.isCancelled();
+    }
+
+    private static ItemStack heldItem(Player player, EquipmentSlot hand) {
+        return hand == EquipmentSlot.OFF_HAND
+            ? player.getInventory().getItemInOffHand()
+            : player.getInventory().getItemInMainHand();
     }
 
     private record BlockInteraction(Block block, ItemStack item, EquipmentSlot hand) {
@@ -69,6 +81,18 @@ public final class ProtectionProbe {
     private static final class BreakProbe extends BlockBreakEvent {
         private BreakProbe(Block block, Player player) {
             super(block, player);
+        }
+
+        @Override
+        public String getEventName() {
+            return EVENT_NAME;
+        }
+    }
+
+    private static final class PlaceProbe extends BlockPlaceEvent {
+        private PlaceProbe(Player player, BlockInteraction interaction) {
+            super(interaction.block(), interaction.block().getState(), interaction.block(), interaction.item(), player,
+                true, interaction.hand());
         }
 
         @Override

@@ -1,6 +1,7 @@
 package art.arcane.volmlib.util.event;
 
 import org.bukkit.block.Block;
+import org.bukkit.block.BlockState;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.Event;
@@ -9,6 +10,7 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.block.Action;
+import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.player.PlayerInteractEntityEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.EquipmentSlot;
@@ -98,6 +100,46 @@ public class ProtectionProbeTest {
         assertEquals(Action.RIGHT_CLICK_BLOCK, event.getAction());
         event.setUseInteractedBlock(Event.Result.DENY);
         assertTrue(event.isCancelled());
+    }
+
+    @Test
+    public void breakProbeIsAMarkedBreakOnTheStandardHandlerList() {
+        Player player = mock(Player.class);
+        Block block = mock(Block.class);
+
+        BlockBreakEvent event = ProtectionProbe.blockBreak(player, block);
+
+        assertTrue(ProtectionProbe.isProbe(event));
+        assertSame(BlockBreakEvent.getHandlerList(), event.getHandlers());
+        assertSame(player, event.getPlayer());
+        assertSame(block, event.getBlock());
+        assertFalse(event.isCancelled());
+        assertFalse(ProtectionProbe.isProbe(new BlockBreakEvent(block, player)));
+    }
+
+    @Test
+    public void placeProbeOffersTheHandsItemAtTheTargetBlock() {
+        Player player = mock(Player.class);
+        PlayerInventory inventory = mock(PlayerInventory.class);
+        ItemStack item = mock(ItemStack.class);
+        Block block = mock(Block.class);
+        BlockState state = mock(BlockState.class);
+        when(player.getInventory()).thenReturn(inventory);
+        when(inventory.getItemInOffHand()).thenReturn(item);
+        when(block.getState()).thenReturn(state);
+
+        BlockPlaceEvent event = ProtectionProbe.blockPlace(player, block, EquipmentSlot.OFF_HAND);
+
+        assertTrue(ProtectionProbe.isProbe(event));
+        assertSame(BlockPlaceEvent.getHandlerList(), event.getHandlers());
+        assertSame(player, event.getPlayer());
+        assertSame(block, event.getBlockPlaced());
+        assertSame(block, event.getBlockAgainst());
+        assertSame(state, event.getBlockReplacedState());
+        assertSame(item, event.getItemInHand());
+        assertEquals(EquipmentSlot.OFF_HAND, event.getHand());
+        assertTrue(event.canBuild());
+        assertFalse(event.isCancelled());
     }
 
     @Test
