@@ -1,5 +1,8 @@
 package art.arcane.volmlib.util.plugin;
 
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.flattener.ComponentFlattener;
+import net.kyori.adventure.text.minimessage.MiniMessage;
 import org.bukkit.plugin.Plugin;
 
 import java.lang.reflect.Method;
@@ -55,7 +58,8 @@ public final class ComponentLog {
         ComponentText componentMessage = fallbackPrefix == null || fallbackPrefix.isEmpty()
                 ? requiredMessage
                 : prefix.append(requiredMessage);
-        if (plugin != null && logComponent(plugin, targetLevel, componentMessage, failure)) {
+        if (plugin != null && logComponent(plugin, targetLevel, componentMessage.miniMessage(),
+                componentMessage.component(), failure)) {
             return;
         }
 
@@ -65,14 +69,42 @@ public final class ComponentLog {
         if (pluginLogger == null && fallbackPrefix != null) {
             plainMessage = prefix.plain() + plainMessage;
         }
+        logPlain(targetLogger, targetLevel, plainMessage, failure);
+    }
+
+    /**
+     * Logs an Adventure component through Paper's component logger, or as plain text through the plugin's logger. It
+     * never touches {@link ComponentText} or the legacy and plain serializers, so a shrunk jar can leave them out.
+     */
+    public static void log(Plugin plugin, Logger fallbackLogger, Level level, Component message, Throwable failure) {
+        Logger requiredFallback = Objects.requireNonNull(fallbackLogger, "fallbackLogger");
+        Component requiredMessage = Objects.requireNonNull(message, "message");
+        Level targetLevel = level == null ? Level.INFO : level;
+        if (plugin != null && logComponent(plugin, targetLevel, MiniMessage.miniMessage().serialize(requiredMessage),
+                requiredMessage, failure)) {
+            return;
+        }
+
+        Logger pluginLogger = resolvePluginLogger(plugin);
+        StringBuilder plainMessage = new StringBuilder();
+        ComponentFlattener.basic().flatten(requiredMessage, plainMessage::append);
+        logPlain(pluginLogger == null ? requiredFallback : pluginLogger, targetLevel, plainMessage.toString(), failure);
+    }
+
+    private static void logPlain(Logger logger, Level level, String message, Throwable failure) {
         if (failure == null) {
-            targetLogger.log(targetLevel, plainMessage);
+            logger.log(level, message);
         } else {
-            targetLogger.log(targetLevel, plainMessage, failure);
+            logger.log(level, message, failure);
         }
     }
 
-    private static boolean logComponent(Plugin plugin, Level level, ComponentText message, Throwable failure) {
+    private static boolean logComponent(
+            Plugin plugin,
+            Level level,
+            String miniMessage,
+            Object localComponent,
+            Throwable failure) {
         try {
             Plugin.class.getMethod("getComponentLogger");
             ClassLoader classLoader = Plugin.class.getClassLoader();
@@ -85,20 +117,16 @@ public final class ComponentLog {
             Class<?> miniMessageType = Class.forName(MINI_MESSAGE_CLASS, true, classLoader);
             Object parser = miniMessageType.getMethod("miniMessage").invoke(null);
             Object component = miniMessageType.getMethod("deserialize", Object.class)
-                    .invoke(parser, message.miniMessage());
+                    .invoke(parser, miniMessage);
             Class<?> componentType = Class.forName(COMPONENT_CLASS, true, classLoader);
             invokeComponentLogger(componentLoggerType, componentLogger, componentType, component, level, failure);
             return true;
         } catch (ReflectiveOperationException | LinkageError | SecurityException ignored) {
-            return logLocalComponent(plugin, level, message, failure);
+            return logLocalComponent(level, localComponent, failure);
         }
     }
 
-    private static boolean logLocalComponent(
-            Plugin plugin,
-            Level level,
-            ComponentText message,
-            Throwable failure) {
+    private static boolean logLocalComponent(Level level, Object component, Throwable failure) {
         try {
             Plugin.class.getMethod("getComponentLogger");
             Class<?> componentLoggerType = Class.forName(COMPONENT_LOGGER_CLASS, true, Plugin.class.getClassLoader());
@@ -106,7 +134,6 @@ public final class ComponentLog {
             if (componentLogger == null) {
                 return false;
             }
-            Object component = message.component();
             for (Method method : componentLoggerType.getMethods()) {
                 if (!method.getName().equals(componentMethod(level))) {
                     continue;

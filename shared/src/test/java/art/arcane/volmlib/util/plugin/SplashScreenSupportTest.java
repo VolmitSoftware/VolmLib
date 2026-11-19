@@ -18,6 +18,13 @@ public class SplashScreenSupportTest {
     }
 
     @Test
+    public void artColorsSwitchOnlyWhenTheGlyphKindChanges() {
+        assertEquals("[F]██[E]╗ [F]█[E]╔═╝", SplashScreenSupport.colorizeArt("██╗ █╔═╝", "[F]", "[E]"));
+        assertEquals(" [F]██[E]╗ [F]█", SplashScreenSupport.colorizeArt(" ██╗ █", "[F]", "[E]"));
+        assertEquals("  ", SplashScreenSupport.colorizeArt("  ", "[F]", "[E]"));
+    }
+
+    @Test
     public void releaseTrainExcludesPatchAndPrereleaseSuffix() {
         assertEquals("3.2", SplashScreenSupport.releaseTrain("3.2.1-beta"));
         assertEquals("3", SplashScreenSupport.releaseTrain("3-beta"));

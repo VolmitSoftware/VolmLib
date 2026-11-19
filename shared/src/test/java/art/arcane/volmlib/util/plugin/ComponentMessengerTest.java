@@ -4,6 +4,7 @@ import net.md_5.bungee.api.chat.BaseComponent;
 import net.md_5.bungee.api.ChatMessageType;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextColor;
+import net.kyori.adventure.text.minimessage.MiniMessage;
 import net.md_5.bungee.api.chat.ClickEvent;
 import net.md_5.bungee.chat.ComponentSerializer;
 import org.bukkit.command.CommandSender;
@@ -13,7 +14,11 @@ import org.mockito.ArgumentCaptor;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.MethodType;
 import java.net.URI;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 
 import static org.junit.Assert.assertEquals;
@@ -215,6 +220,112 @@ public class ComponentMessengerTest {
         assertTrue(markup.getValue().contains("click:open_url"));
         assertTrue(markup.getValue().contains("hover:show_text"));
         assertTrue(markup.getValue().contains("https://mclo.gs/Ab12"));
+    }
+
+    @Test
+    public void componentDeliveryUsesServerRichMessageMarkup() {
+        CommandSender sender = mock(CommandSender.class);
+        Component message = Component.text("Saved ").append(Component.text("[Undo]")
+                .color(TextColor.color(0xFF4FA3))
+                .clickEvent(net.kyori.adventure.text.event.ClickEvent.runCommand("/animus undo ab12"))
+                .hoverEvent(Component.text("Undo this change")));
+
+        ComponentMessenger.send(sender, message);
+
+        verify(sender).sendRichMessage(MiniMessage.miniMessage().serialize(message));
+    }
+
+    @Test
+    public void spigotComponentDeliveryKeepsRgbClickAndHover() {
+        CommandSender sender = mock(CommandSender.class, withSettings().extraInterfaces(Player.class));
+        Player player = (Player) sender;
+        Player.Spigot spigot = mock(Player.Spigot.class);
+        when(player.spigot()).thenReturn(spigot);
+        doThrow(new UnsupportedOperationException("unsupported")).when(sender).sendRichMessage(anyString());
+        Component message = Component.text("Saved ").append(Component.text("[Docs]")
+                .color(TextColor.color(0xFF4FA3))
+                .clickEvent(net.kyori.adventure.text.event.ClickEvent.openUrl("https://docs.example.net/animus"))
+                .hoverEvent(Component.text("Open the guide")));
+
+        ComponentMessenger.send(sender, message);
+
+        ArgumentCaptor<BaseComponent[]> components = ArgumentCaptor.forClass(BaseComponent[].class);
+        verify(spigot).sendMessage(components.capture());
+        String json = ComponentSerializer.toString(components.getValue());
+        assertEquals("Saved [Docs]", BaseComponent.toPlainText(components.getValue()));
+        assertTrue(json.toLowerCase(Locale.ROOT).contains("#ff4fa3"));
+        assertTrue(json.contains("\"action\":\"open_url\""));
+        assertTrue(json.contains("https://docs.example.net/animus"));
+        assertTrue(json.contains("\"action\":\"show_text\""));
+        assertTrue(json.contains("Open the guide"));
+    }
+
+    @Test
+    public void componentDeliveryToSpigotConsoleIsPlainText() {
+        CommandSender sender = mock(CommandSender.class);
+        doThrow(new UnsupportedOperationException("unsupported")).when(sender).sendRichMessage(anyString());
+
+        ComponentMessenger.send(sender, Component.text("Saved ", TextColor.color(0xFF4FA3)).append(Component.text("[Docs]")));
+
+        verify(sender).sendMessage("Saved [Docs]");
+    }
+
+    @Test
+    public void componentDeliveryNeedsNeitherComponentTextNorLegacyOrPlainSerializers() throws Throwable {
+        CommandSender sender = mock(CommandSender.class);
+        doThrow(new UnsupportedOperationException("unsupported")).when(sender).sendRichMessage(anyString());
+        RefusingLoader loader = new RefusingLoader(ComponentText.class.getName(),
+                "net.kyori.adventure.text.serializer.legacy.", "net.kyori.adventure.text.serializer.plain.");
+        Class<?> messenger = Class.forName(ComponentMessenger.class.getName(), true, loader);
+
+        MethodHandles.publicLookup()
+                .findStatic(messenger, "send", MethodType.methodType(void.class, CommandSender.class, Component.class))
+                .invoke(sender, Component.text("Saved"));
+
+        verify(sender).sendMessage("Saved");
+        assertEquals(List.of(), loader.refused);
+    }
+
+    /** Defines VolmLib's plugin classes itself and refuses the named classes and packages. */
+    static final class RefusingLoader extends ClassLoader {
+        private final List<String> refusedNames;
+        final List<String> refused = new ArrayList<>();
+
+        RefusingLoader(String... refusedNames) {
+            super(ComponentMessengerTest.class.getClassLoader());
+            this.refusedNames = List.of(refusedNames);
+        }
+
+        @Override
+        protected Class<?> loadClass(String name, boolean resolve) throws ClassNotFoundException {
+            for (String refusedName : refusedNames) {
+                if (name.startsWith(refusedName)) {
+                    refused.add(name);
+                    throw new ClassNotFoundException(name);
+                }
+            }
+            if (!name.startsWith(ComponentMessenger.class.getPackageName() + ".")) {
+                return super.loadClass(name, resolve);
+            }
+            synchronized (getClassLoadingLock(name)) {
+                Class<?> loaded = findLoadedClass(name);
+                if (loaded == null) {
+                    try (InputStream input = getParent().getResourceAsStream(name.replace('.', '/') + ".class")) {
+                        if (input == null) {
+                            throw new ClassNotFoundException(name);
+                        }
+                        byte[] bytes = input.readAllBytes();
+                        loaded = defineClass(name, bytes, 0, bytes.length);
+                    } catch (IOException exception) {
+                        throw new ClassNotFoundException(name, exception);
+                    }
+                }
+                if (resolve) {
+                    resolveClass(loaded);
+                }
+                return loaded;
+            }
+        }
     }
 
     private static final class MissingSerializerLoader extends ClassLoader {

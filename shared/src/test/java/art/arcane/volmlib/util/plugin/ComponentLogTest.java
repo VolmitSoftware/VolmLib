@@ -1,11 +1,15 @@
 package art.arcane.volmlib.util.plugin;
 
 import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.TextColor;
+import net.kyori.adventure.text.minimessage.MiniMessage;
 import net.kyori.adventure.text.logger.slf4j.ComponentLogger;
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.plugin.Plugin;
 import org.junit.Test;
 
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.MethodType;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -108,6 +112,50 @@ public class ComponentLogTest {
 
         assertEquals(1, records.size());
         assertEquals("Message", records.get(0).getMessage());
+    }
+
+    @Test
+    public void paperComponentLoggerReceivesTheComponent() {
+        Plugin plugin = mock(Plugin.class);
+        ComponentLogger componentLogger = mock(ComponentLogger.class);
+        Component message = Component.text("Ready", TextColor.color(0x55FF55));
+
+        try (org.mockito.MockedStatic<ComponentLogger> loggerFactory = mockStatic(ComponentLogger.class)) {
+            loggerFactory.when(() -> ComponentLogger.logger("")).thenReturn(componentLogger);
+            ComponentLog.log(plugin, logger(new ArrayList<LogRecord>()), Level.INFO, message, null);
+        }
+
+        org.mockito.ArgumentCaptor<Component> component = org.mockito.ArgumentCaptor.forClass(Component.class);
+        verify(componentLogger).info(component.capture());
+        assertEquals(MiniMessage.miniMessage().serialize(message), MiniMessage.miniMessage().serialize(component.getValue()));
+    }
+
+    @Test
+    public void componentFallbackUsesPlainTextAndRetainsFailure() throws Throwable {
+        List<LogRecord> records = new ArrayList<>();
+        Logger logger = logger(records);
+        Plugin plugin = mock(Plugin.class);
+        IllegalStateException failure = new IllegalStateException("broken");
+        when(plugin.getLogger()).thenReturn(logger);
+        ComponentMessengerTest.RefusingLoader loader = new ComponentMessengerTest.RefusingLoader(
+                ComponentText.class.getName(), "net.kyori.adventure.text.serializer.legacy.",
+                "net.kyori.adventure.text.serializer.plain.");
+        Class<?> log = Class.forName(ComponentLog.class.getName(), true, loader);
+
+        try (org.mockito.MockedStatic<ComponentLogger> loggerFactory = mockStatic(ComponentLogger.class)) {
+            loggerFactory.when(() -> ComponentLogger.logger("")).thenReturn(null);
+            MethodHandles.publicLookup().findStatic(log, "log", MethodType.methodType(void.class, Plugin.class,
+                            Logger.class, Level.class, Component.class, Throwable.class))
+                    .invoke(plugin, logger(new ArrayList<LogRecord>()), Level.WARNING,
+                            Component.text("Degraded ", TextColor.color(0xFF5555)).append(Component.text("(shops)")),
+                            failure);
+        }
+
+        assertEquals(1, records.size());
+        assertEquals(Level.WARNING, records.get(0).getLevel());
+        assertEquals("Degraded (shops)", records.get(0).getMessage());
+        assertSame(failure, records.get(0).getThrown());
+        assertEquals(List.of(), loader.refused);
     }
 
     private static Logger logger(List<LogRecord> records) {

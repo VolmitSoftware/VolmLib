@@ -39,6 +39,32 @@ public final class SplashScreenSupport {
         return LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE);
     }
 
+    /**
+     * Paints one row of block-letter art: {@code fill} before each run of {@code █}, {@code edge} before each run of
+     * other glyphs. Spaces keep the current colour. The colours are inserted as given, so any colour syntax works.
+     */
+    public static String colorizeArt(String row, String fill, String edge) {
+        StringBuilder out = new StringBuilder(row.length() * 2);
+        boolean inFill = false;
+        boolean inEdge = false;
+        for (int index = 0; index < row.length(); index++) {
+            char glyph = row.charAt(index);
+            if (glyph == '█') {
+                if (!inFill) {
+                    out.append(fill);
+                    inFill = true;
+                    inEdge = false;
+                }
+            } else if (glyph != ' ' && !inEdge) {
+                out.append(edge);
+                inEdge = true;
+                inFill = false;
+            }
+            out.append(glyph);
+        }
+        return out.toString();
+    }
+
     public static String releaseTrain(String version) {
         String value = version;
         int suffixIndex = value.indexOf('-');

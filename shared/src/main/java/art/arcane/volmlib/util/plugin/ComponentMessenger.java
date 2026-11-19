@@ -1,6 +1,8 @@
 package art.arcane.volmlib.util.plugin;
 
 import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.flattener.ComponentFlattener;
+import net.kyori.adventure.text.minimessage.MiniMessage;
 import net.kyori.adventure.text.serializer.gson.GsonComponentSerializer;
 import net.kyori.adventure.text.serializer.json.JSONOptions;
 import net.md_5.bungee.api.ChatMessageType;
@@ -143,12 +145,29 @@ public final class ComponentMessenger {
         if (sendRichMessage(requiredSender, requiredMessage.miniMessage())) {
             return;
         }
-        if (requiredSender instanceof Player player && sendSpigotMessage(player, requiredMessage)) {
+        if (requiredSender instanceof Player player
+                && sendSpigotMessage(player, (Component) requiredMessage.component())) {
             return;
         }
         requiredSender.sendMessage(requiredSender instanceof Player
                 ? requiredMessage.legacy()
                 : requiredMessage.plain());
+    }
+
+    /**
+     * Paper gets the component as MiniMessage, Spigot players as BungeeCord components, other senders as plain text.
+     * It never touches {@link ComponentText} or the legacy and plain serializers, so a shrunk jar can leave them out.
+     */
+    public static void send(CommandSender sender, Component message) {
+        CommandSender requiredSender = Objects.requireNonNull(sender, "sender");
+        Component requiredMessage = Objects.requireNonNull(message, "message");
+        if (sendRichMessage(requiredSender, MiniMessage.miniMessage().serialize(requiredMessage))) {
+            return;
+        }
+        if (requiredSender instanceof Player player && sendSpigotMessage(player, requiredMessage)) {
+            return;
+        }
+        requiredSender.sendMessage(plain(requiredMessage));
     }
 
     public static void sendActionBarMarkup(Player player, String trustedMarkup) {
@@ -236,13 +255,18 @@ public final class ComponentMessenger {
         }
     }
 
-    private static boolean sendSpigotMessage(Player player, ComponentText message) {
+    private static boolean sendSpigotMessage(Player player, Component message) {
         try {
-            return sendSpigotComponents(player, ComponentSerializer.parse(
-                    SpigotJson.SERIALIZER.serialize((Component) message.component())));
+            return sendSpigotComponents(player, ComponentSerializer.parse(SpigotJson.SERIALIZER.serialize(message)));
         } catch (LinkageError ignored) {
             return false;
         }
+    }
+
+    private static String plain(Component message) {
+        StringBuilder text = new StringBuilder();
+        ComponentFlattener.basic().flatten(message, text::append);
+        return text.toString();
     }
 
     private static int ticks(Duration duration) {
