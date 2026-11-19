@@ -18,3 +18,5 @@ include(':localization')
 include(':crypto')
 
 include(':web')
+
+include(':editor-link')
