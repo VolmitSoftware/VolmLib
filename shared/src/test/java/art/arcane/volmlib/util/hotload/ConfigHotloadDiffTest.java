@@ -71,6 +71,20 @@ public class ConfigHotloadDiffTest {
         assertEquals("\"<red>&a</red>\"", changes.get(0).newValue());
     }
 
+    @Test
+    public void comparesNumbersByValue() {
+        assertTrue(diff("{rate:0.0,limit:5,ordered:['A'],scale:1e2}", "{rate:0,limit:5.00,ordered:['A'],scale:100}").isEmpty());
+        assertEquals(List.of(new ConfigHotloadEngine.DiffEntry("$.rate", "0.5", "0.50001")),
+                diff("{rate:0.5}", "{rate:0.50001}"));
+    }
+
+    @Test
+    public void keepsNumbersAndTheirTextApart() {
+        assertEquals(List.of(new ConfigHotloadEngine.DiffEntry("$.rate", "0", "\"0\"")),
+                diff("{rate:0}", "{rate:'0'}"));
+        assertEquals(1, diff("{ordered:['0']}", "{ordered:['0.0']}").size());
+    }
+
     private static List<ConfigHotloadEngine.DiffEntry> diff(String before, String after) {
         return ConfigHotloadEngine.computeStructuredDiff(before, after, JsonParser::parseString, Config.class);
     }

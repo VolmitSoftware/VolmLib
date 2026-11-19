@@ -28,6 +28,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.assertThrows;
 
@@ -735,6 +736,84 @@ public class ConfigHotloadEngineTest {
             ConfigHotloadEngine.StableContentSnapshot retry = awaitTouchedSnapshot(engine, file);
             assertEquals(snapshot.signature(), retry.signature());
             assertEquals(snapshot.normalizedContent(), retry.normalizedContent());
+        } finally {
+            engine.clear();
+        }
+    }
+
+    @Test(timeout = 8_000L)
+    public void oversizedFileIsRefusedInsteadOfReportedAsDeleted() throws Exception {
+        File directory = temporaryFolder.newFolder("snapshot-oversized-managed");
+        File file = new File(directory, "feature.toml");
+        Files.writeString(file.toPath(), "value = 1\n", StandardCharsets.UTF_8);
+        ConfigHotloadEngine engine = createEngine(() -> knownConfigFiles(directory));
+
+        try {
+            engine.configure(100L, 250L, List.of(file), List.of());
+            Files.writeString(file.toPath(), "value = 2\n#" + "x".repeat(3 * 1024 * 1024) + "\n", StandardCharsets.UTF_8);
+            ConfigHotloadEngine.StableContentSnapshot oversized = awaitTouchedSnapshot(engine, file);
+            assertNull(oversized.normalizedContent());
+            assertTrue(oversized.failure().contains("larger than"));
+            AtomicInteger applyCalls = new AtomicInteger();
+
+            assertFalse(engine.processSnapshotChange(oversized, ignored -> {
+                applyCalls.incrementAndGet();
+                return true;
+            }, null));
+            assertEquals(0, applyCalls.get());
+            assertNoFurtherSnapshots(engine);
+
+            Files.writeString(file.toPath(), "value = 3\n", StandardCharsets.UTF_8);
+            ConfigHotloadEngine.StableContentSnapshot fixed = awaitTouchedSnapshot(engine, file);
+            AtomicReference<ConfigHotloadEngine.ContentDelta> delta = new AtomicReference<>();
+            assertTrue(engine.processSnapshotChange(fixed, ignored -> true, delta::set));
+            assertEquals("value = 1", delta.get().before());
+            assertEquals("value = 3", delta.get().after());
+        } finally {
+            engine.clear();
+        }
+    }
+
+    @Test(timeout = 8_000L)
+    public void failedReadIsRefusedInsteadOfReportedAsDeleted() throws Exception {
+        File file = new File(temporaryFolder.getRoot(), "locked.toml");
+        Files.writeString(file.toPath(), "value = 1\n", StandardCharsets.UTF_8);
+        AtomicBoolean readerFails = new AtomicBoolean();
+        ConfigHotloadEngine engine = new ConfigHotloadEngine(
+                watched -> watched != null && watched.getName().endsWith(".toml"),
+                () -> List.of(file),
+                watched -> {
+                    if (readerFails.get()) {
+                        throw new UncheckedIOException(new IOException("locked by another process"));
+                    }
+                    return readFile(watched);
+                },
+                this::normalize,
+                100L,
+                100L,
+                clock::get
+        );
+
+        try {
+            engine.configure(100L, 250L, List.of(file), List.of());
+            readerFails.set(true);
+            Files.writeString(file.toPath(), "value = 2\n", StandardCharsets.UTF_8);
+            ConfigHotloadEngine.StableContentSnapshot unreadable = awaitTouchedSnapshot(engine, file);
+            assertTrue(unreadable.failure().contains("locked by another process"));
+            AtomicInteger applyCalls = new AtomicInteger();
+
+            assertFalse(engine.processSnapshotChange(unreadable, ignored -> {
+                applyCalls.incrementAndGet();
+                return true;
+            }, null));
+            assertEquals(0, applyCalls.get());
+            assertNoFurtherSnapshots(engine);
+
+            readerFails.set(false);
+            Files.writeString(file.toPath(), "value = 3\n", StandardCharsets.UTF_8);
+            ConfigHotloadEngine.StableContentSnapshot readable = awaitTouchedSnapshot(engine, file);
+            assertEquals("value = 3", readable.normalizedContent());
+            assertTrue(engine.processSnapshotChange(readable, ignored -> true, null));
         } finally {
             engine.clear();
         }

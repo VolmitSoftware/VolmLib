@@ -3,6 +3,7 @@ package art.arcane.volmlib.util.hotload;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonPrimitive;
 import com.google.gson.annotations.SerializedName;
 import art.arcane.volmlib.util.VolmLog;
 import art.arcane.volmlib.util.io.FileWatcher;
@@ -14,6 +15,7 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
+import java.math.BigDecimal;
 import java.nio.file.ClosedWatchServiceException;
 import java.nio.file.FileSystems;
 import java.nio.file.Files;
@@ -211,9 +213,10 @@ public class ConfigHotloadEngine {
 
         StableContentSnapshot snapshot;
         synchronized (watcherStateLock) {
-            String now = readNormalizedContent(file);
+            String failure = oversizeFailure(file);
+            String now = failure == null ? normalize(fileReader.apply(file)) : null;
             String appliedSignature = signature(file);
-            snapshot = new StableContentSnapshot(file, appliedSignature, now, selfWriteRevision(file));
+            snapshot = new StableContentSnapshot(file, appliedSignature, now, failure, selfWriteRevision(file));
         }
         return processSnapshotChange(snapshot, ignored -> applyChange.apply(file), onApplied);
     }
@@ -262,7 +265,7 @@ public class ConfigHotloadEngine {
 
         boolean applied;
         try {
-            applied = Boolean.TRUE.equals(applyChange.apply(snapshot));
+            applied = snapshot.failure() == null && Boolean.TRUE.equals(applyChange.apply(snapshot));
         } catch (RetryLaterException deferred) {
             FileState afterDeferral = state(file);
             synchronized (watcherStateLock) {
@@ -299,6 +302,10 @@ public class ConfigHotloadEngine {
             recordApplyCompletionLocked();
         }
         if (!applied) {
+            if (snapshot.failure() != null) {
+                VolmLog.warning("Hotload", "Skipped hotload of " + path + ": " + snapshot.failure()
+                        + ". The last applied version stays active.");
+            }
             return false;
         }
 
@@ -486,7 +493,8 @@ public class ConfigHotloadEngine {
                     if (alreadyKnown(path, currentState)) {
                         knownSignatures.put(path, currentState.signature());
                     } else if (!alreadyRejected(path, currentState)) {
-                        stable.add(new StableContentSnapshot(file, currentState.signature(), currentState.content(), selfWriteRevision(file)));
+                        stable.add(new StableContentSnapshot(file, currentState.signature(), currentState.content(),
+                                currentState.failure(), selfWriteRevision(file)));
                     }
                     pendingSinceNanos.remove(path);
                 }
@@ -780,20 +788,34 @@ public class ConfigHotloadEngine {
 
     private FileState state(File file) {
         String currentSignature = signature(file);
-        String currentContent;
-        try {
-            currentContent = readNormalizedContent(file);
-        } catch (RuntimeException failure) {
-            currentContent = null;
+        String failure = oversizeFailure(file);
+        if (failure != null) {
+            return new FileState(currentSignature, null, failure);
         }
-        return new FileState(currentSignature, currentContent);
+        try {
+            return new FileState(currentSignature, normalize(fileReader.apply(file)), null);
+        } catch (RuntimeException readFailure) {
+            return new FileState(currentSignature, null, describe(readFailure));
+        }
     }
 
     private String readNormalizedContent(File file) {
-        if (file != null && file.isFile() && file.length() > MAX_RECONCILIATION_FILE_BYTES) {
+        if (oversizeFailure(file) != null) {
             return null;
         }
         return normalize(fileReader.apply(file));
+    }
+
+    private static String oversizeFailure(File file) {
+        if (file != null && file.isFile() && file.length() > MAX_RECONCILIATION_FILE_BYTES) {
+            return "the file is larger than " + MAX_RECONCILIATION_FILE_BYTES + " bytes";
+        }
+        return null;
+    }
+
+    private static String describe(RuntimeException failure) {
+        String message = failure.getMessage();
+        return message == null || message.isBlank() ? failure.getClass().getSimpleName() : message;
     }
 
     private void updateKnownSnapshot(File file, String normalizedContent) {
@@ -836,7 +858,7 @@ public class ConfigHotloadEngine {
         String path = snapshot.file().getAbsolutePath();
         if (snapshot.matches(after)) {
             if (!applied) {
-                rejectedApplies.put(path, new FileState(snapshot.signature(), snapshot.normalizedContent()));
+                rejectedApplies.put(path, new FileState(snapshot.signature(), snapshot.normalizedContent(), snapshot.failure()));
                 queuedTouchedSnapshots.remove(path);
             }
             return;
@@ -928,8 +950,8 @@ public class ConfigHotloadEngine {
                                                        Function<String, JsonElement> parser,
                                                        Type configType) {
         Set<String> setPaths = new HashSet<>();
-        Map<String, String> left = flattenForDiff(before, parser, configType, setPaths);
-        Map<String, String> right = flattenForDiff(after, parser, configType, setPaths);
+        Map<String, Leaf> left = flattenForDiff(before, parser, configType, setPaths);
+        Map<String, Leaf> right = flattenForDiff(after, parser, configType, setPaths);
         Set<String> keys = new HashSet<>(left.keySet());
         keys.addAll(right.keySet());
 
@@ -938,13 +960,13 @@ public class ConfigHotloadEngine {
 
         List<DiffEntry> changes = new ArrayList<>();
         for (String key : ordered) {
-            boolean inLeft = left.containsKey(key);
-            boolean inRight = right.containsKey(key);
-            String oldValue = inLeft ? left.get(key) : MISSING;
-            String newValue = inRight ? right.get(key) : REMOVED;
-            if (Objects.equals(oldValue, newValue)) {
+            Leaf oldLeaf = left.get(key);
+            Leaf newLeaf = right.get(key);
+            if (oldLeaf != null && newLeaf != null && oldLeaf.same(newLeaf)) {
                 continue;
             }
+            String oldValue = oldLeaf == null ? MISSING : oldLeaf.written();
+            String newValue = newLeaf == null ? REMOVED : newLeaf.written();
             if (setPaths.contains(key) && (hasSetMembers(key, left) || hasSetMembers(key, right))) {
                 continue;
             }
@@ -954,7 +976,7 @@ public class ConfigHotloadEngine {
         return changes;
     }
 
-    private static boolean hasSetMembers(String path, Map<String, String> values) {
+    private static boolean hasSetMembers(String path, Map<String, Leaf> values) {
         String prefix = path + "[";
         for (String key : values.keySet()) {
             if (key.startsWith(prefix)) {
@@ -977,20 +999,20 @@ public class ConfigHotloadEngine {
         return compact.substring(0, maxLength - 3) + "...";
     }
 
-    private static Map<String, String> flattenForDiff(String raw,
-                                                      Function<String, JsonElement> parser,
-                                                      Type configType,
-                                                      Set<String> setPaths) {
+    private static Map<String, Leaf> flattenForDiff(String raw,
+                                                    Function<String, JsonElement> parser,
+                                                    Type configType,
+                                                    Set<String> setPaths) {
         JsonElement element = parse(raw, parser);
         if (element == null) {
-            Map<String, String> fallback = new HashMap<>();
+            Map<String, Leaf> fallback = new HashMap<>();
             if (raw != null && !raw.isBlank()) {
-                fallback.put("$", raw);
+                fallback.put("$", Leaf.of(raw));
             }
             return fallback;
         }
 
-        Map<String, String> out = new HashMap<>();
+        Map<String, Leaf> out = new HashMap<>();
         flattenJson("$", element, configType, out, setPaths);
         return out;
     }
@@ -1008,29 +1030,29 @@ public class ConfigHotloadEngine {
     }
 
     private static void flattenJson(String path, JsonElement element, Type type,
-                                    Map<String, String> out, Set<String> setPaths) {
+                                    Map<String, Leaf> out, Set<String> setPaths) {
         if (element == null || element.isJsonNull()) {
-            out.put(path, "null");
+            out.put(path, Leaf.of("null"));
             return;
         }
 
         if (element.isJsonPrimitive()) {
-            out.put(path, element.toString());
+            out.put(path, Leaf.of(element.getAsJsonPrimitive()));
             return;
         }
 
         if (element.isJsonArray()) {
             if (Set.class.isAssignableFrom(rawType(type))) {
                 setPaths.add(path);
-                out.put(path, "[]");
+                out.put(path, Leaf.of("[]"));
                 for (JsonElement member : element.getAsJsonArray()) {
                     String value = canonicalValue(member);
-                    out.put(path + "[" + value + "]", value);
+                    out.put(path + "[" + value + "]", Leaf.of(value));
                 }
                 return;
             }
             if (element.getAsJsonArray().size() == 0) {
-                out.put(path, "[]");
+                out.put(path, Leaf.of("[]"));
                 return;
             }
 
@@ -1042,7 +1064,7 @@ public class ConfigHotloadEngine {
 
         JsonObject object = element.getAsJsonObject();
         if (object.entrySet().isEmpty()) {
-            out.put(path, "{}");
+            out.put(path, Leaf.of("{}"));
             return;
         }
 
@@ -1116,13 +1138,39 @@ public class ConfigHotloadEngine {
         return sorted;
     }
 
+    /** One flattened value as written, and its value when it is a JSON number. */
+    private record Leaf(String written, BigDecimal number) {
+        private static Leaf of(String written) {
+            return new Leaf(written, null);
+        }
+
+        private static Leaf of(JsonPrimitive value) {
+            if (value.isNumber()) {
+                try {
+                    return new Leaf(value.toString(), new BigDecimal(value.getAsString()));
+                } catch (NumberFormatException notDecimal) {
+                    return of(value.toString());
+                }
+            }
+            return of(value.toString());
+        }
+
+        /** Numbers compare by value, so a save that writes {@code 0.0} as {@code 0} is no change. */
+        private boolean same(Leaf other) {
+            if (number != null && other.number != null) {
+                return number.compareTo(other.number) == 0;
+            }
+            return number == null && other.number == null && written.equals(other.written);
+        }
+    }
+
     private record WatchedFile(File file, FileWatcher watcher) {
     }
 
     private record WatchedDirectory(File directory, FolderWatcher watcher) {
     }
 
-    private record FileState(String signature, String content) {
+    private record FileState(String signature, String content, String failure) {
         private boolean missing() {
             return "missing".equals(signature);
         }
@@ -1134,14 +1182,25 @@ public class ConfigHotloadEngine {
         }
     }
 
-    public record StableContentSnapshot(File file, String signature, String normalizedContent, long selfWriteRevision) {
+    /**
+     * {@code normalizedContent} is null when the file is gone (signature {@code "missing"}) or unreadable;
+     * {@code failure} says why an existing file could not be read, such as one over 3 MiB. A snapshot with a
+     * failure never reaches the apply function.
+     */
+    public record StableContentSnapshot(File file, String signature, String normalizedContent, String failure,
+                                        long selfWriteRevision) {
         public StableContentSnapshot {
             file = Objects.requireNonNull(file, "file").getAbsoluteFile();
             signature = Objects.requireNonNull(signature, "signature");
         }
 
+        public StableContentSnapshot(File file, String signature, String normalizedContent, long selfWriteRevision) {
+            this(file, signature, normalizedContent, null, selfWriteRevision);
+        }
+
         private boolean matches(FileState state) {
-            return signature.equals(state.signature()) && Objects.equals(normalizedContent, state.content());
+            return signature.equals(state.signature()) && Objects.equals(normalizedContent, state.content())
+                    && Objects.equals(failure, state.failure());
         }
     }
 

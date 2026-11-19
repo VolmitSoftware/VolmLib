@@ -8,10 +8,15 @@ import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AccessDeniedException;
 import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.Objects;
 
 public final class AtomicFileIO {
@@ -28,7 +33,7 @@ public final class AtomicFileIO {
             throw new IOException("Target has no parent directory: " + requiredTarget);
         }
 
-        Files.createDirectories(parent);
+        createDirectoriesDurably(parent);
         Path temporary = Files.createTempFile(parent, "." + requiredTarget.getFileName() + ".", ".tmp");
         boolean replaced = false;
         try {
@@ -60,6 +65,7 @@ public final class AtomicFileIO {
         for (int attempt = 1; ; attempt++) {
             try {
                 move(requiredSource, requiredTarget);
+                syncDirectory(requiredTarget.getParent());
                 return;
             } catch (AccessDeniedException exception) {
                 if (!WINDOWS || attempt >= MOVE_ATTEMPTS) {
@@ -75,6 +81,45 @@ public final class AtomicFileIO {
                     throw failure;
                 }
             }
+        }
+    }
+
+    /** Creates each missing directory and flushes its entry into the parent, so a file written beneath it survives a crash. */
+    private static void createDirectoriesDurably(Path directory) throws IOException {
+        List<Path> missing = new ArrayList<>();
+        Path cursor = directory;
+        while (cursor != null && !Files.exists(cursor, LinkOption.NOFOLLOW_LINKS)) {
+            missing.add(cursor);
+            cursor = cursor.getParent();
+        }
+        if (cursor == null || !Files.isDirectory(cursor)) {
+            throw new IOException("Not a directory: " + (cursor == null ? directory : cursor));
+        }
+
+        Collections.reverse(missing);
+        for (Path path : missing) {
+            try {
+                Files.createDirectory(path);
+            } catch (FileAlreadyExistsException concurrent) {
+                if (!Files.isDirectory(path)) {
+                    throw concurrent;
+                }
+            }
+            syncDirectory(path.getParent());
+        }
+    }
+
+    /**
+     * Best effort: Windows cannot open a directory and some file systems refuse the sync, which must not fail a
+     * write whose rename already happened.
+     */
+    private static void syncDirectory(Path directory) {
+        if (WINDOWS || directory == null) {
+            return;
+        }
+        try (FileChannel channel = FileChannel.open(directory, StandardOpenOption.READ)) {
+            channel.force(true);
+        } catch (IOException | UnsupportedOperationException ignored) {
         }
     }
 

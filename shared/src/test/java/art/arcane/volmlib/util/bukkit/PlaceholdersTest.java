@@ -39,6 +39,14 @@ public class PlaceholdersTest {
         assertSame("%a%", Placeholders.setPlaceholders(null, "%a%"));
     }
 
+    @Test
+    public void setServerPlaceholders_isTotalWhenPlaceholderApiIsAbsent() {
+        String text = "Online: %server_online%";
+
+        assertSame(text, Placeholders.setServerPlaceholders(text));
+        assertNull(Placeholders.setServerPlaceholders(null));
+    }
+
     private static final class StubPlayer implements Player {
     }
 }
