@@ -46,6 +46,8 @@ import art.arcane.volmlib.nativelib.terrain.NativeBlockChangeSet;
 import art.arcane.volmlib.nativelib.terrain.NativeBlockChangeSnapshot;
 import net.minecraft.world.level.block.Block;
 import art.arcane.volmlib.nativelib.terrain.feature.NativeImportedFeatureControl;
+import art.arcane.volmlib.nativelib.terrain.feature.NativeChunkFeaturePass;
+import art.arcane.volmlib.nativelib.terrain.feature.NativeStepwiseFeaturePass;
 import art.arcane.volmlib.nativelib.terrain.feature.NativeImportedFeaturePolicy;
 
 /**
@@ -288,81 +290,109 @@ public final class NativeImportedFeatureStage<D> {
 
 
     /**
-     * Runs the vanilla placed-feature pass for one chunk on the calling worldgen thread. A no-op while the
-     * control is disabled or the table degraded.
+     * Runs every step of the vanilla placed-feature pass for one chunk on the calling worldgen thread.
      */
     public void run(WorldGenLevel level, ChunkAccess chunk, ChunkGenerator owner) {
+        try (NativeChunkFeaturePass pass = open(level, chunk, owner)) {
+            pass.placeRemainingSteps();
+        }
+    }
+
+    /**
+     * Opens the vanilla placed-feature pass for one chunk on the calling worldgen thread. The caller advances it
+     * after each structure step, so structures and features interleave per decoration step as in vanilla. Inert while the control is disabled or the table degraded.
+     */
+    public NativeChunkFeaturePass open(WorldGenLevel level, ChunkAccess chunk, ChunkGenerator owner) {
         RuntimeFeatureState<D> state = currentState();
         FeatureTable table = state == null ? null : state.featureTable();
         if (table == null) {
-            return;
+            return NativeChunkFeaturePass.INERT;
         }
-        ChunkPos centerPos = chunk.getPos();
-        SectionPos sectionPos = SectionPos.of(centerPos, level.getMinSectionY());
-        BlockPos origin = sectionPos.origin();
-        Registry<PlacedFeature> featureRegistry = level.registryAccess().lookupOrThrow(Registries.PLACED_FEATURE);
-        List<FeatureSorter.StepFeatureData> steps = table.steps();
-        WorldgenRandom random = new WorldgenRandom(new XoroshiroRandomSource(RandomSupport.generateUniqueSeed()));
-        long decorationSeed = random.setDecorationSeed(level.getSeed(), origin.getX(), origin.getZ());
-        NativeImportedFeaturePolicy.Placement placement = policy.placement();
-        Set<Holder<Biome>> chunkBiomes = chunkBiomes(level, sectionPos, table, placement);
-        IntBinaryOperator surfaceFirstFreeY = placement.stacked()
-                ? placement.surfaceFirstFreeY()
-                : (x, z) -> level.getHeight(Heightmap.Types.WORLD_SURFACE_WG, x, z);
-        IntBinaryOperator floorFirstFreeY = placement.stacked()
-                ? placement.floorFirstFreeY()
-                : (x, z) -> level.getHeight(Heightmap.Types.OCEAN_FLOOR_WG, x, z);
-        NativeBlockChangeSet trackedPositions = policy.trackedBlockPositions(
-                NativeStructureWorldgenAccess.changeBounds(level, centerPos));
-        NativeBlockChangeSet blockChanges = trackedPositions.isEmpty() ? NativeBlockChangeSet.disabled()
-                : NativeBlockChangeSet.create(trackedPositions.bounds());
-        NativeBlockChangeSnapshot<Block> snapshot = trackedPositions.isEmpty() ? null
-                : NativeBlockChangeSnapshot.capture(trackedPositions,
-                (x, y, z) -> level.getBlockState(new BlockPos(x, y, z)).getBlock());
-        WorldGenLevel placementLevel = !placement.guarded() && blockChanges == NativeBlockChangeSet.disabled()
-                ? level : NativeStructureWorldgenAccess.create(
-                level, centerPos, surfaceFirstFreeY, floorFirstFreeY, placement.stacked(), placement.guarded(),
-                position -> placement.guarded()
-                        && placement.protectedPosition().test(position.getX(), position.getY(), position.getZ()),
-                blockChanges);
+        return new ChunkFeaturePass(level, chunk, owner, table);
+    }
 
-        IllegalStateException placementFailure = null;
-        try {
-            for (int stepIndex = 0; stepIndex < steps.size(); stepIndex++) {
-                if (!table.control().shouldGenerateStepOrdinal(stepIndex)) {
-                    continue;
-                }
-                placeStep(placementLevel, table, steps.get(stepIndex), featureRegistry, chunkBiomes, owner,
-                        random, decorationSeed, origin, stepIndex);
+    private final class ChunkFeaturePass extends NativeStepwiseFeaturePass {
+        private final WorldGenLevel level;
+        private final WorldGenLevel placementLevel;
+        private final FeatureTable table;
+        private final ChunkGenerator owner;
+        private final ChunkPos centerPos;
+        private final BlockPos origin;
+        private final Registry<PlacedFeature> featureRegistry;
+        private final Set<Holder<Biome>> chunkBiomes;
+        private final WorldgenRandom random;
+        private final long decorationSeed;
+        private final NativeBlockChangeSet blockChanges;
+        private final NativeBlockChangeSnapshot<Block> snapshot;
+
+        private ChunkFeaturePass(WorldGenLevel level, ChunkAccess chunk, ChunkGenerator owner, FeatureTable table) {
+            super(table.steps().size());
+            this.level = level;
+            this.table = table;
+            this.owner = owner;
+            centerPos = chunk.getPos();
+            SectionPos sectionPos = SectionPos.of(centerPos, level.getMinSectionY());
+            origin = sectionPos.origin();
+            featureRegistry = level.registryAccess().lookupOrThrow(Registries.PLACED_FEATURE);
+            random = new WorldgenRandom(new XoroshiroRandomSource(RandomSupport.generateUniqueSeed()));
+            decorationSeed = random.setDecorationSeed(level.getSeed(), origin.getX(), origin.getZ());
+            NativeImportedFeaturePolicy.Placement placement = policy.placement();
+            chunkBiomes = chunkBiomes(level, sectionPos, table, placement);
+            IntBinaryOperator surfaceFirstFreeY = placement.stacked()
+                    ? placement.surfaceFirstFreeY()
+                    : (x, z) -> level.getHeight(Heightmap.Types.WORLD_SURFACE_WG, x, z);
+            IntBinaryOperator floorFirstFreeY = placement.stacked()
+                    ? placement.floorFirstFreeY()
+                    : (x, z) -> level.getHeight(Heightmap.Types.OCEAN_FLOOR_WG, x, z);
+            NativeBlockChangeSet trackedPositions = policy.trackedBlockPositions(
+                    NativeStructureWorldgenAccess.changeBounds(level, centerPos));
+            blockChanges = trackedPositions.isEmpty() ? NativeBlockChangeSet.disabled()
+                    : NativeBlockChangeSet.create(trackedPositions.bounds());
+            snapshot = trackedPositions.isEmpty() ? null
+                    : NativeBlockChangeSnapshot.capture(trackedPositions,
+                    (x, y, z) -> level.getBlockState(new BlockPos(x, y, z)).getBlock());
+            placementLevel = !placement.guarded() && blockChanges == NativeBlockChangeSet.disabled()
+                    ? level : NativeStructureWorldgenAccess.create(
+                    level, centerPos, surfaceFirstFreeY, floorFirstFreeY, placement.stacked(), placement.guarded(),
+                    position -> placement.guarded()
+                            && placement.protectedPosition().test(position.getX(), position.getY(), position.getZ()),
+                    blockChanges);
+        }
+
+        @Override
+        protected void placeStep(int stepIndex) {
+            if (!table.control().shouldGenerateStepOrdinal(stepIndex)) {
+                return;
             }
-        } catch (Throwable error) {
-            placementFailure = new IllegalStateException("imported feature placement failed for chunk "
-                    + centerPos.x() + "," + centerPos.z(), error);
-            throw placementFailure;
-        } finally {
             try {
-                try {
-                    if (snapshot != null) {
-                        snapshot.collectChanges(blockChanges, (x, y, z) -> level.getBlockState(new BlockPos(x, y, z)).getBlock());
-                    }
-                } finally {
-                    policy.invalidateBlockChanges(blockChanges);
-                }
+                placeStepFeatures(placementLevel, table, table.steps().get(stepIndex), featureRegistry, chunkBiomes,
+                        owner, random, decorationSeed, origin, stepIndex);
             } catch (Throwable error) {
-                if (placementFailure == null) {
-                    throw error;
+                throw new IllegalStateException("imported feature placement failed for chunk "
+                        + centerPos.x() + "," + centerPos.z(), error);
+            }
+        }
+
+        @Override
+        public void close() {
+            try {
+                if (snapshot != null) {
+                    snapshot.collectChanges(blockChanges, (x, y, z) -> level.getBlockState(new BlockPos(x, y, z)).getBlock());
                 }
-                placementFailure.addSuppressed(error);
             } finally {
-                level.setCurrentlyGenerating(null);
+                try {
+                    policy.invalidateBlockChanges(blockChanges);
+                } finally {
+                    level.setCurrentlyGenerating(null);
+                }
             }
         }
     }
 
-    private void placeStep(WorldGenLevel level, FeatureTable table, FeatureSorter.StepFeatureData stepData,
-                           Registry<PlacedFeature> featureRegistry, Set<Holder<Biome>> chunkBiomes,
-                           ChunkGenerator owner, WorldgenRandom random, long decorationSeed,
-                           BlockPos origin, int stepIndex) {
+    private void placeStepFeatures(WorldGenLevel level, FeatureTable table, FeatureSorter.StepFeatureData stepData,
+                                   Registry<PlacedFeature> featureRegistry, Set<Holder<Biome>> chunkBiomes,
+                                   ChunkGenerator owner, WorldgenRandom random, long decorationSeed,
+                                   BlockPos origin, int stepIndex) {
         IntSet stepFeatures = new IntArraySet();
         for (Holder<Biome> biome : chunkBiomes) {
             List<HolderSet<PlacedFeature>> biomeFeatures = settingsFor(biome, table.derivatives(), table.scoped()).features();

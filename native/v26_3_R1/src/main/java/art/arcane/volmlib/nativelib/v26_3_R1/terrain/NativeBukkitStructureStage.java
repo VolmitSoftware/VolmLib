@@ -118,6 +118,7 @@ import java.util.concurrent.CompletionException;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.IntBinaryOperator;
 import java.util.function.Predicate;
+import java.util.function.IntConsumer;
 import art.arcane.volmlib.nativelib.terrain.structure.StructureSeaSurface;
 import art.arcane.volmlib.nativelib.terrain.structure.StructureWaterRules;
 import art.arcane.volmlib.nativelib.terrain.structure.StructureStagePolicy;
@@ -383,6 +384,17 @@ public final class NativeBukkitStructureStage<C, D, P extends StructureStartPlan
     }
 
     public void placeVanillaStructures(WorldGenLevel world, ChunkAccess chunk, StructureManager structureManager) {
+        placeVanillaStructures(world, chunk, structureManager, step -> {
+        });
+    }
+
+    /**
+     * Places this chunk's structure starts one decoration step at a time and runs {@code afterStructureStep}
+     * after each step, so the caller can place that step's features before the next step's structures, as
+     * vanilla does. Not called when structure generation is off.
+     */
+    public void placeVanillaStructures(WorldGenLevel world, ChunkAccess chunk, StructureManager structureManager,
+                                       IntConsumer afterStructureStep) {
         if (!structureManager.shouldGenerateStructures()) {
             return;
         }
@@ -501,16 +513,13 @@ public final class NativeBukkitStructureStage<C, D, P extends StructureStartPlan
             } catch (Throwable error) {
                 containStructure(error, "structure terrain", nativeStructureBatchContext(placementGroups), chunkPos);
             }
-            for (NativePlacementGroup group : placementGroups) {
-                random.setFeatureSeed(decoSeed, group.featureIndex(), group.step());
-                for (NativePlacement placement : group.placements()) {
-                    try {
-                        placeVanillaStructure(boundedWorld, structureManager, random, area, chunkPos,
-                                group.structureId(), placement.start(), placement.decision());
-                    } catch (Throwable error) {
-                        containStructure(error, "vanilla structure", group.structureId(), chunkPos);
+            for (int step = 0; step < steps; step++) {
+                for (NativePlacementGroup group : placementGroups) {
+                    if (group.step() == step) {
+                        placeStructureGroup(boundedWorld, structureManager, random, decoSeed, area, chunkPos, group);
                     }
                 }
+                afterStructureStep.accept(step);
             }
             try {
                 NativeStructureSurfaceFitter.repairVacuumFoundations(
@@ -532,6 +541,20 @@ public final class NativeBukkitStructureStage<C, D, P extends StructureStartPlan
                     throw invalidationFailure;
                 }
                 placementFailure.addSuppressed(invalidationFailure);
+            }
+        }
+    }
+
+    private void placeStructureGroup(NativeStructureWorldgenAccess boundedWorld, StructureManager structureManager,
+                                     WorldgenRandom random, long decoSeed, BoundingBox area, ChunkPos chunkPos,
+                                     NativePlacementGroup group) {
+        random.setFeatureSeed(decoSeed, group.featureIndex(), group.step());
+        for (NativePlacement placement : group.placements()) {
+            try {
+                placeVanillaStructure(boundedWorld, structureManager, random, area, chunkPos,
+                        group.structureId(), placement.start(), placement.decision());
+            } catch (Throwable error) {
+                containStructure(error, "vanilla structure", group.structureId(), chunkPos);
             }
         }
     }
