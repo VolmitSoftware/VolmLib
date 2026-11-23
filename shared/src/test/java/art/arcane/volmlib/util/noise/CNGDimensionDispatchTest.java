@@ -69,12 +69,14 @@ public class CNGDimensionDispatchTest {
         double x = -13.25D;
         double y = 5.5D;
         double z = 37.75D;
+        NoiseGenerator secondAxisSource = fractureSource.offset(CNG.fractureAxisSeed(2L, 1));
+        NoiseGenerator thirdAxisSource = fractureSource.offset(CNG.fractureAxisSeed(2L, 2));
         double displaced1D = x + (fractureSource.noise(x) - 0.5D) * 12D;
         double displacedX2D = x + (fractureSource.noise(x, z) - 0.5D) * 12D;
-        double displacedZ2D = z + (fractureSource.noise(z, x) - 0.5D) * 12D;
+        double displacedZ2D = z + (secondAxisSource.noise(x, z) - 0.5D) * 12D;
         double displacedX3D = x + (fractureSource.noise(x, y, z) - 0.5D) * 12D;
-        double displacedY3D = y + (fractureSource.noise(y, x) - 0.5D) * 12D;
-        double displacedZ3D = z + (fractureSource.noise(z, x, y) - 0.5D) * 12D;
+        double displacedY3D = y + (secondAxisSource.noise(x, y) - 0.5D) * 12D;
+        double displacedZ3D = z + (thirdAxisSource.noise(x, y, z) - 0.5D) * 12D;
         double expected1D = source.noise(displaced1D * 0.35D) * 0.7D;
         double expected2D = source.noise(displacedX2D * 0.35D, displacedZ2D * 0.35D) * 0.7D;
         double expected3D = source.noise(displacedX3D * 0.35D, displacedY3D * 0.35D, displacedZ3D * 0.35D) * 0.7D;

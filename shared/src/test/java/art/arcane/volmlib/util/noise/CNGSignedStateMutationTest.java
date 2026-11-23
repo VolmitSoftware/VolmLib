@@ -65,10 +65,12 @@ public class CNGSignedStateMutationTest {
                 fracture.scale(0.25D);
             };
             parent.fractureWith(fracture, 8D);
+            NoiseGenerator secondAxis = fractureSource.offset(CNG.fractureAxisSeed(13L, 1));
+            NoiseGenerator thirdAxis = fractureSource.offset(CNG.fractureAxisSeed(13L, 2));
             double shiftedX = 4D + value(threeDimensions, 1D, 1.5D, 2D) * 4D;
-            double shiftedY = 6D + value(false, 1.5D, 0D, 1D) * 4D;
+            double shiftedY = 6D + secondAxis.noiseSigned(1D, 1.5D) * 4D;
             double shiftedZ = 8D + (threeDimensions
-                    ? value(true, 2D, 1D, 1.5D) : value(false, 2D, 0D, 1D)) * 4D;
+                    ? thirdAxis.noiseSigned(1D, 1.5D, 2D) : secondAxis.noiseSigned(1D, 2D)) * 4D;
             assertEquals(value(threeDimensions, shiftedX, shiftedY, shiftedZ), sample(parent, threeDimensions), 0D);
             assertEquals(value(threeDimensions, shiftedX * 0.5D, shiftedY * 0.5D, shiftedZ * 0.5D),
                     sample(parent, threeDimensions), 0D);

@@ -160,7 +160,9 @@ public class CNGUnsignedFractureTest {
         });
         assertFalse(eligible(noise));
         noise.noiseFast2D(12D, -8D);
-        assertEquals(32, calls.get());
+        int leafReads = 32;
+        int firstAxisLeafReads = leafReads / 2;
+        assertEquals(firstAxisLeafReads, calls.get());
     }
 
     @Test
@@ -382,14 +384,19 @@ public class CNGUnsignedFractureTest {
 
     private static void instrument(CNG noise, Runnable onSample) throws ReflectiveOperationException {
         for (CNG node = noise; node != null; node = node.getFracture()) {
-            NoiseGenerator base = node.getGenerator();
-            while (base instanceof OffsetNoiseGenerator offset) {
-                base = offset.getBase();
-            }
-            Field field = declaredField(SimplexNoise.class, "n");
-            FastNoiseDouble original = (FastNoiseDouble) field.get(base);
-            field.set(base, new ObservedSimplex(original, onSample));
+            instrumentGenerator(node, onSample);
+            instrumentGenerator(node.reseededForAxis(1), onSample);
         }
+    }
+
+    private static void instrumentGenerator(CNG node, Runnable onSample) throws ReflectiveOperationException {
+        NoiseGenerator base = node.getGenerator();
+        while (base instanceof OffsetNoiseGenerator offset) {
+            base = offset.getBase();
+        }
+        Field field = declaredField(SimplexNoise.class, "n");
+        FastNoiseDouble original = (FastNoiseDouble) field.get(base);
+        field.set(base, new ObservedSimplex(original, onSample));
     }
 
     private static final class ObservedSimplex extends FastNoiseDouble {

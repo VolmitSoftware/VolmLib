@@ -50,6 +50,8 @@ import java.util.List;
 @Data
 public class CNG {
     private static final int UNSIGNED_MEMO_CAPACITY = 64;
+    private static final int FRACTURE_AXES = 3;
+    private static final long AXIS_SEED_STRIDE = 0x9E3779B97F4A7C15L;
     private static final ThreadLocal<UnsignedMemo> UNSIGNED_MEMO = ThreadLocal.withInitial(UnsignedMemo::new);
     public static final NoiseInjector ADD = (s, v) -> new double[]{s + v, 1};
     public static final NoiseInjector SRC_SUBTRACT = (s, v) -> new double[]{s - v < 0 ? 0 : s - v, -1};
@@ -88,6 +90,16 @@ public class CNG {
     @Setter(AccessLevel.NONE)
     @EqualsAndHashCode.Exclude
     @ToString.Exclude
+    private NoiseType generatorType;
+    @Getter(AccessLevel.NONE)
+    @Setter(AccessLevel.NONE)
+    @EqualsAndHashCode.Exclude
+    @ToString.Exclude
+    private transient volatile CNG[] axisVariants;
+    @Getter(AccessLevel.NONE)
+    @Setter(AccessLevel.NONE)
+    @EqualsAndHashCode.Exclude
+    @ToString.Exclude
     private transient boolean unsignedFractureMemoizable;
     private transient boolean identityPostFastPath;
     private transient boolean identitySignedFastPath;
@@ -112,6 +124,7 @@ public class CNG {
 
     public CNG(RNG random, NoiseType type, double opacity, int octaves) {
         this(random, type.create(random.nextParallelRNG((long) ((1113334944L * opacity) + 12923)).lmax()), opacity, octaves);
+        generatorType = type;
     }
 
     public CNG(RNG random, NoiseGenerator generator, double opacity, int octaves) {
@@ -138,6 +151,75 @@ public class CNG {
         }
 
         refreshFastPathState();
+    }
+
+    /**
+     * Seed of the noise that warps one axis of a fracture. Axis 0 keeps the fracture's own seed; the others get
+     * uncorrelated seeds, so every axis is warped by its own field read at the same coordinates.
+     */
+    public static long fractureAxisSeed(long fractureSeed, int axis) {
+        requireFractureAxis(axis);
+        if (axis == 0) {
+            return fractureSeed;
+        }
+        long mixed = fractureSeed + (axis * AXIS_SEED_STRIDE);
+        mixed = (mixed ^ (mixed >>> 30)) * 0xBF58476D1CE4E5B9L;
+        mixed = (mixed ^ (mixed >>> 27)) * 0x94D049BB133111EBL;
+        return mixed ^ (mixed >>> 31);
+    }
+
+    private static void requireFractureAxis(int axis) {
+        if (axis < 0 || axis >= FRACTURE_AXES) {
+            throw new IllegalArgumentException("Fracture axis must be 0, 1 or 2");
+        }
+    }
+
+    /**
+     * This noise with its generator reseeded by {@link #fractureAxisSeed(long, int)}, for use as the fracture of the
+     * given axis. Every other setting is copied, and the nested fracture and children are shared. Axis 0 is this noise.
+     * The copy is a plain CNG, so a subclass that changes how it samples should override this.
+     */
+    public CNG reseededForAxis(int axis) {
+        requireFractureAxis(axis);
+        if (axis == 0) {
+            return this;
+        }
+        CNG[] variants = axisVariants;
+        if (variants != null && variants[axis] != null) {
+            return variants[axis];
+        }
+        return publishAxisVariant(variants, axis);
+    }
+
+    private CNG publishAxisVariant(CNG[] current, int axis) {
+        CNG variant = createAxisVariant(axis);
+        CNG[] published = current == null ? new CNG[FRACTURE_AXES] : current.clone();
+        published[axis] = variant;
+        axisVariants = published;
+        return variant;
+    }
+
+    private CNG createAxisVariant(int axis) {
+        long axisSeed = fractureAxisSeed(rng == null ? 0L : rng.getSeed(), axis);
+        RNG axisRng = new RNG(axisSeed);
+        CNG variant = generatorType != null
+                ? new CNG(axisRng, generatorType, opacity, oct)
+                : new CNG(axisRng, new OffsetNoiseGenerator(generator, axisSeed), opacity, oct);
+        variant.scale = scale;
+        variant.bakedScale = bakedScale;
+        variant.fscale = fscale;
+        variant.fracture = fracture;
+        variant.children = children == null ? null : new KList<>(children);
+        variant.injector = injector;
+        variant.injectorMode = injectorMode;
+        variant.noscale = noscale;
+        variant.power = power;
+        variant.up = up;
+        variant.down = down;
+        variant.patch = patch;
+        variant.customGenerator = customGenerator;
+        variant.invalidateLocalState();
+        return variant;
     }
 
     public static CNG signature(RNG rng) {
@@ -394,6 +476,7 @@ public class CNG {
 
     public void setGenerator(NoiseGenerator generator) {
         this.generator = generator;
+        generatorType = null;
         noscale = generator.isNoScale();
         if (generator instanceof OctaveNoise octaveNoise) {
             octaveNoise.setOctaves(oct);
@@ -790,7 +873,8 @@ public class CNG {
 
         double fractureX = memo == null ? fracture.noiseFast2D(x, z) : fracture.memoizedNoise2D(x, z, memo);
         double fx = x + ((fractureX - 0.5D) * fscale);
-        double fractureZ = memo == null ? fracture.noiseFast2D(z, x) : fracture.memoizedNoise2D(z, x, memo);
+        CNG fractureForZ = fracture.reseededForAxis(1);
+        double fractureZ = memo == null ? fractureForZ.noiseFast2D(x, z) : fractureForZ.memoizedNoise2D(x, z, memo);
         double fz = z + ((fractureZ - 0.5D) * fscale);
         return generator.noise(fx * scl, fz * scl) * opacity;
     }
@@ -804,8 +888,8 @@ public class CNG {
         }
 
         double fx = x + ((fracture.noiseFast3D(x, y, z) - 0.5D) * fscale);
-        double fy = y + ((fracture.noiseFast2D(y, x) - 0.5D) * fscale);
-        double fz = z + ((fracture.noiseFast3D(z, x, y) - 0.5D) * fscale);
+        double fy = y + ((fracture.reseededForAxis(1).noiseFast2D(x, y) - 0.5D) * fscale);
+        double fz = z + ((fracture.reseededForAxis(2).noiseFast3D(x, y, z) - 0.5D) * fscale);
         return generator.noise(fx * scl, fy * scl, fz * scl) * opacity;
     }
 
@@ -1434,6 +1518,7 @@ public class CNG {
         fastPathStateDirty = true;
         cache = null;
         coordCacheIdentity = new Object();
+        axisVariants = null;
     }
 
     private boolean referencesChild(CNG candidate) {
@@ -1555,7 +1640,7 @@ public class CNG {
         }
 
         double fx = x + (localFracture.fractureSigned2D(x, z, caches) * signedFractureScale);
-        double fz = z + (localFracture.fractureSigned2D(z, x, caches) * signedFractureScale);
+        double fz = z + (localFracture.reseededForAxis(1).fractureSigned2D(x, z, caches) * signedFractureScale);
         return signedWithOpacity(localGenerator.noiseSigned(fx * scl, fz * scl));
     }
 
@@ -1569,8 +1654,8 @@ public class CNG {
         }
 
         double fx = x + (localFracture.fractureSigned3D(x, y, z, caches) * signedFractureScale);
-        double fy = y + (localFracture.fractureSigned2D(y, x, caches) * signedFractureScale);
-        double fz = z + (localFracture.fractureSigned3D(z, x, y, caches) * signedFractureScale);
+        double fy = y + (localFracture.reseededForAxis(1).fractureSigned2D(x, y, caches) * signedFractureScale);
+        double fz = z + (localFracture.reseededForAxis(2).fractureSigned3D(x, y, z, caches) * signedFractureScale);
         return signedWithOpacity(localGenerator.noiseSigned(fx * scl, fy * scl, fz * scl));
     }
 
