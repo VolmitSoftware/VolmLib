@@ -1,5 +1,6 @@
 package art.arcane.volmlib.nativelib.v26_2_R1.terrain;
 
+import art.arcane.volmlib.nativelib.common.block.GroundSurvival;
 import art.arcane.volmlib.nativelib.terrain.BiomeColor;
 import art.arcane.volmlib.nativelib.terrain.BlockProperty;
 import art.arcane.volmlib.nativelib.terrain.NativeBlockAccess;
@@ -53,10 +54,12 @@ import org.bukkit.Bukkit;
 import org.bukkit.Difficulty;
 import org.bukkit.Location;
 import org.bukkit.Material;
+import org.bukkit.block.data.BlockData;
 import org.bukkit.craftbukkit.CraftServer;
 import org.bukkit.craftbukkit.CraftWorld;
 import org.bukkit.craftbukkit.block.CraftBlockState;
 import org.bukkit.craftbukkit.block.CraftBlockStates;
+import org.bukkit.craftbukkit.block.data.CraftBlockData;
 import org.bukkit.craftbukkit.inventory.CraftItemStack;
 import org.bukkit.craftbukkit.util.CraftMagicNumbers;
 import org.bukkit.entity.Entity;
@@ -67,6 +70,7 @@ import org.jetbrains.annotations.Contract;
 public class NativeBlockAccessImpl extends NativeChunkAccessImpl implements NativeBlockAccess {
     private static final Logger LOG = Logger.getLogger("VolmLib-Native");
 
+    private final GroundSurvival groundSurvival = new GroundSurvival();
     private volatile RegistryAccess registryAccess;
 
     protected RegistryAccess registry() {
@@ -329,5 +333,15 @@ public class NativeBlockAccessImpl extends NativeChunkAccessImpl implements Nati
         if (!scheduler.schedule(pos, () -> merge(level, blockPos, tag))) {
             LOG.warning("[NMS] Failed to schedule tile deserialize at " + blockPos + " in world " + pos.getWorld().getName());
         }
+    }
+
+    @Override
+    public boolean canSurviveOn(BlockData plant, BlockData ground) {
+        return groundSurvival.canSurviveOn(((CraftBlockData) plant).getState(), ((CraftBlockData) ground).getState());
+    }
+
+    @Override
+    public void forgetBlockRules() {
+        groundSurvival.forgetRules();
     }
 }

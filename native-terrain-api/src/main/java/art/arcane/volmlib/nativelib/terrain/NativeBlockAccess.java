@@ -5,6 +5,7 @@ import art.arcane.volmlib.util.collection.KMap;
 import art.arcane.volmlib.util.math.Vector3d;
 import org.bukkit.Location;
 import org.bukkit.Material;
+import org.bukkit.block.data.BlockData;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.EntityType;
 import org.bukkit.event.entity.CreatureSpawnEvent;
@@ -34,4 +35,10 @@ public interface NativeBlockAccess extends NativeChunkAccess {
     Color getBiomeColor(Location location, BiomeColor type);
 
     KMap<Material, List<BlockProperty>> getBlockProperties();
+
+    /** Whether the server's own canSurvive rule lets {@code plant} stand on {@code ground}. */
+    boolean canSurviveOn(BlockData plant, BlockData ground);
+
+    /** Drops the canSurviveOn answers remembered so far, which a resource reload may have changed. */
+    void forgetBlockRules();
 }
