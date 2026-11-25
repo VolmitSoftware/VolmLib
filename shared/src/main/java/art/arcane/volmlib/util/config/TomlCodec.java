@@ -101,12 +101,52 @@ public final class TomlCodec {
 
     private static Object parseToml(String raw) {
         EscapedBackslashProtection protection = protectEscapedBackslashes(raw == null ? "" : raw);
-        Toml toml = new Toml().read(protection.source());
-        Map<String, Object> map = toml.toMap();
+        Map<String, Object> map = readSegmented(protection.source());
         if (map == null) {
             return new LinkedHashMap<String, Object>();
         }
         return normalizeKeys(map, protection.marker());
+    }
+
+    private static Map<String, Object> readSegmented(String source) {
+        List<String> segments = TomlSegments.split(source);
+        if (segments.size() > 1) {
+            Map<String, Object> merged = new LinkedHashMap<>();
+            try {
+                boolean consistent = true;
+                for (String segment : segments) {
+                    Map<String, Object> part = new Toml().read(segment).toMap();
+                    if (part != null && !mergeTables(merged, part)) {
+                        consistent = false;
+                        break;
+                    }
+                }
+                if (consistent) {
+                    return merged;
+                }
+            } catch (RuntimeException invalid) {
+                // The whole document is read below so the error names the line toml4j sees in the original.
+            }
+        }
+        return new Toml().read(source).toMap();
+    }
+
+    @SuppressWarnings("unchecked")
+    private static boolean mergeTables(Map<String, Object> target, Map<String, Object> part) {
+        for (Map.Entry<String, Object> entry : part.entrySet()) {
+            Object existing = target.get(entry.getKey());
+            if (existing == null) {
+                target.put(entry.getKey(), entry.getValue());
+                continue;
+            }
+            if (!(existing instanceof Map<?, ?> existingTable) || !(entry.getValue() instanceof Map<?, ?> partTable)) {
+                return false;
+            }
+            if (!mergeTables((Map<String, Object>) existingTable, (Map<String, Object>) partTable)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static Object normalizeKeys(Object value, char escapedBackslashMarker) {
