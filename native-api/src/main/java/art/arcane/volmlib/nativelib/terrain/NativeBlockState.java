@@ -122,6 +122,16 @@ public interface NativeBlockState {
     boolean isTreeBlock();
 
     /**
+     * Whether this is tagged as a log, including a log of a plugin's custom block.
+     */
+    boolean isLog();
+
+    /**
+     * Whether this is tagged as leaves, including leaves of a plugin's custom block.
+     */
+    boolean isLeaves();
+
+    /**
      * Whether foliage can be planted on top of this block.
      */
     boolean isFoliagePlantable();

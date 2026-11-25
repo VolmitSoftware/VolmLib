@@ -227,10 +227,20 @@ public final class ModdedBlockState implements NativeBlockState {
     public boolean isTreeBlock() {
         Boolean cached = treeBlock;
         if (cached == null) {
-            cached = state.is(BlockTags.LOGS) || state.is(BlockTags.LEAVES);
+            cached = isLog() || isLeaves();
             treeBlock = cached;
         }
         return cached;
+    }
+
+    @Override
+    public boolean isLog() {
+        return state.is(BlockTags.LOGS);
+    }
+
+    @Override
+    public boolean isLeaves() {
+        return state.is(BlockTags.LEAVES);
     }
 
     @Override
