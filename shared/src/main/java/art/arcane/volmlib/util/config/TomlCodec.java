@@ -48,7 +48,16 @@ public final class TomlCodec {
     }
 
     public static String toToml(Object object, String sourceTag, ConfigExposePolicy exposePolicy) {
-        return new ReflectiveTomlWriter(sourceTag, exposePolicy).write(object);
+        return toToml(object, sourceTag, exposePolicy, ConfigComments.GENERATED);
+    }
+
+    public static String toToml(
+            Object object,
+            String sourceTag,
+            ConfigExposePolicy exposePolicy,
+            ConfigComments comments
+    ) {
+        return new ReflectiveTomlWriter(sourceTag, exposePolicy, comments).write(object);
     }
 
     public static String toToml(JsonElement element) {
@@ -516,11 +525,13 @@ public final class TomlCodec {
         private final StringBuilder out = new StringBuilder();
         private final String sourceTag;
         private final ConfigExposePolicy exposePolicy;
+        private final ConfigComments commentMode;
         private boolean fieldComments = true;
 
-        private ReflectiveTomlWriter(String sourceTag, ConfigExposePolicy exposePolicy) {
+        private ReflectiveTomlWriter(String sourceTag, ConfigExposePolicy exposePolicy, ConfigComments commentMode) {
             this.sourceTag = sourceTag == null ? "config" : sourceTag;
             this.exposePolicy = exposePolicy == null ? ConfigExposePolicy.ALL : exposePolicy;
+            this.commentMode = commentMode == null ? ConfigComments.GENERATED : commentMode;
         }
 
         private String write(Object root) {
@@ -585,13 +596,13 @@ public final class TomlCodec {
                 }
 
                 writeSectionHeader(childPath, fieldComments
-                        ? ConfigDocumentation.buildSectionComments(sourceTag, childPath, field, value) : List.of());
+                        ? ConfigDocumentation.buildSectionComments(sourceTag, childPath, field, value, commentMode) : List.of());
                 writePojoSection(childPath, value);
             }
         }
 
         private void writeMapSection(String sectionPath, Map<?, ?> map, Field sourceField) {
-            List<String> comments = ConfigDocumentation.buildFieldComments(sourceTag, sectionPath, sourceField, map);
+            List<String> comments = ConfigDocumentation.buildFieldComments(sourceTag, sectionPath, sourceField, map, commentMode);
             if (compactEntries(map, sourceField)) {
                 writeCompactEntries(sectionPath, map, comments);
                 return;
@@ -664,7 +675,7 @@ public final class TomlCodec {
                 if (value == null || !isInlineValue(value) || !exposePolicy.expose(sourceTag, sectionPath, field, value)) {
                     continue;
                 }
-                List<String> lines = ConfigDocumentation.buildFieldComments(sourceTag, sectionPath, field, value);
+                List<String> lines = ConfigDocumentation.buildFieldComments(sourceTag, sectionPath, field, value, commentMode);
                 if (!lines.isEmpty()) {
                     header.add(field.getName() + ": " + lines.get(0));
                 }
@@ -718,7 +729,7 @@ public final class TomlCodec {
             if (!fieldComments) {
                 return;
             }
-            List<String> comments = ConfigDocumentation.buildFieldComments(sourceTag, path, field, value);
+            List<String> comments = ConfigDocumentation.buildFieldComments(sourceTag, path, field, value, commentMode);
             for (String comment : comments) {
                 if (comment == null || comment.isBlank()) {
                     continue;

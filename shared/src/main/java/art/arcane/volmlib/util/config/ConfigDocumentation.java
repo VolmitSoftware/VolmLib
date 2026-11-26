@@ -68,6 +68,19 @@ public final class ConfigDocumentation {
         return lines;
     }
 
+    public static List<String> buildFieldComments(
+            String sourceTag,
+            String path,
+            Field field,
+            Object value,
+            ConfigComments comments
+    ) {
+        if (comments == ConfigComments.ANNOTATED_ONLY) {
+            return annotatedComments(field);
+        }
+        return buildFieldComments(sourceTag, path, field, value);
+    }
+
     public static List<String> buildSectionComments(String sourceTag, String path) {
         if (path == null || path.isBlank()) {
             return List.of();
@@ -100,6 +113,37 @@ public final class ConfigDocumentation {
             return buildFieldComments(sourceTag, path, field, value);
         }
         return buildSectionComments(sourceTag, path);
+    }
+
+    public static List<String> buildSectionComments(
+            String sourceTag,
+            String path,
+            Field field,
+            Object value,
+            ConfigComments comments
+    ) {
+        if (comments == ConfigComments.ANNOTATED_ONLY) {
+            return annotatedComments(field);
+        }
+        return buildSectionComments(sourceTag, path, field, value);
+    }
+
+    private static List<String> annotatedComments(Field field) {
+        ConfigDoc annotation = field == null ? null : field.getAnnotation(ConfigDoc.class);
+        if (annotation == null) {
+            return List.of();
+        }
+
+        List<String> lines = new ArrayList<>();
+        String summary = annotation.value().strip();
+        if (!summary.isBlank()) {
+            lines.add(summary);
+        }
+        String impact = annotation.impact().strip();
+        if (!impact.isBlank()) {
+            lines.add("Effect: " + impact);
+        }
+        return lines;
     }
 
     private static String defaultSummary(String sourceTag, String path, Field field) {
