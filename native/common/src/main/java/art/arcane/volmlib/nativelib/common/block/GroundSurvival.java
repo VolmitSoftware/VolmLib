@@ -11,6 +11,7 @@ import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -27,6 +28,7 @@ public final class GroundSurvival {
 
     private final Map<BlockState, Map<BlockState, Boolean>> survivesOn = new ConcurrentHashMap<>();
     private final Map<BlockState, Boolean> restsOnGround = new ConcurrentHashMap<>();
+    private final Set<Block> plantsWarnedAbout = ConcurrentHashMap.newKeySet();
 
     public boolean canSurviveOn(BlockState plant, BlockState ground) {
         return survivesOn.computeIfAbsent(plant, ignored -> new ConcurrentHashMap<>())
@@ -36,13 +38,14 @@ public final class GroundSurvival {
     public void forgetRules() {
         survivesOn.clear();
         restsOnGround.clear();
+        plantsWarnedAbout.clear();
     }
 
     private boolean decide(BlockState plant, BlockState ground) {
         try {
             return survives(plant, ground) || !restsOnGround(plant);
         } catch (RuntimeException e) {
-            LOG.log(Level.WARNING, "Could not ask whether " + plant + " survives on " + ground + ", letting it stand", e);
+            warnOncePerPlant(plant, ground, e);
             return true;
         }
     }
@@ -54,11 +57,30 @@ public final class GroundSurvival {
 
     private boolean survivesOnSomeGround(BlockState plant) {
         for (Block block : BuiltInRegistries.BLOCK) {
-            if (survives(plant, block.defaultBlockState())) {
+            if (survivesUnlessUnanswered(plant, block.defaultBlockState())) {
                 return true;
             }
         }
         return false;
+    }
+
+    // One ground the rule can't be asked about must not decide whether the plant rests on ground at all.
+    private boolean survivesUnlessUnanswered(BlockState plant, BlockState ground) {
+        try {
+            return survives(plant, ground);
+        } catch (RuntimeException e) {
+            warnOncePerPlant(plant, ground, e);
+            return false;
+        }
+    }
+
+    // A custom block whose rule throws would otherwise warn for every state and ground it meets.
+    private void warnOncePerPlant(BlockState plant, BlockState ground, RuntimeException e) {
+        if (!plantsWarnedAbout.add(plant.getBlock())) {
+            return;
+        }
+        LOG.log(Level.WARNING, "Could not ask whether " + plant + " survives on " + ground
+                + ", letting it stand; later failures of " + plant.getBlock() + " are not logged", e);
     }
 
     private boolean survives(BlockState plant, BlockState ground) {

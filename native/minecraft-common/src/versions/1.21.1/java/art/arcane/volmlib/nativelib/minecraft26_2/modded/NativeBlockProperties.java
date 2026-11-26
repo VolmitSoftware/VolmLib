@@ -52,6 +52,11 @@ public final class NativeBlockProperties {
     private static final Map<Block, Block> DEEPSLATE_TO_NORMAL = oreMap(true);
     private static final Set<Block> FOLIAGE_PLANTABLE_STATE = blockSet(
             "grass_block", "moss_block", "rooted_dirt", "dirt", "coarse_dirt", "podzol");
+    private static final Set<Block> FOLIAGE_PLANTABLE_MATERIAL = blockSet(
+            "grass_block", "moss_block", "dirt", "tall_grass", "tall_seagrass", "large_fern", "sunflower",
+            "peony", "lilac", "rose_bush", "rooted_dirt", "coarse_dirt", "podzol");
+    private static final Set<Block> PLACE_ONTO_LEAVES = blockSet(
+            "acacia_leaves", "birch_leaves", "dark_oak_leaves", "jungle_leaves", "oak_leaves", "spruce_leaves");
     private static final BlockState AIR = Blocks.AIR.defaultBlockState();
 
     public static boolean matches(NativeBlockState first, NativeBlockState second, boolean exact) {
@@ -217,5 +222,57 @@ public final class NativeBlockProperties {
 
     public static boolean hasTileEntity(BlockState state) {
         return state.getBlock().defaultBlockState().hasBlockEntity();
+    }
+
+    /**
+     * @deprecated ModdedBlockState#canPlaceOnto asks the server's canSurvive rule instead. This table only stays so
+     * callers built against it keep working until they move over.
+     */
+    @Deprecated
+    public static boolean canPlaceOnto(Block mat, Block onto) {
+        if (mat == Blocks.SUGAR_CANE) {
+            return onto == Blocks.SUGAR_CANE || onto == Blocks.GRASS_BLOCK || onto == Blocks.DIRT
+                    || onto == Blocks.COARSE_DIRT || onto == Blocks.PODZOL || onto == Blocks.MYCELIUM
+                    || onto == Blocks.ROOTED_DIRT
+                    || onto == Blocks.MOSS_BLOCK || onto == Blocks.MUD
+                    || onto == Blocks.MUDDY_MANGROVE_ROOTS || onto == Blocks.SAND || onto == Blocks.RED_SAND
+                    || onto == Blocks.SUSPICIOUS_SAND;
+        }
+
+        if (mat == Blocks.CACTUS) {
+            return onto == Blocks.CACTUS || onto == Blocks.SAND || onto == Blocks.RED_SAND;
+        }
+
+        if ((onto == Blocks.CRIMSON_NYLIUM || onto == Blocks.WARPED_NYLIUM || onto == Blocks.SOUL_SOIL)
+                && (mat == Blocks.CRIMSON_FUNGUS || mat == Blocks.CRIMSON_ROOTS
+                || mat == Blocks.WARPED_FUNGUS || mat == Blocks.WARPED_ROOTS || mat == Blocks.NETHER_SPROUTS)) {
+            return true;
+        }
+
+        if (FOLIAGE.contains(mat)) {
+            if (!FOLIAGE_PLANTABLE_MATERIAL.contains(onto)) {
+                return false;
+            }
+        }
+
+        if (onto == Blocks.AIR || onto == Blocks.CAVE_AIR || onto == Blocks.VOID_AIR) {
+            return false;
+        }
+
+        if (onto == Blocks.GRASS_BLOCK && mat == Blocks.DEAD_BUSH) {
+            return false;
+        }
+
+        if (onto == Blocks.DIRT_PATH) {
+            if (!isSolid(mat.defaultBlockState())) {
+                return false;
+            }
+        }
+
+        if (PLACE_ONTO_LEAVES.contains(onto)) {
+            return isSolid(mat.defaultBlockState());
+        }
+
+        return true;
     }
 }

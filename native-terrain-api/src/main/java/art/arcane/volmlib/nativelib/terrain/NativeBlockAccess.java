@@ -36,9 +36,15 @@ public interface NativeBlockAccess extends NativeChunkAccess {
 
     KMap<Material, List<BlockProperty>> getBlockProperties();
 
-    /** Whether the server's own canSurvive rule lets {@code plant} stand on {@code ground}. */
-    boolean canSurviveOn(BlockData plant, BlockData ground);
+    /**
+     * Whether the server's own canSurvive rule lets {@code plant} stand on {@code ground}. Bindings that cannot ask
+     * the server let every plant stand, the same answer a rule that fails to answer gives.
+     */
+    default boolean canSurviveOn(BlockData plant, BlockData ground) {
+        return true;
+    }
 
     /** Drops the canSurviveOn answers remembered so far, which a resource reload may have changed. */
-    void forgetBlockRules();
+    default void forgetBlockRules() {
+    }
 }
