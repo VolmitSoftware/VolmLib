@@ -22,6 +22,7 @@ import art.arcane.volmlib.nativelib.terrain.BlockStateKey;
 import art.arcane.volmlib.nativelib.terrain.NativeBlockState;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.tags.BlockTags;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.Property;
 
@@ -32,6 +33,7 @@ import java.util.stream.Collectors;
 
 public final class ModdedBlockState implements NativeBlockState {
     private static final ConcurrentHashMap<String, ModdedBlockState> CACHE = new ConcurrentHashMap<>();
+    private static final GroundSurvival GROUND_SURVIVAL = new GroundSurvival();
 
     private final BlockState state;
     private final Map<Property<?>, Comparable<?>> parsedProperties;
@@ -290,7 +292,17 @@ public final class ModdedBlockState implements NativeBlockState {
 
     @Override
     public boolean canPlaceOnto(NativeBlockState onto) {
-        return NativeBlockProperties.canPlaceOnto(state.getBlock(), ((BlockState) onto.nativeHandle()).getBlock());
+        BlockState ground = (BlockState) onto.nativeHandle();
+        if (ground.isAir() || isDeadBushOnGrass(ground)) {
+            return false;
+        }
+        return GROUND_SURVIVAL.canSurviveOn(state, ground);
+    }
+
+    // Vanilla allows this, but packs mix dead bushes with other plants for their sandy patches, and blacklisting grass
+    // on such a decorator would take the other plants off the grass too.
+    private boolean isDeadBushOnGrass(BlockState ground) {
+        return state.is(Blocks.DEAD_BUSH) && ground.is(Blocks.GRASS_BLOCK);
     }
 
     @Override

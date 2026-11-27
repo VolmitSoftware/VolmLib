@@ -224,6 +224,11 @@ public final class NativeBlockProperties {
         return state.getBlock().defaultBlockState().hasBlockEntity();
     }
 
+    /**
+     * @deprecated ModdedBlockState#canPlaceOnto asks the server's canSurvive rule instead. This table only stays so
+     * callers built against it keep working until they move over.
+     */
+    @Deprecated
     public static boolean canPlaceOnto(Block mat, Block onto) {
         if (mat == Blocks.SUGAR_CANE) {
             return onto == Blocks.SUGAR_CANE || onto == Blocks.GRASS_BLOCK || onto == Blocks.DIRT
