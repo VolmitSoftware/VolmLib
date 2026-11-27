@@ -3,6 +3,7 @@ package art.arcane.volmlib.nativelib.minecraft26_2.modded;
 import art.arcane.volmlib.nativelib.minecraft26_2.modded.NativeStructureReachability;
 import art.arcane.volmlib.nativelib.minecraft26_2.modded.ModdedPlatformWorld;
 import art.arcane.volmlib.nativelib.minecraft26_2.modded.NativeGeneratorContext;
+import art.arcane.volmlib.nativelib.terrain.feature.NativeChunkFeaturePass;
 import art.arcane.volmlib.nativelib.terrain.NativeWorld;
 import art.arcane.volmlib.nativelib.minecraft26_2.modded.NativeModdedStructureStage;
 import art.arcane.volmlib.nativelib.minecraft26_2.modded.NativeModdedBiomeSource;
@@ -577,28 +578,34 @@ public final class NativeModdedChunkGenerator<C, P extends StructureStartPlan, O
             if (chunk.getPersistedStatus().isOrAfter(ChunkStatus.FEATURES)) {
                 return;
             }
-            nativeStructures.placeVanillaStructures(level, chunk, structureManager);
-            if (!allowsRoutedDiscreteGeneration(
-                    current,
-                    route,
-                    chunkPos,
-                    chunk,
-                    ChunkStatus.FEATURES
-            )) {
-                return;
-            }
-            if (!NativeGenerationWriteGuard.allowsDecoration(policy.chunkWrites(current), level, chunkPos)) {
-                return;
-            }
-            importedFeatures.prepare(current);
-            // Vanilla's placed-feature pass, on THIS thread and never on ModdedGenPool: the FEATURES chunk
-            // step writes into the eight neighbouring chunks and is not parallel-safe. Inert unless the
-            // dimension set importedFeatures.enabled.
-            NativeFeatureTable featureTable = importedFeatures.placementTable(current);
-            if (featureTable != null) {
-                importedFeatures.nativeFeatures().run(level, chunk, this, featureTable);
+            try (NativeChunkFeaturePass importedFeaturePass = openImportedFeatures(current, route, level, chunk)) {
+                nativeStructures.placeVanillaStructures(level, chunk, structureManager,
+                        importedFeaturePass::placeThroughStep);
+                importedFeaturePass.placeRemainingSteps();
             }
         }
+    }
+
+    /**
+     * Vanilla's placed-feature pass runs on THIS thread and never on ModdedGenPool: the FEATURES chunk step
+     * writes into the eight neighbouring chunks and is not parallel-safe. Inert unless the dimension set
+     * importedFeatures.enabled.
+     */
+    private NativeChunkFeaturePass openImportedFeatures(C current, NativeGenerationRoute route, WorldGenLevel level,
+                                                        ChunkAccess chunk) {
+        ChunkPos chunkPos = chunk.getPos();
+        if (!allowsRoutedDiscreteGeneration(current, route, chunkPos, chunk, ChunkStatus.FEATURES)) {
+            return NativeChunkFeaturePass.INERT;
+        }
+        if (!NativeGenerationWriteGuard.allowsDecoration(policy.chunkWrites(current), level, chunkPos)) {
+            return NativeChunkFeaturePass.INERT;
+        }
+        importedFeatures.prepare(current);
+        NativeFeatureTable featureTable = importedFeatures.placementTable(current);
+        if (featureTable == null) {
+            return NativeChunkFeaturePass.INERT;
+        }
+        return importedFeatures.nativeFeatures().open(level, chunk, this, featureTable);
     }
 
     @Override

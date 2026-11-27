@@ -1,6 +1,7 @@
 package art.arcane.volmlib.nativelib.v26_3_R1.terrain;
 
 import art.arcane.volmlib.nativelib.common.terrain.NativeGeneratorChain;
+import art.arcane.volmlib.nativelib.terrain.feature.NativeChunkFeaturePass;
 import art.arcane.volmlib.nativelib.terrain.NativeBukkitGeneratorContext;
 import art.arcane.volmlib.nativelib.terrain.NativeBiomeSourcePolicy;
 import art.arcane.volmlib.nativelib.terrain.NativeBiomeRegistry;
@@ -458,27 +459,52 @@ public class NativeChunkGenerator<C, D, P extends StructureStartPlan, O extends 
              NativeGenerationScope runtimeScope = openHistoryRuntimeScope(route);
              NativeGenerationLease lease = context.acquireLease("bukkit_nms_biome_decoration");
             NativeGenerationScope ignored = context.openContext(lease)) {
-            boolean flatStudioTerrain = context.usesFlatTerrain();
-            if (!flatStudioTerrain && !ichunkaccess.getPersistedStatus().isOrAfter(ChunkStatus.FEATURES)) {
-                nativeStructures.placeVanillaStructures(generatoraccessseed, ichunkaccess, structuremanager);
+            boolean decorationAllowed = allowsRoutedDiscreteGeneration(ichunkaccess, ChunkStatus.FEATURES)
+                    && NativeGenerationWriteGuard.allowsDecoration(context::allowsChunkWrite, generatoraccessseed, chunkPos);
+            if (!context.usesFlatTerrain()) {
+                placeStructuresAndImportedFeatures(generatoraccessseed, ichunkaccess, structuremanager, decorationAllowed);
             }
-            if (allowsRoutedDiscreteGeneration(ichunkaccess, ChunkStatus.FEATURES)
-                    && NativeGenerationWriteGuard.allowsDecoration(context::allowsChunkWrite, generatoraccessseed, chunkPos)) {
-                if (!flatStudioTerrain) {
-                    // Bind-time equivalent for Bukkit: the table is built on the first decorated chunk, which is where a
-                    // feature-order cycle is reported once and degraded to features-off.
-                    importedFeatures.prepare(generatoraccessseed);
-                }
+            if (decorationAllowed) {
                 addVanillaDecorations(generatoraccessseed, ichunkaccess, structuremanager);
-                if (!flatStudioTerrain) {
-                    // Vanilla's placed-feature pass, on THIS thread. The delegate is still called with
-                    // addVanillaDecorations=false below, so the vanilla half never runs twice. Inert unless the
-                    // dimension set importedFeatures.enabled.
-                    importedFeatures.run(generatoraccessseed, ichunkaccess, this);
-                }
                 decorateDelegate(delegate, generatoraccessseed, ichunkaccess, structuremanager);
             }
             NativeTerrainPipeline.claimGeneratedSemantics(route, ichunkaccess, context.minimumY());
+        }
+    }
+
+    private void placeStructuresAndImportedFeatures(WorldGenLevel level, ChunkAccess chunk, StructureManager manager,
+                                                    boolean decorationAllowed) {
+        try (NativeChunkFeaturePass importedFeaturePass = openImportedFeatures(level, chunk, decorationAllowed)) {
+            if (importedFeaturePass.active()) {
+                primeTerrainHeightmaps(chunk);
+            }
+            if (!chunk.getPersistedStatus().isOrAfter(ChunkStatus.FEATURES)) {
+                nativeStructures.placeVanillaStructures(level, chunk, manager, importedFeaturePass::placeThroughStep);
+            }
+            importedFeaturePass.placeRemainingSteps();
+        }
+    }
+
+    /**
+     * The delegate is decorated with addVanillaDecorations=false, so this pass is the only vanilla feature
+     * pass. The table is built on the first decorated chunk, where a feature-order cycle is reported once and
+     * degrades to features-off.
+     */
+    private NativeChunkFeaturePass openImportedFeatures(WorldGenLevel level, ChunkAccess chunk, boolean decorationAllowed) {
+        if (!decorationAllowed) {
+            return NativeChunkFeaturePass.INERT;
+        }
+        importedFeatures.prepare(level);
+        return importedFeatures.open(level, chunk, this);
+    }
+
+    private void primeTerrainHeightmaps(ChunkAccess chunk) {
+        ChunkPos chunkPos = chunk.getPos();
+        try (NativeGenerationScope historyScope = context.openCoordinateScope(
+                     chunkPos.getMinBlockX(), chunkPos.getMinBlockZ(), "bukkit_nms_heightmaps");
+             NativeGenerationLease lease = context.acquireLease("bukkit_nms_heightmaps");
+             NativeGenerationScope ignored = context.openContext(lease)) {
+            terrainPipeline.primeHeightmaps(chunk);
         }
     }
 
