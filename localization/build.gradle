@@ -29,6 +29,7 @@ sourceSets {
             exclude('art/arcane/volmlib/util/localization/BukkitLanguageEditorPresentation.java')
             exclude('art/arcane/volmlib/util/localization/BukkitLanguageSwitcher.java')
             exclude('art/arcane/volmlib/util/localization/BukkitVolmitCommand.java')
+            include('art/arcane/volmlib/util/config/ConfigComments.java')
             include('art/arcane/volmlib/util/config/ConfigDescription.java')
             include('art/arcane/volmlib/util/config/ConfigDoc.java')
             include('art/arcane/volmlib/util/config/ConfigDocumentation.java')
