@@ -208,15 +208,54 @@ public class JSONTokener {
     }
 
     /**
-     * Get the next char in the string, skipping whitespace.
+     * Get the next char in the string, skipping whitespace and JSONC comments.
      *
      * @return A character, or 0 if there are no more characters.
      */
     public char nextClean() throws JSONException {
         for (; ; ) {
             char c = this.next();
+            if (c == '/' && this.skipComment()) {
+                continue;
+            }
             if (c == 0 || c > ' ') {
                 return c;
+            }
+        }
+    }
+
+    private boolean skipComment() throws JSONException {
+        switch (this.next()) {
+            case '/':
+                this.skipLineComment();
+                return true;
+            case '*':
+                this.skipBlockComment();
+                return true;
+            default:
+                this.back();
+                return false;
+        }
+    }
+
+    private void skipLineComment() throws JSONException {
+        char c;
+        do {
+            c = this.next();
+        } while (c != '\n' && c != '\r' && c != 0);
+    }
+
+    private void skipBlockComment() throws JSONException {
+        for (; ; ) {
+            char c = this.next();
+            if (c == 0) {
+                throw this.syntaxError("Unclosed comment");
+            }
+            if (c == '*') {
+                if (this.next() == '/') {
+                    return;
+                }
+                this.back();
             }
         }
     }
