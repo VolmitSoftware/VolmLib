@@ -35,6 +35,7 @@ sourceSets {
             include('art/arcane/volmlib/util/config/ConfigExposePolicy.java')
             include('art/arcane/volmlib/util/config/ConfigJson.java')
             include('art/arcane/volmlib/util/config/TomlCodec.java')
+            include('art/arcane/volmlib/util/config/TomlSegments.java')
             include('art/arcane/volmlib/util/director/DirectorMessages.java')
             include('art/arcane/volmlib/util/director/help/DirectorHelpMessages.java')
             include('art/arcane/volmlib/util/director/runtime/DirectorRuntimeMessages.java')
